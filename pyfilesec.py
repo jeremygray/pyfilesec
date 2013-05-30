@@ -34,11 +34,13 @@ from functools import partial  # for buffered hash digest
 from base64 import b64encode, b64decode
 
 
+lib_name = 'PyFileSec'
+lib_path = abspath(__file__)
 usage = """%(name)s v%(version)s
 
   File privacy and integrity for psychology and human neuroscience research:
     encrypt, decrypt, sign, verify, rotate, generate passwords (RSA keys),
-    secure delete, & padding (to obscure file-size)
+    secure delete, pad (to obscure file-size), & archive.
     Requires Python 2.6 or 2.7, and OpenSSL 0.9.8 or higher.
 
   Module example:
@@ -49,19 +51,21 @@ usage = """%(name)s v%(version)s
     /path/to/data.txt
 
   Command-line example:
-    $ ./%(name)s.py encrypt data.txt pub.pem
-    /full/path/to/data.enc
-    $ ./%(name)s.py decrypt data.enc priv.pem
-    /full/path/to/data.txt
+    $ alias pfs='%(lib_path)s'
+    $ pfs encrypt data.txt pub.pem
+    /path/to/data.enc
+    $ pfs decrypt data.enc priv.pem
+    /path/to/data.txt
 
   Options:
     --help | -h : display this message
     --version   : print version and exit
-    --openssl=/path/to/binary : binary to use for openssl calls
+    --openssl=/path/to/openssl : openssl binary file to use for openssl calls
 
   Testing:
     $ py.test %(name)s.py
   """ % {'name': os.path.splitext(os.path.basename(__file__))[0],
+         'lib_path': lib_path,
          'version': __version__}
 
 if '--version' in sys.argv:
@@ -73,9 +77,6 @@ if (__name__ == "__main__" and len(sys.argv) == 1 or
     sys.exit()
 if python_version() < '2.6' or python_version() > '3':
     raise RuntimeError('Requires python 2.6 or 2.7')
-
-lib_name = 'PyFileSec'
-lib_path = abspath(__file__)
 
 
 class PublicKeyTooShortError(StandardError):
@@ -1136,7 +1137,7 @@ def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
             _fatal('%s: Could not decrypt (RSA step)' % name, DecryptError)
     if se_AES:
         if 'bad decrypt' in se_AES:
-            raise('%s: openssl bad decrypt (AES step)' % name, DecryptError)
+            _fatal('%s: openssl bad decrypt (AES step)' % name, DecryptError)
         else:
             _fatal('%s: Could not decrypt (AES step)' % name, DecryptError)
 

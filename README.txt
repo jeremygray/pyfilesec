@@ -19,7 +19,7 @@ file-oriented strong encryption tools more accessible to human subjects
 research (``encrypt``, ``decrypt``, ``rotate``), and 2) to automatically
 document the encryption procedures used (in meta-data). Other tools are
 provided to obscure file length (``pad``), securely remove files from disk
-(``wipe``), and combine a set of files into an archive file (``archive``).
+(``wipe``), and combine a set of files into a single archive file (``archive``).
 
 The integrated test-suite passes on Mac OS (10.8.3) and Linux (CentOS 6.4 and
 Ubuntu 12.04). Windows support to be added soon (will require user to install
@@ -28,6 +28,8 @@ OpenSSL and SDelete).
 Contributors
 -------------
 Jeremy R. Gray - package author
+    GPG public key: D934B0D7
+    Key fingerprint: 0D49 273C 2AA9 8514 3E31  5136 E96D 8449 D934 B0D7
 
 Thanks to
 ----------
