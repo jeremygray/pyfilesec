@@ -1,0 +1,12 @@
+*.py[co]
+*.egg-info
+*.log
+*.orig
+*__pycache__*
+.coverage
+.idea
+dist
+build
+
+.DS_Store
+/.spyderproject
