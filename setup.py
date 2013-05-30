@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 from distutils.core import setup
 
 setup(
@@ -6,7 +9,7 @@ setup(
     author='Jeremy R. Gray',
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
-    packages=['pyfilesec', 'pyfilesec.test'],
+    packages=['pyfilesec'],
     classifiers=['Development Status :: 3 - Alpha',
                  'Programming Language :: Python :: 2.6',
                  'Programming Language :: Python :: 2.7',
@@ -21,6 +24,6 @@ setup(
     keywords=['encryption', 'security', 'privacy', 'integrity'],
     url='http://pypi.python.org/pypi/PyFileSec/',
     license='LICENSE.txt',
-    description='File privacy & integrity tools for human neuroscience research.',
+    description='File privacy & integrity tools for human-subjects research.',
     long_description=open('README.txt').read(),
 )
