@@ -69,29 +69,29 @@ usage = """%(name)s v%(version)s
          'version': __version__}
 
 if '--version' in sys.argv:
-    print __version__
+    print(__version__)
     sys.exit()
 if (__name__ == "__main__" and len(sys.argv) == 1 or
     '-h' in sys.argv or '--help' in sys.argv):
-    print usage
+    print(usage)
     sys.exit()
-if python_version() < '2.6' or python_version() > '3':
-    raise RuntimeError('Requires python 2.6 or 2.7')
+if python_version() < '2.6.6':
+    raise RuntimeError('Requires python 2.6+')
 
 
-class PublicKeyTooShortError(StandardError):
+class PublicKeyTooShortError(Exception):
     '''Error to indicate that a public key is not long enough.'''
 
-class DecryptError(StandardError):
+class DecryptError(Exception):
     '''Error to signify that decryption failed.'''
 
-class PrivateKeyError(StandardError):
+class PrivateKeyError(Exception):
     '''Error to signify that loading a private key failed.'''
 
-class InternalFormatError(StandardError):
+class InternalFormatError(Exception):
     '''Error to indicate bad file name inside .tgz file.'''
 
-class PaddingError(StandardError):
+class PaddingError(Exception):
     '''Error to indicate bad padding.'''
 
 
@@ -129,17 +129,17 @@ class PFSCodecRegistry(object):
         self.register(defaults)
 
     def keys(self):
-        return self._functions.keys()
+        return list(self._functions.keys())
 
     def register(self, new_functions):
         """Validate and add codec pairs to the registry, in pairs.
         """
-        for key in new_functions.keys():
+        for key in list(new_functions.keys()):
             fxn = new_functions[key]
             if not key in globals() or not hasattr(fxn, '__call__'):
                 msg = ': failed to register "%s", not callable' % key
                 _fatal(self.name + msg)
-            if key in self.keys():
+            if key in list(self.keys()):
                 _fatal(self.name + ': function "%s" already registered' % key)
             if not len(key) > 3 or key[:4] not in ['_enc', '_dec']:
                 msg = ': failed to register "%s": need _enc/_dec...' % key
@@ -147,12 +147,12 @@ class PFSCodecRegistry(object):
             self._functions.update({key: fxn})
             fxn_info = '%s(): fxn id=%d' % (key, id(fxn))
             logging.info(self.name + ': registered %s' % fxn_info)
-        for key in new_functions.keys():
+        for key in list(new_functions.keys()):
             # check for the other half of the pair, now that all are updated:
             lead = key[:4]
             prefix_swap = {'_enc': '_dec', '_dec': '_enc'}
             twin = key.replace(lead, prefix_swap[lead], 1)
-            if not twin in self._functions.keys():
+            if not twin in list(self._functions.keys()):
                 _fatal('method "%s" incomplete codec pair' % key)
 
     def unregister(self, function_list):
@@ -166,7 +166,7 @@ class PFSCodecRegistry(object):
             lead = key[:4]
             target_list.append(key.replace(lead, prefix_swap[lead], 1))
         for key in list(set(target_list)):
-            if key in self._functions.keys():
+            if key in list(self._functions.keys()):
                 del self._functions[key]
                 logging.info('removed %s from registry' % key)
             else:
@@ -189,11 +189,13 @@ class PFSCodecRegistry(object):
 def _setup_logging():
     # Logging:  stderr, or psychopy.logging if we're a PsychoPy module
     class _log2stderr(object):
-        """Print all logging messages to stderr, regardless of log level.
+        """Print all logging messages, regardless of log level.
         """
         @staticmethod
         def debug(msg):
-            print >> sys.stderr, msgfmt % (time.time() - logging_t0, msg)
+            m = msgfmt % (time.time() - logging_t0, msg)
+            print(m)
+
         # flatten log levels:
         error = warning = exp = data = info = debug
 
@@ -344,8 +346,8 @@ if True:  # CONSTANTS (with code folding) ------------
     NO_DATE = '(date-time suppressed)'
 
     # for python-based HMAC (from wikipedia):
-    _hmac_trans_5C = "".join(chr(x ^ 0x5c) for x in xrange(256))
-    _hmac_trans_36 = "".join(chr(x ^ 0x36) for x in xrange(256))
+    _hmac_trans_5C = "".join(chr(x ^ 0x5c) for x in range(256))
+    _hmac_trans_36 = "".join(chr(x ^ 0x36) for x in range(256))
     _hmac_blocksize = hashlib.sha256().block_size
 
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
@@ -424,7 +426,7 @@ def archive(paths, name='', ext='.tgz', umask=0o0077, unlink=False):
     unlink is whether to unlink the original files after making an archive, not
     a secure-delete option.
     """
-    if isinstance(paths, basestring):
+    if isinstance(paths, str):
         paths = [paths]
     if not name:
         name = os.path.splitext(paths[0])[0].strip(os.sep) + ext
@@ -447,7 +449,7 @@ def archive(paths, name='', ext='.tgz', umask=0o0077, unlink=False):
 def _zip_size(paths, name=''):
     """Make a .zip file and return its size.
     """
-    if isinstance(paths, basestring):
+    if isinstance(paths, str):
         paths = [paths]
     if not name:
         name = os.path.splitext(paths[0])[0] + '.zip'
@@ -527,7 +529,7 @@ def wipe(filename, cmdList=()):
     try:
         __, err = _sysCall(cmdList, stderr=True)
         good_sys_call = not err
-    except OSError, e:
+    except OSError as e:
         good_sys_call = False
         logging.warning('wipe: %s' % e)
         logging.warning('wipe: %s' % ' '.join(cmdList))
@@ -605,7 +607,7 @@ def _getMetaData(datafile, dataEncFile, pubkey, encMethod,
         'platform': sys.platform,
         'python version': '%d.%d.%d' % sys.version_info[:3]})
 
-    return {u'meta-data %s' % now: md}
+    return {'meta-data %s' % now: md}
 
 
 def loadMetaData(md_file):
@@ -693,7 +695,7 @@ def pad(filename, size=16384, test=False, strict=True):
     with open(filename, 'a+b') as fd:
         chunk = 1024  # cap memory usage
         chunkbytes = PAD_BYTE * chunk
-        for i in xrange(needed // chunk):
+        for i in range(needed // chunk):
             fd.write(chunkbytes)
         extrabytes = PAD_BYTE * (needed % chunk)
         fd.write(extrabytes)
@@ -966,7 +968,7 @@ def _getValidDecMethod(metaFile, decMethod):
     """
     if metaFile:
         md = loadMetaData(metaFile)
-        dates = md.keys()  # dates of meta-data events
+        dates = list(md.keys())  # dates of meta-data events
         most_recent = sorted(dates)[-1]
         encMethod = md[most_recent]['encryption method'].split('.')[1]
         _dec_from_enc = encMethod.replace('_encrypt', '_decrypt')
@@ -986,7 +988,7 @@ def _getValidDecMethod(metaFile, decMethod):
         if not decMethod:
             # ... and nothing explicit either, so go with default:
             logging.info('falling through to default decryption')
-            available = [f for f in default_codec.keys()
+            available = [f for f in list(default_codec.keys())
                          if f.startswith('_decrypt_')]
             decMethod = available[0]
 
@@ -1118,7 +1120,7 @@ def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
     except:
         try:
             wipe(dataDecrypted)
-        except ex, reason:
+        except ex as reason:
             logging.error('failure during wipe: %s' % reason)
         _fatal('%s: Could not decrypt (exception in RSA or AES step)' % name,
                DecryptError)
@@ -1130,7 +1132,7 @@ def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
 
     if se_RSA:
         if 'unable to load Private Key' in se_RSA:
-            raise PrivateKeyError('%s: unable to load Private Key' % name)
+            _fatal('%s: unable to load Private Key' % name, PrivateKeyError)
         elif 'RSA operation error' in se_RSA:
             _fatal("%s: can't use Priv Key; wrong key?" % name, DecryptError)
         else:
@@ -1347,18 +1349,18 @@ class Tests(object):
     def test_codec_registry(self):
         # Test basic set-up:
         test_codec = PFSCodecRegistry()
-        assert len(test_codec.keys()) == 0
+        assert len(list(test_codec.keys())) == 0
         test_codec = PFSCodecRegistry(default_codec)
-        assert len(test_codec.keys()) == 2
-        current = codec.keys()
+        assert len(list(test_codec.keys())) == 2
+        current = list(codec.keys())
         assert (current[0].startswith('_encrypt_') or
                 current[0].startswith('_decrypt_'))
         assert (current[1].startswith('_encrypt_') or
                 current[1].startswith('_decrypt_'))
         test_codec.unregister(current)
-        assert len(test_codec.keys()) == 0
+        assert len(list(test_codec.keys())) == 0
         test_codec.register(default_codec)
-        assert len(test_codec.keys()) == 2
+        assert len(list(test_codec.keys())) == 2
 
     def test_bit_count(self):
         # bit count using a known pub key
@@ -1512,14 +1514,14 @@ class Tests(object):
         # Meta-data from key rotation:
         md = loadMetaData(dec_rot3 + META_EXT)
         logMetaData(md)  # for debug
-        dates = md.keys()
+        dates = list(md.keys())
         hashes = [md[d]['sha256 of encrypted file'] for d in dates]
         assert len(hashes) == len(set(hashes)) == 3
-        assert (u'meta-data %s' % NO_DATE) in dates
+        assert ('meta-data %s' % NO_DATE) in dates
 
         # Should be only one hmac-sha256 present; hashing tested in test_hmac:
         hmacs = [md[d]['hmac-sha256 of encrypted file'] for d in dates
-                 if 'hmac-sha256 of encrypted file' in md[d].keys()]
+                 if 'hmac-sha256 of encrypted file' in list(md[d].keys())]
         assert len(hmacs) == 1
 
         # Should be able to suppress meta-data file:
@@ -1638,7 +1640,7 @@ class Tests(object):
         tw_path = 'tmp_test_wipe'
         tw_reps = 3
         wipe_times = []
-        for i in xrange(tw_reps):
+        for i in range(tw_reps):
             with open(tw_path, 'wb') as fd:
                 fd.write(b'\0')
             code, links, t1 = wipe(tw_path)
@@ -1646,7 +1648,7 @@ class Tests(object):
             assert links == 1
             wipe_times.append(t1)
         unlink_times = []
-        for i in xrange(tw_reps):
+        for i in range(tw_reps):
             with open(tw_path, 'wb') as fd:
                 fd.write(b'\0')
             t0 = time.time()
@@ -1675,7 +1677,7 @@ class Tests(object):
             fd.write(b'\0')
         assert isfile(tw_path)  # need a file or can't test
         numlinks = 2
-        for i in xrange(numlinks):
+        for i in range(numlinks):
             os.link(tw_path, tw_path + 'hardlink' + str(i))
 
         hardlinks = os.stat(tw_path)[stat.ST_NLINK]
@@ -1706,7 +1708,8 @@ if __name__ == '__main__':
             try:
                 eval('ts.' + test + '()')
             except:
-                print test + ' FAILED'
+                result = test + ' FAILED'
+                print(result)
         logging.info("%.4fs for tests" % (time.time() - t0))
     else:
         """pass sys.args to encrypt or decrypt
@@ -1719,7 +1722,8 @@ if __name__ == '__main__':
             if cmd == 'unpad':
                 cmd = '_unpad_strict'
             del sys.argv[1]
-            print eval(cmd + '(*sys.argv[1:])')  # full path to file, typically
+            result = eval(cmd + '(*sys.argv[1:])')
+            print(result)  # full path to file
         else:
-            print usage
+            print(usage)
             sys.exit()
