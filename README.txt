@@ -4,26 +4,36 @@ PyFileSec
 
 PyFileSec provides robust yet easy-to-use tools for working with files that may
 contain sensitive information. The aim is to achieve a "industry standard"
-level of privacy, capable of protecting confidential information
-about human research subjects from casual inspection or accidental disclosure.
-In addition, integrity assurance may be useful in archival and provenance
-applications.
+level of privacy, capable of protecting confidential information from casual
+inspection or accidental disclosure in a research setting. In addition,
+integrity assurance may be useful in archival and provenance applications. The
+main motivation for developing PyFileSec is research with human subjects (e.g.,
+in combination with PsychoPy), but the hope is that it will be more widely
+useful.
 
-Public-key encryption is used for security and flexibility, currently relying
-on OpenSSL for all cryptography (RSA + AES256). The aim is to provide a
-extensible framework for adding other encryption methods, while retaining the
-API and meta-data.
+Several excellent Python packages are available for encryption. However, file
+security requires far more than just encryption. The main and potentially
+unique contribution of PyFileSec is that it aspires to provide secure /file
+management/ tools having a /low barrier to entry/. These considerations motivate
+many of the design choices, e.g., using openssl (often already installed)
+rather than PyCrypto (requires compiling) or GPG (requires set-up).
 
-The main contribution of PyFileSec is data management: 1) to make existing
-file-oriented strong encryption tools more accessible to human subjects
-research (``encrypt``, ``decrypt``, ``rotate``), and 2) to automatically
-document the encryption procedures used (in meta-data). Other tools are
-provided to obscure file length (``pad``), securely remove files from disk
-(``wipe``), and combine a set of files into a single archive file (``archive``).
+The main functions provided include encryption: ``encrypt()``, ``decrypt()``,
+``rotate()``; and verification: ``sign()``, ``verify()``. It is also easy to
+obscure file length: ``pad()``, securely remove files from disk: ``wipe()``,
+combine a set of files into a single archive file prior to encryption:
+``archive()``, and display the meta-data associated with an encrypted file.
+Command-line / shell-script usage is also supported.
+
+Public-key (asymmetric) encryption is used for security and flexibility,
+currently relying on calls to OpenSSL for all cryptography (RSA + AES256 --
+an approach that is well-known and widely regarded). The aim is to provide an
+easily extensible framework for adding other encryption backends (e.g.,
+PyCrypto or GPG, should they be desired), without requiring changes to the API.
 
 The integrated test-suite passes on Mac OS (10.8.3) and Linux (CentOS 6.4 and
-Ubuntu 12.04). Windows support to be added soon (will require user to install
-OpenSSL and SDelete).
+Ubuntu 12.04). Windows support will be added soon, and Python 3.x support looks
+easy.
 
 Contributors
 -------------

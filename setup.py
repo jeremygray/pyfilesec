@@ -22,9 +22,9 @@ setup(
                  'Topic :: Scientific/Engineering',
                  'Topic :: Security'
                  ],
-    keywords=['encryption', 'security', 'privacy', 'integrity'],
-    url='http://pypi.python.org/pypi/PyFileSec/',
+    keywords=['encryption', 'security', 'privacy', 'integrity', 'human subjects', 'research'],
+    url='https://github.com/jeremygray/pyfilesec',
     license='LICENSE.txt',
-    description='File privacy & integrity tools for human-subjects research.',
+    description='File privacy & integrity tools, e.g., for human-subjects research.',
     long_description=open('README.txt').read(),
 )

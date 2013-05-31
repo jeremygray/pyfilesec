@@ -41,7 +41,9 @@
     To be added to documentation:
     - an encrypted or decrypted file will be created in the same directory as
       the original
-    - always decrypt a /copy/ of data.enc, don't touch orig
+    - the code will always decrypt a /copy/ of data.enc, and not touch orig
+    - the command-line mode means that non-python programs can access pyfilesec
+      functions if they can do system calls.
     - RSA pub-key is thought to be medium-term-secure if 2048+ bits;
       see http://www.keylength.com
     - tries to use 256 bits for the openssl enc password using
@@ -65,13 +67,14 @@
     - explain how to do encrypt-then-HMAC (good as a strategy):
         http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html)
 
-    - tested with 5 versions of openssl, on Mac and linux:
+    - tested with 6 versions of openssl, on Mac OS X and 3 linux distributions:
         OpenSSL 0.9.8r  8 Feb 2011     Mac 10.8.3, python 2.7.3
+        OpenSSL 1.0.1e 11 Feb 2013     same Mac, openssl via macports
+        OpenSSL 1.1.0-dev xx XXX xx    same Mac, clone from github & compile
         OpenSSL 1.0.0-fips 29 Mar 2010 CentOS 6.4, python 2.6.6
         OpenSSL 1.0.1  14 Mar 2012     Ubuntu 12.04.2 LTS, python 2.7.3
-        OpenSSL 1.0.1e 11 Feb 2013     Mac, openssl via macports, python 2.7.3
-        OpenSSL 1.1.0-dev xx XXX xx    cloned from github, compiled on Mac 10.8
-      Using rsautl passes on all platforms tested to date; pkeyutl does not
+        OpenSSL 0.9.8o 01 June 2010    Debian (squeeze), python 2.6.6
+      Using rsautl passes on all platforms tested to date; pkeyutl does not.
       Recovering a known file signature only works if the reference sig was
       created by the same version (0.9.8r vs 1.0.*).
 

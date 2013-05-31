@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""PyFileSec: File privacy & integrity tools for human neuroscience research
+"""PyFileSec: File privacy & integrity tools, e.g., for human-subjects research
 """
 
 # Copyright (c) Jeremy R. Gray, 2013
