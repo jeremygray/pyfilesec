@@ -66,6 +66,20 @@
       are unlikely to be parsed in detail; the python locale is irrelevant.
     - explain how to do encrypt-then-HMAC (good as a strategy):
         http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html)
+    - tests for randomness quality could only catch really egregious cases, do
+        not seem worth doing
+    - a minimal custom codec is provided (see tests) as proof of concept:
+        Strongly suggest only add another codec if its demonstrably better than
+        RSA+AES256. The point of the codec is to provide a transition path in
+        the event that the current choice becomes weak. The point is not to
+        provide flexibility for the sake of flexiblity, but rather to give an
+        escape hatch: Demonstrate future-proofing, but don't use it until
+        forced. You might be forced by a company or university policy for
+        example (e.g., only using a specific approved version of pgp).
+    - References:
+        1. N. Ferguson, B. Schneier, & T. Kohno 2010. Cryptographic
+            engineering. Wiley Publishing Inc: Indianapolis IN, USA
+        2. http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html
 
     - tested with 6 versions of openssl, on Mac OS X and 3 linux distributions:
         OpenSSL 0.9.8r  8 Feb 2011     Mac 10.8.3, python 2.7.3

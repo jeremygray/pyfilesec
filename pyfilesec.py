@@ -1704,6 +1704,32 @@ class Tests(object):
         assert links == numlinks + 1  # +1 for itself
         assert links == hardlinks
 
+    def test_add_new_codec(self):
+        import codecs
+        global _decrypt_rot13
+        global _encrypt_rot13
+
+        def _encrypt_rot13(dataFile, *args, **kwargs):
+            stuff = open(dataFile, 'rb').read()
+            with open(dataFile, 'wb') as fd:
+                fd.write(codecs.encode(stuff, 'rot_13'))
+            return dataFile
+        _decrypt_rot13 = _encrypt_rot13  # == fun fact
+
+        rot13 = {'_encrypt_rot13': _encrypt_rot13,
+                 '_decrypt_rot13': _decrypt_rot13}
+        codec.register(rot13)
+        assert '_encrypt_rot13' in list(codec.keys())
+        assert '_decrypt_rot13' in list(codec.keys())
+        clearText = 'clearText.txt'
+        secret = 'la la la, sssssh!'
+        with open(clearText, 'wb') as fd:
+            fd.write(secret)
+        _decrypt_rot13(_encrypt_rot13(clearText))
+        extracted = open(clearText, 'rb').read()
+        assert extracted == secret
+        # not working yet, due to encrypt() expect a pubkey, etc:
+        # decrypt(encrypt(clearText, encMethod='_encrypt_rot13'))
 
 # Basic set-up (order matters) ------------------------------------------------
 logging, loggingID, logging_t0, log_sysCalls = _setup_logging()
