@@ -4,10 +4,21 @@
 """PyFileSec: File privacy & integrity tools, e.g., for human-subjects research
 """
 
+"""
 # Copyright (c) Jeremy R. Gray, 2013
-# Released under the GPLv3 licence with an additional exemption that
-# compiling, linking, and/or using OpenSSL is allowed.
+# Released under the GPLv3 licence with the additional exemptions that
+# 1) compiling, linking, and/or using OpenSSL are allowed, and
+# 2) this licence and copyright notice be included in all derivative works.
 
+THIS SOFTWARE IS PROVIDED AS IS, WITHOUT REPRESENTATION FROM THE COPYRIGHT
+HOLDER AS TO ITS FITNESS FOR ANY PURPOSE, AND WITHOUT WARRANTY BY THE COPYRIGHT
+HOLDER OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT
+LIMITATION THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE. THE COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR ANY DAMAGES,
+INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WITH RESPECT
+TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE USE OF THE SOFTWARE, EVEN
+IF HE HAS BEEN OR IS HEREAFTER ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+"""
 
 __version__ = '0.1.0'
 __author__ = 'Jeremy R. Gray'
