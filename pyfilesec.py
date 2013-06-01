@@ -362,6 +362,25 @@ if True:  # CONSTANTS (with code folding) ------------
     UMASK = 0o777 - PERMISSIONS
 
 
+def _entropy():
+    """Basic query for some indication that entropy is available.
+    """
+    if sys.platform == 'darwin':
+        # SecurityServer daemon is supposed to ensure entropy is available:
+        ps = _sysCall(['ps', '-e'])
+        securityd = _sysCall(['which', 'securityd'])  # full path
+        if securityd in ps:
+            e = securityd + ' running'
+        else:
+            e = ''
+    elif sys.platform.startswith('linux'):
+        avail = _sysCall(['cat', '/proc/sys/kernel/random/entropy_avail'])
+        e = 'entropy_avail: ' + avail
+    else:
+        e = '(unknown)'
+    return e
+
+
 def _sha256(filename, prepend='', raw=False):
     """Return sha256 hexdigest of a file, using a buffered digest.
     """
