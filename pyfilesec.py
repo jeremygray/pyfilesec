@@ -73,6 +73,7 @@ usage = """%(name)s v%(version)s
     --help | -h : display this message
     --version   : print version and exit
     --openssl=/path/to/openssl : openssl binary file to use for openssl calls
+    --genrsa    : RSA key generation dialog
 
   Testing:
     $ py.test %(name)s.py
@@ -89,6 +90,10 @@ if (__name__ == "__main__" and len(sys.argv) == 1 or
     sys.exit()
 if python_version() < '2.6.6':
     raise RuntimeError('Requires python 2.6+')
+if python_version < '3.':
+    input23 = raw_input
+else:
+    input23 = input
 
 
 class PublicKeyTooShortError(Exception):
@@ -290,17 +295,17 @@ def _get_openssl_info():
               'Try http://www.slproweb.com/products/Win32OpenSSL.html'
         _fatal(msg, RuntimeError)
 
-    opensslVersion = _sysCall([OPENSSL, 'version'])
-    if opensslVersion.lower() < 'openssl 0.9.8':
-        _fatal('OpenSSL too old (%s)' % opensslVersion, RuntimeError)
+    openssl_version = _sysCall([OPENSSL, 'version'])
+    if openssl_version.lower() < 'openssl 0.9.8':
+        _fatal('OpenSSL too old (%s)' % openssl_version, RuntimeError)
     logging.info('OpenSSL binary  = %s' % OPENSSL)
-    logging.info('OpenSSL version = %s' % opensslVersion)
+    logging.info('OpenSSL version = %s' % openssl_version)
 
-    # use_rsautl = opensslVersion < 'OpenSSL 1.0'  # ideally use pkeyutl
+    # use_rsautl = (openssl_version < 'OpenSSL 1.0')  # ideally use pkeyutl
     # but -decrypt with passphrase fails with pkeyutl, so always use rsautl:
     use_rsautl = True
 
-    return OPENSSL, opensslVersion, use_rsautl
+    return OPENSSL, openssl_version, use_rsautl
 
 
 def _get_wipe_info():
@@ -374,7 +379,7 @@ if True:  # CONSTANTS (with code folding) ------------
     UMASK = 0o777 - PERMISSIONS
 
 
-def _entropy():
+def _entropy_check():
     """Basic query for some indication that entropy is available.
     """
     if sys.platform == 'darwin':
@@ -634,7 +639,7 @@ def _getMetaData(datafile, dataEncFile, pubkey, encMethod,
     else:
         now = NO_DATE
     md.update({'encrypted year-month-day-localtime-Hm.s.ms': now,
-        'openssl version': opensslVersion,
+        'openssl version': openssl_version,
         'platform': sys.platform,
         'python version': '%d.%d.%d' % sys.version_info[:3]})
 
@@ -1253,13 +1258,13 @@ def verify(filename, pub, sig):
 def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     """For TESTS: generate new RSA pub and priv keys, return paths to files.
 
-    pphr is expected to be a file here.
+    pphr is expected to be in a FILE here.
     """
     if use_rsautl:
         # Generate priv key:
         cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
         if pphr:
-            cmdGEN += ['-des3', '-passout', 'file:' + pphr]
+            cmdGEN += ['-aes256', '-passout', 'file:' + pphr]
         _sysCall(cmdGEN + [str(bits)])
 
         # Extract pub from priv:
@@ -1300,44 +1305,74 @@ def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     return abspath(pub), abspath(priv)
 
 
-def genRsaKeys(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
-    """Dialog to generate an RSA key pair, with optional passphrase.
+def genRsaKeys():
+    """Dialog to generate an RSA key pair, PEM format.
 
-    Bare bones. Works but not user-friendly. Needs lots of documentation.
-    Will need the passphrase saved in a file to use it with decrypt, etc.
+    Limited to 2048, 4096, 8192 bits; 1024 is not secure for medium-term
+    storage, and 16384 bits is impractical. Require or generate a passphrase.
+
+    Needs lots of documentation. Ideally, generate a strong passphrase using a
+    password manager (e.g., KeePassX), save there, paste it in here.
     """
-    pub = _uniqFile(pub)
-    priv = _uniqFile(priv)
-    print('RSA key generation. 16 char minimum passphrase.')
-    if not pphr:
-        pphr = getpass.getpass('Passphrase: ')
-        if pphr:
-            pphr2 = getpass.getpass('same again: ')
-            if pphr != pphr2:
-                print('  > differ, exiting <')
-                return
-        else:
-            print('  > no passphrase, proceeding anyway <')
-    if pphr and len(pphr) < 16:
-        print('  > too short; exiting <')
-        return
-    if python_version > '3.':
-        b = eval(input('RSA key length (2048 or 4096): '))
+    def _cleanup(msg):
+        print(msg)
+        try:
+            wipe(priv)
+        except:
+            pass
+        try:
+            os.unlink(pub)
+        except:
+            pass
+
+    pub = abspath(_uniqFile('pub_RSA.pem'))  # ensure unique, abspath
+    priv = pub.replace('pub_RSA', 'priv_RSA')  # ensure a matched pair
+    if os.path.exists(priv):
+        msg = ('RSA key generation.\n  %s already exists\n' % priv +
+               '  > Clean up files and try again. Exiting. <')
+        print(msg)
+        return None, None
+
+    print('RSA key generation. Will try to create two files:')
+    pub_msg = '  %s   = %s' % (os.path.split(pub)[1], pub)
+    print(pub_msg)
+    priv_msg = '  %s  = %s' % (os.path.split(priv)[1], priv)
+    print(priv_msg)
+    print('To proceed, enter a passphrase (16+ chars, return to generate).')
+    pphr = getpass.getpass('Passphrase: ')
+    if pphr:
+        pphr2 = getpass.getpass('same again: ')
+        if pphr != pphr2:
+            print('  > Passphrase mismatch. Exiting. <')
+            return None, None
+        pphr_auto = False
     else:
-        b = raw_input('RSA key length (2048 or 4096): ')
-        if b in ['2048', '4096']:
-            bits = b
+        pphr = _printablePwd(128)  # or a word-based generator?
+        pphr_auto = True
+    if pphr and len(pphr) < 16:
+        print('  > passphrase too short; exiting <')
+        return None, None
+    bits = 4096  # default
+    b = input23('RSA key length (2048, 4096, 8192): ')
+    if b in ['2048', '4096', '8192']:
+        bits = b
     bits_msg = '  using %s' % bits
+    if bits > 4096:
+        bits_msg += '; this will take a minute!'
     print(bits_msg)
-    ent_msg = 'entropy: ' + _entropy()
+    ent_msg = '  entropy: ' + _entropy_check()
     print(ent_msg)
+    print('  > move the mouse around for 5s (to help generate entropy)')
+    time.sleep(5)
+    msg = 'Generating RSA keys (using %s)\n' % openssl_version
+    print(msg)
 
     try:
         umask_restore = os.umask(UMASK)
         # Generate priv key:
         cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
         if pphr:
-            cmdGEN += ['-des3', '-passout', 'stdin']
+            cmdGEN += ['-aes256', '-passout', 'stdin']
         _sysCall(cmdGEN + [str(bits)], stdin=pphr)
 
         # Extract pub from priv:
@@ -1345,16 +1380,25 @@ def genRsaKeys(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
         if pphr:
             cmdEXTpub += ['-passin', 'stdin']
         _sysCall(cmdEXTpub, stdin=pphr)
+    except:
+        _cleanup('\n  > Removing temp files. Exiting. <')
+        raise
     finally:
         os.umask(umask_restore)
 
-    pub = abspath(pub)
-    priv = abspath(priv)
     pub_msg = 'public key:  ' + pub
     print(pub_msg)
     priv_msg = 'private key: ' + priv
     print(priv_msg)
-    print('Keep the private key private, and remember your passphrase!')
+    if pphr_auto:
+        pphr_msg = 'passphrase:  ' + pphr
+    else:
+        pphr_msg = 'passphrase:  (entered by hand)'
+    print(pphr_msg)
+    warn_msg = (' >> Keep the private key private! <<\n' +
+           '  >> Do not lose the passphrase! <<')
+    print(warn_msg)
+
     return pub, priv
 
 
@@ -1803,9 +1847,164 @@ class Tests(object):
         # not working yet, due to encrypt() expect a pubkey, etc:
         # decrypt(encrypt(clearText, encMethod='_encrypt_rot13'))
 
+    def test_8192_bit_keys(self):
+        pub = 'pub_8192.pem'
+        pub_stuff = """-----BEGIN PUBLIC KEY-----
+            MIIEIjANBgkqhkiG9w0BAQEFAAOCBA8AMIIECgKCBAEA1NVm8RI/fo58LNmjNoDA
+            sdRZ1L507zBfGufo1cI/0eLfWTOtbHE+hoqCdac2RW/TVd/eTo1/wUqpbnkg1Y6m
+            icvaEEfCivhBgQNrJLvXLrqkg1J9ApI6ha4kDpgsFkYITy+GdNNQcbuLJ88eA1nn
+            oy1JiSBOtuXOP2OQnMI/zssPL0RogofqGIIGtOxeQia5eGS3d7fQkbZEN5dqBLJZ
+            FqGDtMqCcMmZFnfGTfKUEtf3LH1dTvelHx/ypvRp5ir92c4qz9JA21ftbuTfJIkw
+            9S672WsoghCuFZpdxRn/r0q5wanWPVPb7GiTSbTfcjrZR5Ma5DPm14wCMAo6gAtD
+            1CWbFI+x5bHCj8XcW8evqzBn/NtW6Rug3T6tPfuv9O/W5kCq1vUtmktv6Ew+9onN
+            CAkTHJKktOIK2ydTHTUeAzEhIzMsvrOSeIpyqkRZK4z5bsbYTcKKxZwq8T9IuiNs
+            d5PqfU1NHBCXkEjAMA2aAyB9AEXPC4ENm6fXu5rbioUvzS95oUlnVTFPoc1lDPNx
+            MUh8Xm2Qjc01fcIZmEz8IIWLu/refGS2Q2s0hDh1C4mD6bXMh3TVVSI7q2eM8Ftd
+            0cBWzj0ufsk0/Vs6zE8xfRdXKSCNHA5qDRh4ZRrufZnw0r2yacCNFB1wdKsVvpOH
+            jaGQb590kPewKQ/7aG3WrNLd2/dJfQiXAA7hcKCzbiZf5nwdEu/BaQcZUYBySADK
+            PpTVBKaZaCvWKtZKi+0UmMMjgk3uAmkvnlKJt45i5qDcr+i9IziWX/qV9LuX5U/8
+            LlqgiA/CGawTlnpOaZWx6hh5/l6d0chJ0ULTGhiEPIeiWMMKE9/zE9D/e6t9PJQ/
+            XdaxpIM/2rI8Mx7a3dK4zjqzPkYoP301NcBub9Vq6pQMn/89K8fikGP7LKncI/lf
+            n6U9uXKW487u5/WULe1atDQUkCIx1P9UEqQxl8MhUX+KorV8nQFaazGa7tY39YRW
+            eBMucPZjC9hywCF1O9+OJW5pGU/WCR/KGKoZfOsGY5GT85HeXdCkYqpemPuLgC9+
+            YU2xd5sMPotFHrK5PNMzqpf7xryUiwc0FDgM278Sp9TJ+WO2lp6rTJJfFehINjV5
+            1mG4Oddf3k9RJWk5CEuEPhV2kP3JH6EslnkjS4M1l2w3pLc/5XkMYyL9kUlRXW7I
+            bqbPXrds/GuVR42vixA8x4Rzb8dIbZauIFvuueWYyETLCGK6jyXhgzRSgFX26aCs
+            J/u3eHHpac+xuiZFhXqcSdYocoRyioOQ9X7zqMZxQcfvrxSgl8PVhfh7hzHR9ZPi
+            lGzMDEaUjv0ZbkWJa1rohoOtggwMXeKH2mh//0Jp7vYZzfgC/0iIHAQH1MPEodVl
+            4wIDAQAB
+            -----END PUBLIC KEY-----
+            """.replace('    ', '')
+        with open(pub, 'wb') as fd:
+            fd.write(pub_stuff)
+        assert open(pub, 'rb').read() == pub_stuff
+        priv = 'priv_8192.pem'
+        priv_stuff = """-----BEGIN RSA PRIVATE KEY-----
+            Proc-Type: 4,ENCRYPTED
+            DEK-Info: AES-256-CBC,ABD70159132455FBDC8E798415A4DE36
+
+            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
+            -----END RSA PRIVATE KEY-----
+            """.replace('    ', '')
+        with open(priv, 'wb') as fd:
+            fd.write(priv_stuff)
+        assert open(priv, 'rb').read() == priv_stuff
+        pphr = 'pphr_8192'
+        pphr_stuff = '149acf1a8c196eeb5cdba121567e670b'
+        with open(pphr, 'wb') as fd:
+            fd.write(pphr_stuff)
+        assert open(pphr, 'rb').read() == pphr_stuff
+
+        secretText = 'secret.txt'
+        datafile = secretText  # does double duty as file name and contents
+        with open(datafile, 'wb') as fd:
+            fd.write(secretText)
+
+        enc = encrypt(datafile, pub)
+        dataDecNested = decrypt(enc, priv, pphr=pphr)
+        recoveredText = open(dataDecNested).read()
+        assert recoveredText == secretText
+
+
 # Basic set-up (order matters) ------------------------------------------------
 logging, loggingID, logging_t0, log_sysCalls = _setup_logging()
-OPENSSL, opensslVersion, use_rsautl = _get_openssl_info()
+OPENSSL, openssl_version, use_rsautl = _get_openssl_info()
 have_wipe_tool, WIPE_TOOL, WIPE_OPTS = _get_wipe_info()
 
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
@@ -1813,7 +2012,7 @@ default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
 codec = PFSCodecRegistry(default_codec)
 
 if __name__ == '__main__':
-    logging.info("%s with %s" % (lib_name, opensslVersion))
+    logging.info("%s with %s" % (lib_name, openssl_version))
     if '--debug' in sys.argv:
         global pytest
         import pytest
@@ -1828,6 +2027,10 @@ if __name__ == '__main__':
                 result = test + ' FAILED'
                 print(result)
         logging.info("%.4fs for tests" % (time.time() - t0))
+    elif '--genrsa' in sys.argv:
+        """Walk through key generation.
+        """
+        genRsaKeys()
     else:
         """pass sys.args to encrypt or decrypt
         """
@@ -1843,4 +2046,3 @@ if __name__ == '__main__':
             print(result)  # full path to file
         else:
             print(usage)
-            sys.exit()

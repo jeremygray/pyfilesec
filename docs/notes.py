@@ -105,6 +105,7 @@
     - add tests for:
         preserve orig file in case of failed encryption
     - docs
+    - refactor to avoid passphrase in file, use stdin
 
     Medium-term:
     - tarfile.TarInfo() for managing owner, permissions, time, etc
