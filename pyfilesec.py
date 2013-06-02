@@ -43,6 +43,7 @@ import subprocess
 import hashlib
 from functools import partial  # for buffered hash digest
 from base64 import b64encode, b64decode
+import getpass  # for RSA key-gen
 
 
 lib_name = 'PyFileSec'
@@ -1249,11 +1250,10 @@ def verify(filename, pub, sig):
     return result in ['Verification OK', 'Verified OK']
 
 
-def genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
-    """Generate new RSA pub and priv keys, return paths to files.
+def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
+    """For TESTS: generate new RSA pub and priv keys, return paths to files.
 
-    Works but not user-friendly (for pphr), nor warns about proper entropy, key
-    management, etc.
+    pphr is expected to be a file here.
     """
     if use_rsautl:
         # Generate priv key:
@@ -1298,6 +1298,64 @@ def genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
         _sysCall(cmdEXTpub)
 
     return abspath(pub), abspath(priv)
+
+
+def genRsaKeys(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
+    """Dialog to generate an RSA key pair, with optional passphrase.
+
+    Bare bones. Works but not user-friendly. Needs lots of documentation.
+    Will need the passphrase saved in a file to use it with decrypt, etc.
+    """
+    pub = _uniqFile(pub)
+    priv = _uniqFile(priv)
+    print('RSA key generation. 16 char minimum passphrase.')
+    if not pphr:
+        pphr = getpass.getpass('Passphrase: ')
+        if pphr:
+            pphr2 = getpass.getpass('same again: ')
+            if pphr != pphr2:
+                print('  > differ, exiting <')
+                return
+        else:
+            print('  > no passphrase, proceeding anyway <')
+    if pphr and len(pphr) < 16:
+        print('  > too short; exiting <')
+        return
+    if python_version > '3.':
+        b = eval(input('RSA key length (2048 or 4096): '))
+    else:
+        b = raw_input('RSA key length (2048 or 4096): ')
+        if b in ['2048', '4096']:
+            bits = b
+    bits_msg = '  using %s' % bits
+    print(bits_msg)
+    ent_msg = 'entropy: ' + _entropy()
+    print(ent_msg)
+
+    try:
+        umask_restore = os.umask(UMASK)
+        # Generate priv key:
+        cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
+        if pphr:
+            cmdGEN += ['-des3', '-passout', 'stdin']
+        _sysCall(cmdGEN + [str(bits)], stdin=pphr)
+
+        # Extract pub from priv:
+        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
+        if pphr:
+            cmdEXTpub += ['-passin', 'stdin']
+        _sysCall(cmdEXTpub, stdin=pphr)
+    finally:
+        os.umask(umask_restore)
+
+    pub = abspath(pub)
+    priv = abspath(priv)
+    pub_msg = 'public key:  ' + pub
+    print(pub_msg)
+    priv_msg = 'private key: ' + priv
+    print(priv_msg)
+    print('Keep the private key private, and remember your passphrase!')
+    return pub, priv
 
 
 class Tests(object):
@@ -1488,7 +1546,7 @@ class Tests(object):
         pphr1 = 'passphrs1 unic\xcc\x88de.txt'
         with open(pphr1, 'wb') as fd:
             fd.write(_printablePwd(180))
-        pub1, priv1 = genRsa(pubTmp1, prvTmp1, pphr1, testBits)
+        pub1, priv1 = _genRsa(pubTmp1, prvTmp1, pphr1, testBits)
 
         pubTmp2 = 'pubkey2 unic\xcc\x88de.pem'
         prvTmp2 = 'prvkey2 unic\xcc\x88de.pem'
@@ -1515,12 +1573,12 @@ class Tests(object):
         assert recoveredText == secretText
 
         # a correct-format but wrong priv key should fail:
-        pub2, priv2 = genRsa(pubTmp2, prvTmp2, pphr1, testBits)
+        pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr1, testBits)
         with pytest.raises(DecryptError):
             dataEncDec = decrypt(dataEnc, priv2, pphr1)
 
         # should refuse-to-encrypt if pub key is too short:
-        pub256, __ = genRsa('pub256.pem', 'priv256.pem', bits=256)
+        pub256, __ = _genRsa('pub256.pem', 'priv256.pem', bits=256)
         assert numBits(pub256) == 256  # oops failed to get a short key to use
         with pytest.raises(PublicKeyTooShortError):
             dataEnc = encrypt(datafile, pub256)

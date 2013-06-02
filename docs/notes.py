@@ -76,6 +76,10 @@
         escape hatch: Demonstrate future-proofing, but don't use it until
         forced. You might be forced by a company or university policy for
         example (e.g., only using a specific approved version of pgp).
+    - add generate RSA keys options and documentation; its not easy to export
+        PEM format from GPG, you get PGP-format .asc
+        docs: note that a good entropy source is not trivial, and getting a
+        hardware RNG is the way to go for demanding applications.
     - References:
         1. N. Ferguson, B. Schneier, & T. Kohno 2010. Cryptographic
             engineering. Wiley Publishing Inc: Indianapolis IN, USA
@@ -93,10 +97,6 @@
       created by the same version (0.9.8r vs 1.0.*).
 
     To-do near-term:
-    - add generate RSA keys options and documentation; its not easy to export
-        PEM format from GPG, you get PGP-format .asc
-        docs: note that a good entropy source is not trivial, and getting a
-        hardware source is the way to go for demanding applications
     - test everything on Windows, esp mkdtemp, sdelete (what default path?)
         random.SystemRandom(), openssl (what install dir?),
         hardlink detection (in wipe), umask, padding,
