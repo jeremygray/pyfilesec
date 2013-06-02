@@ -95,14 +95,21 @@
     To-do near-term:
     - add generate RSA keys options and documentation; its not easy to export
         PEM format from GPG, you get PGP-format .asc
-    - test everything on Windows, esp mkdtemp, sdelete, random.SystemRandom(),
-        hardlink detection (in wipe), umask, padding, time.time/time.clock, ...
-        how long does 'where /r openssl.exe' take?
+        docs: note that a good entropy source is not trivial, and getting a
+        hardware source is the way to go for demanding applications
+    - test everything on Windows, esp mkdtemp, sdelete (what default path?)
+        random.SystemRandom(), openssl (what install dir?),
+        hardlink detection (in wipe), umask, padding,
+        time.time/time.clock (now used in wipe as well),
+        how long does 'where /r C:\ openssl.exe' take?
     - add tests for:
         preserve orig file in case of failed encryption
+    - docs
 
     Medium-term:
     - tarfile.TarInfo() for managing owner, permissions, time, etc
+    - sphinx docs
+    - make _encrypt_x / _decrypt_x truly modular, pass in all needed values
     - MS: CBC is not so great here, esp. if you care about data integrity and
         about secrecy. Instead, you probably want an "authenticated encryption"
         scheme like "Encrypt-then-MAC", the "GCM" cipher mode, or something
@@ -116,10 +123,15 @@
         #    supporting a pycrypto backend might be useful
         # encrypt-then-MAC is robust as separate steps
         # see http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html
-    - could add _encrypt_aes256gcm function; want to be able to simply import
-      other functions and register them
+      could add _encrypt_aes256gcm function if this becomes urgent
 
     Long-term (think about):
+    - first-run / --setup wizard:
+        run self-tests
+        enable / disable RSA key generation; don't want to generate keys all
+          the time or haphazardly; key proliferation is a bad thing
+        set / confirm paths to openssl, sdelete
+        add alias to __file__ to shell path for command line usage
     - more to pkeyutl instead of rsautl when possible; currently not:
         -decrypt with passphrase seems to fail, maybe -sign as well
     - use zip instead of tar for file bundle, easier to work with items in mem
@@ -129,7 +141,8 @@
 
     Related projects:
     pyOpenSSL - "thin wrapper around (a subset of) the OpenSSL library"
-    pycrypto - complete, need to compile; might be a backend to opensslwrap
+    pycrypto - complete, need to compile; might be a backend but it seems
+        like should always prefer OpenSSL if at all possible
     M2Crypto - "M2Crypto is the most complete Python wrapper for OpenSSL"
     pycryptopp - not complete enough: "AES, XSalsa20, and Ed25519 signatures."
     pycogworks.crypto - interesting but no crypto except an ID generator

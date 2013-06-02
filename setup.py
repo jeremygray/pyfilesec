@@ -14,6 +14,7 @@ setup(
     classifiers=['Development Status :: 3 - Alpha',
                  'Programming Language :: Python :: 2.6',
                  'Programming Language :: Python :: 2.7',
+                 'Programming Language :: Python :: 3',
                  'Operating System :: POSIX :: Linux',
                  'Operating System :: MacOS :: MacOS X',
                  #'Operating System :: Microsoft :: Windows',  # soon!
@@ -27,4 +28,5 @@ setup(
     license='LICENSE.txt',
     description='File privacy & integrity tools, e.g., for human-subjects research.',
     long_description=open('README.txt').read(),
+    install_requires=['ctypes'],
 )

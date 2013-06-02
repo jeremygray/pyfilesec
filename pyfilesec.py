@@ -37,7 +37,7 @@ from random import SystemRandom
 sysRand = SystemRandom()
 
 import json
-import time  # only for logging
+import time
 from tempfile import mkdtemp, NamedTemporaryFile
 import subprocess
 import hashlib
@@ -861,7 +861,7 @@ def encrypt(datafile, pubkeyPem, meta=True, date=True, keep=False,
 
     # Do the encryption, using a registered `encMethod`:
     ENCRYPT_FXN = codec.get_function(encMethod)
-    dataFileEnc, pwdEncFile = ENCRYPT_FXN(datafile, pubkeyPem)
+    dataFileEnc, pwdEncFile = ENCRYPT_FXN(datafile, pubkeyPem, OPENSSL)
     ok_encrypt = (isfile(dataFileEnc) and
                     os.stat(dataFileEnc)[stat.ST_SIZE] and
                     isfile(pwdEncFile) and
@@ -902,16 +902,16 @@ def encrypt(datafile, pubkeyPem, meta=True, date=True, keep=False,
     return abspath(bundleFilename)
 
 
-def _encrypt_rsa_aes256cbc(datafile, pubkeyPem):
+def _encrypt_rsa_aes256cbc(datafile, pubkeyPem, OPENSSL=''):
     """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
     """
     name = '_encrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
 
     # Define file paths:
-    pwdFileRsa = PWD_EXT + '_file' + RSA_EXT
+    pwdFileRsa = PWD_EXT + RSA_EXT
     dataFileEnc = abspath(datafile) + AES_EXT
-    pwdFileRsaNew = _uniqFile(dataFileEnc + pwdFileRsa.replace('_file', ''))
+    pwdFileRsaNew = _uniqFile(dataFileEnc + pwdFileRsa)
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     if use_rsautl:
@@ -1065,7 +1065,8 @@ def decrypt(dataEnc, privkeyPem, pphr='', outFile='', decMethod=None):
 
         # Decrypt:
         DECRYPT_FXN = codec.get_function(decMethod)
-        dataFileDec = DECRYPT_FXN(dataFileEnc, pwdFile, priv, pphr, outFile)
+        dataFileDec = DECRYPT_FXN(dataFileEnc, pwdFile, priv, pphr, outFile,
+                                  OPENSSL=OPENSSL)
         os.chmod(dataFileDec, PERMISSIONS)
         logging.info('decrypted, permissions ' + perm_str + ': ' + dataFileDec)
 
@@ -1087,8 +1088,8 @@ def decrypt(dataEnc, privkeyPem, pphr='', outFile='', decMethod=None):
                 wipe(metaFile)
     finally:
         try:
-            os.chmod(newClearTextFile, 0o0600)  # typically already done
-            os.chmod(newMeta, 0o0600)  # typically not already done
+            os.chmod(newClearTextFile, PERMISSIONS)  # typically already done
+            os.chmod(newMeta, PERMISSIONS)  # typically not already done
         except:
             pass
         try:
@@ -1102,7 +1103,7 @@ def decrypt(dataEnc, privkeyPem, pphr='', outFile='', decMethod=None):
 
 
 def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
-                           pphr=None, outFile=''):
+                           pphr=None, outFile='', OPENSSL=''):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
     """
     name = '_decrypt_rsa_aes256cbc'
@@ -1112,7 +1113,9 @@ def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
     if outFile:
         dataDecrypted = outFile
     else:
-        dataDecrypted = abspath(dataFileEnc).replace(AES_EXT, '')
+        dataDecrypted = os.path.splitext(abspath(dataFileEnc))[0]
+    #else:
+    #    dataDecrypted = abspath(dataFileEnc)
 
     # set up the command to retrieve password from pwdFileRsa
     if use_rsautl:
