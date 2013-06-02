@@ -1,1 +1,11 @@
-v0.1.0, June 2, 2013 -- initial release
+v0.1.1, June 1, 2013
+---------------------
+* prep work for python 3 version
+* more tests
+* _entropy
+* proof of concept: add custom codec (partial)
+* add legal disclaimer
+
+v0.1.0, May 31, 2013
+---------------------
+* initial release

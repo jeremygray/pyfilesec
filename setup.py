@@ -5,7 +5,7 @@ from distutils.core import setup
 
 setup(
     name='PyFileSec',
-    version='0.1.0',
+    version='0.1.1',
     author='Jeremy R. Gray',
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
