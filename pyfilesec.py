@@ -8,7 +8,8 @@
 # Copyright (c) Jeremy R. Gray, 2013
 # Released under the GPLv3 licence with the additional exemptions that
 # 1) compiling, linking, and/or using OpenSSL are allowed, and
-# 2) this licence and copyright notice be included in all derivative works.
+# 2) the copyright, licence terms, and legal disclaiminer be included in any
+     and all derivative work.
 
 THIS SOFTWARE IS PROVIDED AS IS, WITHOUT REPRESENTATION FROM THE COPYRIGHT
 HOLDER AS TO ITS FITNESS FOR ANY PURPOSE, AND WITHOUT WARRANTY BY THE COPYRIGHT
@@ -17,10 +18,11 @@ LIMITATION THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
 PARTICULAR PURPOSE. THE COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR ANY DAMAGES,
 INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WITH RESPECT
 TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE USE OF THE SOFTWARE, EVEN
-IF HE HAS BEEN OR IS HEREAFTER ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+IF THE COPYRIGHT HOLDER HAS BEEN OR IS HEREAFTER ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
 """
 
-__version__ = '0.1.1'
+__version__ = '0.1.3'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
@@ -123,6 +125,9 @@ class PFSCodecRegistry(object):
     2) Want the method used for encryption to be documentable in meta-data,
        esp. useful if there are several alternative methods available.
 
+    3) Retain the ability to access all decryption methods, even if the
+       related encryption method is no longer supported.
+
     Currently works for the default functions. To register a new function, the
     idea is to be able to do::
 
@@ -164,18 +169,17 @@ class PFSCodecRegistry(object):
             self._functions.update({key: fxn})
             fxn_info = '%s(): fxn id=%d' % (key, id(fxn))
             logging.info(self.name + ': registered %s' % fxn_info)
+        # allow _dec without _enc, but not vice-verse:
         for key in list(new_functions.keys()):
-            # check for the other half of the pair, now that all are updated:
-            lead = key[:4]
-            prefix_swap = {'_enc': '_dec', '_dec': '_enc'}
-            twin = key.replace(lead, prefix_swap[lead], 1)
-            if not twin in list(self._functions.keys()):
+            if key.startswith('_dec'):
+                continue
+            dec_twin = key.replace('_enc', '_dec', 1)
+            if not dec_twin in list(self._functions.keys()):
                 _fatal('method "%s" incomplete codec pair' % key)
 
     def unregister(self, function_list):
         """Remove codec pairs from the registry based on keys.
         """
-        #raise NotImplementedError()
         target_list = []
         prefix_swap = {'_enc': '_dec', '_dec': '_enc'}
         for key in function_list:
@@ -351,11 +355,9 @@ if True:  # CONSTANTS (with code folding) ------------
     PFS_PAD = lib_name + '_padded'  # label = 'file is padded by opensslwrap'
     PAD_STR = 'pad='    # label means 'pad length = \d\d\d\d\d\d\d\d\d\d bytes'
     PAD_BYTE = b'\0'    # actual byte to use; value unimportant
-    if PAD_BYTE in PFS_PAD:
-        _fatal('padding byte must not be in the label %s' % PFS_PAD)
-    if len(PAD_BYTE) != 1:
-        _fatal('padding byte length must be 1')
-    PAD_LEN = len(PAD_STR + PFS_PAD) + 10 + 2
+    assert not PAD_BYTE in PFS_PAD
+    assert len(PAD_BYTE) == 1
+    PAD_LEN = len(PAD_STR + PFS_PAD) + 10 + 2  # len of info about padding
     # 10 = # digits in max file size, also works for 4G files
     #  2 = # extra bytes, one at end, one between PAD_STR and PFS_PAD labels
 
@@ -693,8 +695,9 @@ def pad(filename, size=16384, test=False, strict=True):
     to the max file size can thus cause pad / unpad failures.
 
     Special size values:
-       0 = remove any existing padding
-      -1 = remove padding if its present, raise PaddingError if not present
+
+       0 :  remove any existing padding
+       -1 : remove padding if its present, raise PaddingError if not present
     """
     name = 'pad: '
     size = int(size)
@@ -812,6 +815,7 @@ def encrypt(datafile, pubkeyPem, meta=True, date=True, keep=False,
     it to create a single file, which you can then `encrypt()`.
 
     :Parameters:
+
         `datafile`:
             The path (name) of the original plaintext file to be encrypted.
             NB: To encrypt a whole directory, first convert it to a single
@@ -831,15 +835,14 @@ def encrypt(datafile, pubkeyPem, meta=True, date=True, keep=False,
             Use False if the date is sensitive.
             File time-stamps are NOT obscured in any way.
         `keep`:
-            None | False  = remove original (unencrypted) & all intermediate
-                files (more secure)
-            True  = leave original file, delete intermediate (encrypted) files
-            'all' = leave all intermed files & orig (for testing purposes)
+            False = remove original (unencrypted) file
+            True  = leave original file
         `encMethod`:
             name of the function / method to use (currently only one option)
         `hmac_key`:
             key to use for HMAC-SHA256; if provided a HMAC will be generated
             and stored with the meta-data
+
     """
     name = 'encrypt: '
     logging.debug(name + 'start')
@@ -1846,6 +1849,16 @@ class Tests(object):
         assert extracted == secret
         # not working yet, due to encrypt() expect a pubkey, etc:
         # decrypt(encrypt(clearText, encMethod='_encrypt_rot13'))
+
+        # test whether can register just a _dec but not _enc function:
+        codec.unregister(rot13)
+        dec_rot13 = {'_decrypt_rot13': _decrypt_rot13}
+        codec.register(dec_rot13)
+        enc_rot13 = {'_encrypt_rot13': _encrypt_rot13}
+        codec.register(enc_rot13)  # OK because dec is already there
+        codec.unregister(rot13)
+        with pytest.raises(ValueError):
+            codec.register(enc_rot13)  # fails because dec is no longer there
 
     def test_8192_bit_keys(self):
         pub = 'pub_8192.pem'

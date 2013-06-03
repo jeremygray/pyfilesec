@@ -8,14 +8,14 @@ level of privacy, capable of protecting confidential information from casual
 inspection or accidental disclosure in a research setting. In addition,
 integrity assurance may be useful in archival and provenance applications. The
 main motivation for developing PyFileSec is research with human subjects (e.g.,
-in combination with PsychoPy), but the hope is that it will be more widely
-useful.
+in combination with PsychoPy or the Open Science Framework), but the hope is
+that it will be more widely useful.
 
 Several excellent Python packages are available for encryption. However, file
 security requires far more than just encryption. The main and potentially
 unique contribution of PyFileSec is that it aspires to provide secure /file
 management/ tools having a /low barrier to entry/. These considerations motivate
-many of the design choices, e.g., using openssl (often already installed)
+many of the design choices, e.g., using OpenSSL (often already installed)
 rather than PyCrypto (requires compiling) or GPG (requires set-up).
 
 The main functions provided include encryption: ``encrypt()``, ``decrypt()``,
@@ -31,15 +31,14 @@ an approach that is well-known and widely regarded). The aim is to provide an
 easily extensible framework for adding other encryption backends (e.g.,
 PyCrypto or GPG, should they be desired), without requiring changes to the API.
 
-The integrated test-suite passes on Mac OS (10.8.3) and Linux (CentOS 6.4 and
-Ubuntu 12.04). Windows support will be added soon, and Python 3.x support looks
-easy.
+The integrated test-suite passes on Mac OS (10.8.3) and Linux (CentOS 6.4,
+Debian squeeze, and Ubuntu 12.04), using 6 different versions of OpenSSL.
+Windows support will be added soon, and Python 3.x support looks easy (2to3
+passes now).
 
 Contributors
 -------------
 Jeremy R. Gray - package author
-    GPG public key: D934B0D7
-    Key fingerprint: 0D49 273C 2AA9 8514 3E31  5136 E96D 8449 D934 B0D7
 
 Thanks to
 ----------
