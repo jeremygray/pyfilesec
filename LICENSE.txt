@@ -5,10 +5,23 @@ PyFileSec
 Copyright (c) 2013, Jeremy R. Gray
 All rights reserved.
 
-PyFileSec is licensed under the GNU General Public License (version 3), with an
-additional exemption. For the complete text of that license see
-http://www.gnu.org/copyleft/gpl.html  The additional exemption is that
-compiling, linking, and/or using OpenSSL is allowed.
+PyFileSec is licensed under the GNU General Public License (version 3), with
+two additional exemptions. For the complete text of that license see
+http://www.gnu.org/copyleft/gpl.html  The first additional exemption is that
+compiling, linking, and/or using OpenSSL is allowed. The second exemption is
+that the copyright, licence terms, and following disclaimer be included in any
+and all derivative work.
+
+DISCLAIMER: THIS SOFTWARE IS PROVIDED AS IS, WITHOUT REPRESENTATION FROM THE
+COPYRIGHT HOLDER AS TO ITS FITNESS FOR ANY PURPOSE, AND WITHOUT WARRANTY OF ANY
+KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. YOU BEAR
+THE RISK OF USING IT. THE COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR ANY DAMAGES,
+INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WITH RESPECT
+TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE USE OF THE SOFTWARE, EVEN
+IF THE COPYRIGHT HOLDER HAS BEEN OR IS HEREAFTER ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+"""
 
 In basic terms, this allows you to use, redistribute, add to, modify, or even
 sell, PyFileSec or any of it's components. If you do release any such
