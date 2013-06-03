@@ -1,19 +1,19 @@
 ==========
-PyFileSec
+pyFileSec
 ==========
 
-PyFileSec provides robust yet easy-to-use tools for working with files that may
+pyFileSec provides robust yet easy-to-use tools for working with files that may
 contain sensitive information. The aim is to achieve a "industry standard"
 level of privacy, capable of protecting confidential information from casual
 inspection or accidental disclosure in a research setting. In addition,
 integrity assurance may be useful in archival and provenance applications. The
-main motivation for developing PyFileSec is research with human subjects (e.g.,
+main motivation for developing pyFileSec is research with human subjects (e.g.,
 in combination with PsychoPy or the Open Science Framework), but the hope is
 that it will be more widely useful.
 
 Several excellent Python packages are available for encryption. However, file
 security requires far more than just encryption. The main and potentially
-unique contribution of PyFileSec is that it aspires to provide secure /file
+unique contribution of pyFileSec is that it aspires to provide secure /file
 management/ tools having a /low barrier to entry/. These considerations motivate
 many of the design choices, e.g., using OpenSSL (often already installed)
 rather than PyCrypto (requires compiling) or GPG (requires set-up).

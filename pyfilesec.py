@@ -1,26 +1,28 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""PyFileSec: File privacy & integrity tools, e.g., for human-subjects research
+"""pyFileSec: File privacy & integrity tools, e.g., for human-subjects research
 """
 
-"""
-Copyright (c) Jeremy R. Gray, 2013
-Released under the GPLv3 licence with the additional exemptions that
-1) compiling, linking, and/or using OpenSSL are allowed, and
-2) the copyright, licence terms, and following disclaimer be included in any
-   and all derivative work.
+ # Copyright (c) Jeremy R. Gray, 2013
+ # Released under the GPLv3 licence with the additional exemptions that
+ # 1) compiling, linking, and/or using OpenSSL are allowed, and
+ # 2) the copyright, licence terms, and following disclaimer be included in any
+ #    and all derivative work.
 
-DISCLAIMER: THIS SOFTWARE IS PROVIDED AS IS, WITHOUT REPRESENTATION FROM THE
-COPYRIGHT HOLDER AS TO ITS FITNESS FOR ANY PURPOSE, AND WITHOUT WARRANTY OF ANY
-KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. YOU BEAR
-THE RISK OF USING IT. THE COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR ANY DAMAGES,
-INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WITH RESPECT
-TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE USE OF THE SOFTWARE, EVEN
-IF THE COPYRIGHT HOLDER HAS BEEN OR IS HEREAFTER ADVISED OF THE POSSIBILITY OF
-SUCH DAMAGES.
-"""
+ # DISCLAIMER: THIS SOFTWARE IS PROVIDED ``AS IS'', WITHOUT REPRESENTATION FROM
+ # THE COPYRIGHT HOLDER OR CONTRIBUTORS AS TO ITS FITNESS FOR ANY PURPOSE, AND
+ # WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT
+ # LIMITATION THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ # PARTICULAR PURPOSE. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+ # BE LIABLE FOR ANY DAMAGES, INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR
+ # CONSEQUENTIAL DAMAGES OF ANY NATURE, WITH RESPECT TO ANY CLAIM HOWEVER
+ # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING OUT OF OR IN
+ # CONNECTION WITH THE USE OF THE SOFTWARE, EVEN IF THE COPYRIGHT HOLDER OR
+ # CONTRIBUTORS HAVE BEEN OR ARE HEREAFTER ADVISED OF THE POSSIBILITY OF SUCH
+ # DAMAGES.
+
 
 __version__ = '0.1.3'
 __author__ = 'Jeremy R. Gray'
@@ -48,14 +50,14 @@ from base64 import b64encode, b64decode
 import getpass  # for RSA key-gen
 
 
-lib_name = 'PyFileSec'
+lib_name = 'pyFileSec'
 lib_path = abspath(__file__)
 usage = """%(name)s v%(version)s
 
   File privacy and integrity for psychology and human neuroscience research:
     encrypt, decrypt, sign, verify, rotate, generate passwords (RSA keys),
     secure delete, pad (to obscure file-size), & archive.
-    Requires Python 2.6 or 2.7, and OpenSSL 0.9.8 or higher.
+    Requires Python 2.6+, and OpenSSL 0.9.8 or higher.
 
   Module example:
     >>> import %(name)s as pfs
@@ -74,7 +76,7 @@ usage = """%(name)s v%(version)s
   Options:
     --help | -h : display this message
     --version   : print version and exit
-    --openssl=/path/to/openssl : openssl binary file to use for openssl calls
+    --openssl=/path/to/openssl : binary file to use for openssl calls
     --genrsa    : RSA key generation dialog
 
   Testing:
