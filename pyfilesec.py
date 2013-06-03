@@ -96,6 +96,10 @@ if python_version < '3.':
     input23 = raw_input
 else:
     input23 = input
+if sys.platform == 'win32':
+    get_time = time.clock
+else:
+    get_time = time.time
 
 
 class PublicKeyTooShortError(Exception):
@@ -214,7 +218,7 @@ def _setup_logging():
         """
         @staticmethod
         def debug(msg):
-            m = msgfmt % (time.time() - logging_t0, msg)
+            m = msgfmt % (get_time() - logging_t0, msg)
             print(m)
 
         # flatten log levels:
@@ -227,7 +231,7 @@ def _setup_logging():
         error = warning = exp = data = info = debug
 
     loggingID = lib_name
-    logging_t0 = time.time()
+    logging_t0 = get_time()
     log_sysCalls = True
     verbose = bool('--verbose' in sys.argv or '--test' in sys.argv or
                    '--debug' in sys.argv)
@@ -537,7 +541,7 @@ def wipe(filename, cmdList=()):
         file_in.seek(0)
 
     os.chmod(filename, 0o600)  # raises OSError if no file or cant change
-    t0 = time.time()
+    t0 = get_time()
 
     # Try to detect & inform about hardlinks:
     # srm will detect but not affect those links or the inode data
@@ -581,8 +585,8 @@ def wipe(filename, cmdList=()):
                 pass  # gives an OSError but has done something
         if not isfile(filename):
             if good_sys_call:
-                return pfs_WIPED, orig_links, time.time() - t0
-            return pfs_UNKNOWN, orig_links, time.time() - t0
+                return pfs_WIPED, orig_links, get_time() - t0
+            return pfs_UNKNOWN, orig_links, get_time() - t0
 
     # file should have been overwritten and removed; if not...
     logging.warning('wipe: falling through to 1 pass of zeros')
@@ -591,7 +595,7 @@ def wipe(filename, cmdList=()):
     shutil.rmtree(filename, ignore_errors=True)
     assert not isfile(filename)  # yikes, file remains
 
-    return pfs_UNKNOWN, orig_links, time.time() - t0
+    return pfs_UNKNOWN, orig_links, get_time() - t0
 
 
 def _get_permissions(filename):
@@ -633,8 +637,8 @@ def _getMetaData(datafile, dataEncFile, pubkey, encMethod,
         'max_file_size_limit': MAX_FILE_SIZE})
     if date:
         now = time.strftime("%Y_%m_%d_%H%M", time.localtime())
-        m = int(time.time() / 60)
-        s = (time.time() - m * 60)
+        m = int(get_time() / 60)
+        s = (get_time() - m * 60)
         now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
             # only want ms precision for testing, which can easily
             # generate two files within ms of each other
@@ -1582,7 +1586,7 @@ class Tests(object):
 
     def test_encrypt_decrypt_etc(self):
         # Lots of tests here (just to avoid re-generating keys a lot)
-        secretText = 'secret snippet %.6f' % time.time()
+        secretText = 'secret snippet %.6f' % get_time()
         datafile = 'cleartext unic\xcc\x88de.txt'
         with open(datafile, 'w+b') as fd:
             fd.write(secretText)
@@ -1745,7 +1749,7 @@ class Tests(object):
         # send encrypt and decrypt commands via command line
 
         datafile = 'cleartext unicöde.txt'
-        secretText = 'secret snippet %.6f' % time.time()
+        secretText = 'secret snippet %.6f' % get_time()
         with open(datafile, 'wb') as fd:
             fd.write(secretText)
         pub1, priv1, pphr1, __, __ = self._knownValues()
@@ -1789,9 +1793,9 @@ class Tests(object):
         for i in range(tw_reps):
             with open(tw_path, 'wb') as fd:
                 fd.write(b'\0')
-            t0 = time.time()
+            t0 = get_time()
             os.unlink(tw_path)
-            unlink_times.append(time.time() - t0)
+            unlink_times.append(get_time() - t0)
         avg_wipe = sum(wipe_times) / tw_reps
         avg_unlink = sum(unlink_times) / tw_reps
 
@@ -2030,7 +2034,7 @@ if __name__ == '__main__':
         global pytest
         import pytest
 
-        t0 = time.time()
+        t0 = get_time()
         ts = Tests()
         tests = [t for t in dir(ts) if t.startswith('test_')]
         for test in tests:
@@ -2039,7 +2043,7 @@ if __name__ == '__main__':
             except:
                 result = test + ' FAILED'
                 print(result)
-        logging.info("%.4fs for tests" % (time.time() - t0))
+        logging.info("%.4fs for tests" % (get_time() - t0))
     elif '--genrsa' in sys.argv:
         """Walk through key generation.
         """
