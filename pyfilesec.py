@@ -935,15 +935,7 @@ def _encrypt_rsa_aes256cbc(datafile, pubkeyPem, OPENSSL=''):
               '-pubin',
               RSA_PADDING, '-encrypt']
     else:
-        # openssl pkeyutl -encrypt -in message.txt -pubin -inkey
-        #   pubkey-ID.pem -out ciphertext-ID.bin -pkeyopt rsa_padding_mode:oeap
-        cmd_RSA = [OPENSSL, 'pkeyutl', '-encrypt',
-              #'-in', stdin
-              '-pubin',
-              '-inkey', pubkeyPem,
-              '-out', pwdFileRsa,
-              '-keyform', 'PEM',
-              '-pkeyopt', 'rsa_padding_mode:' + RSA_PADDING]
+        raise NotImplementedError
 
     # Define command to AES-256-CBC encrypt datafile using the password:
     cmd_AES = [OPENSSL, 'enc', '-aes-256-cbc',
@@ -1047,6 +1039,7 @@ def decrypt(dataEnc, privkeyPem, pphr='', outFile='', decMethod=None):
 
     To get the data back, need two files: `data.enc` and `privkey.pem`.
     If the private key has a passphrase, you'll need to provide that too.
+    `pphr` should be the passphrase itself (a string), not a file name.
 
     Works on a copy of data.enc, tries to decrypt, clean-up only those files.
     The original is never touched beyond making a copy.
@@ -1057,8 +1050,8 @@ def decrypt(dataEnc, privkeyPem, pphr='', outFile='', decMethod=None):
 
     priv = abspath(privkeyPem)
     dataEnc = abspath(dataEnc)
-    if pphr:
-        pphr = abspath(pphr)
+    if pphr and isfile(pphr):
+        pphr = open(abspath(pphr), 'rb').read()
     elif 'ENCRYPTED' in open(privkeyPem, 'r').read().upper():
         _fatal(name + 'missing passphrase (encrypted privkey)', DecryptError)
 
@@ -1136,21 +1129,13 @@ def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
                   '-in', pwdFileRsa,
                   '-inkey', privkeyPem]
         if pphr:
-            cmdRSA += ['-passin', 'file:' + pphr]
+            if isfile(pphr):
+                logging.warning(name + ': reading passphrase from file')
+                pphr = open(pphr, 'rb').read()
+            cmdRSA += ['-passin', 'stdin']
         cmdRSA += [RSA_PADDING, '-decrypt']
     else:
-        # pkeyutl only decrypts for me if no passphrase
-        # openssl pkeyutl -decrypt -in ciphertext-ID.bin -inkey privkey-ID.pem
-        #   -out received-ID.txt -pkeyopt rsa_padding_mode:oeap
-        #   -passin file:pphr.test
-        cmdRSA = [OPENSSL, 'pkeyutl', '-decrypt',
-                  '-in', pwdFileRsa,
-                  '-inkey', privkeyPem,
-                  #-out stdout
-                  '-pkeyopt', 'rsa_padding_mode:' + RSA_PADDING,
-                  ]
-        if pphr:
-            cmdRSA += ['-passin', 'file:' + pphr]
+        raise NotImplementedError
 
     # set up the command to decrypt the data using pwd:
     cmdAES = [OPENSSL, 'enc', '-d', '-aes-256-cbc', '-a',
@@ -1161,7 +1146,10 @@ def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
     # retrieve password (to RAM), then use to decrypt into dataDecrypted file:
     try:
         umask_restore = os.umask(UMASK)
-        pwd, se_RSA = _sysCall(cmdRSA, stderr=True)  # want se, parse below
+        if pphr and not isfile(pphr):
+            pwd, se_RSA = _sysCall(cmdRSA, stdin=pphr, stderr=True)  # want se
+        else:
+            pwd, se_RSA = _sysCall(cmdRSA, stderr=True)  # want se, parse below
         __,  se_AES = _sysCall(cmdAES, stdin=pwd, stderr=True)
     except:
         try:
@@ -1199,7 +1187,7 @@ def rotate(fileEnc, oldPriv, newPub, pphr=None,
     Returns the path to new encrypted file. A new meta-data entry is added
     alongside the existing one.
 
-    newPad will update to a new padding size (prior to re-encryption).
+    If `newPad` is given, the padding will be update prior to re-encryption.
     """
     logging.debug('rotate (beta): start')
     fileDec = decrypt(fileEnc, oldPriv, pphr=pphr)
@@ -1222,30 +1210,33 @@ def sign(filename, priv, pphr=None):
 
     Get a digest of the file, sign the digest, return base64-encoded signature.
     """
-    logging.debug('sign: start')
-    _sig = filename + '.sig'
+    name = 'sign'
+    logging.debug(name + ': start')
+    sig_out = filename + '.sig'
     if use_rsautl:
-        cmd_SIGN = [OPENSSL, 'dgst', '-sign', priv, '-out', _sig]
+        cmd_SIGN = [OPENSSL, 'dgst', '-sign', priv, '-out', sig_out]
         if pphr:
-            cmd_SIGN += ['-passin', 'file:' + pphr]
+            if isfile(pphr):
+                logging.warning(name + ': reading passphrase from file')
+                pphr = open(pphr, 'rb').read()
+            cmd_SIGN += ['-passin', 'stdin']
         cmd_SIGN += ['-keyform', 'PEM', filename]
     else:
-        # openssl dgst -sha256 -sign privpphr-ID.pem -out sign-ID.bin
-        #   -passin file:pphr.test -pkeyopt digest:sha256 message.txt
-        cmd_SIGN = [OPENSSL, 'dgst', '-sha256', '-sign', priv, '-out', _sig]
-        if pphr:
-            cmd_SIGN += ['-passin', 'file:' + pphr]
-        cmd_SIGN += ['-pkeyopt', 'digest:sha256', filename]
-    _sysCall(cmd_SIGN)
-    sig = open(_sig, 'rb').read()
+        raise NotImplementedError
+    if pphr:
+        _sysCall(cmd_SIGN, stdin=pphr)
+    else:
+        _sysCall(cmd_SIGN)
+    sig = open(sig_out, 'rb').read()
 
     return b64encode(sig)
 
 
 def verify(filename, pub, sig):
-    """Verify signature of filename using pubkey, to check file integrity.
+    """Verify signature of filename using pubkey; expects a base64-encoded sig.
     """
-    logging.debug('verifySig: start')
+    name = 'verify'
+    logging.debug(name + ': start')
     with NamedTemporaryFile() as sig_file:
         sig_file.write(b64decode(sig))
         sig_file.seek(0)
@@ -1253,10 +1244,7 @@ def verify(filename, pub, sig):
             cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform', 'PEM',
                          '-signature', sig_file.name, filename]
         else:
-            # openssl dgst -sha256 -verify pubkey-ID.pem
-            # -signature sign-ID.bin received-ID.txt
-            cmd_VERIFY = [OPENSSL, 'dgst', '-sha256', '-verify', pub,
-                         '-signature', sig_file.name, filename]
+            raise NotImplementedError
         result = _sysCall(cmd_VERIFY)
 
     return result in ['Verification OK', 'Verified OK']
@@ -1752,7 +1740,7 @@ class Tests(object):
         secretText = 'secret snippet %.6f' % get_time()
         with open(datafile, 'wb') as fd:
             fd.write(secretText)
-        pub1, priv1, pphr1, __, __ = self._knownValues()
+        pub1, priv1 = _genRsa(bits=1024)  # NO PASSPHRASE
         pathToSelf = abspath(__file__)
         datafile = abspath(datafile)
 
@@ -1764,7 +1752,7 @@ class Tests(object):
 
         # Decrypt:
         cmdLineCmd = [sys.executable, pathToSelf, 'decrypt', dataEnc,
-                      priv1, pphr1, '--openssl=' + OPENSSL]
+                      priv1, '--openssl=' + OPENSSL]
         dataEncDec_cmdline = _sysCall(cmdLineCmd).strip()
         assert os.path.isfile(dataEncDec_cmdline)
 
