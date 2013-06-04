@@ -354,7 +354,8 @@ if True:  # CONSTANTS (with code folding) ------------
     RSA_EXT = '.rsa'    # extension for RSA-encrypted AES-password ciphertext
     META_EXT = '.meta'  # extension for meta-data
 
-    # files larger than this size in bytes will not be encrypted:
+    # files larger than this size in bytes are likely fine; change to warning?
+    # 8G enc/dec ok: 64-bit mac, 8G RAM, 3G free, 32-bit python, openssl 0.9.8r
     MAX_FILE_SIZE = 2 ** 30  # 1G
 
     # file-length padding:
@@ -946,16 +947,19 @@ def _encrypt_rsa_aes256cbc(datafile, pubkeyPem, OPENSSL=''):
               '-out', dataFileEnc,
               '-pass', 'stdin']
 
+    # Generate a password:
     pwd = _printablePwd(nbits=256)
-    # whitespace can do bad things in a pwd:
-    assert not re.search('\s', pwd)
+    assert not re.search('\s', pwd)  # whitespace can do bad things here
+
     try:
-        so = _sysCall(cmd_RSA, stdin=pwd)  # stderr is logged in _sysCall
-        so = _sysCall(cmd_AES, stdin=pwd)
+        # encrypt the password:
+        _sysCall(cmd_RSA, stdin=pwd)
+        # encrypt the file, using password; takes a long time for large file:
+        _sysCall(cmd_AES, stdin=pwd)
+        # better to return immediately, del(pwd); using stdin blocks return
     finally:
         if 'pwd' in locals():
             del pwd  # might as well try
-            # can fail if manual interrupt when queried for passphrase
 
     # Rename the pwd_ciphertext file to match the datafile:
     os.rename(pwdFileRsa, pwdFileRsaNew)
@@ -1156,10 +1160,8 @@ def _decrypt_rsa_aes256cbc(dataFileEnc, pwdFileRsa, privkeyPem,
             pwd, se_RSA = _sysCall(cmdRSA, stderr=True)  # want se, parse below
         __,  se_AES = _sysCall(cmdAES, stdin=pwd, stderr=True)
     except:
-        try:
+        if isfile(dataDecrypted):
             wipe(dataDecrypted)
-        except ex as reason:
-            logging.error('failure during wipe: %s' % reason)
         _fatal('%s: Could not decrypt (exception in RSA or AES step)' % name,
                DecryptError)
     finally:
@@ -1563,18 +1565,32 @@ class Tests(object):
             assert sig1 in kwnSigs
 
     def test_max_size_limit(self):
+        # manual test: works with an actual 1G (MAX_FILE_SIZE) file as well
         global MAX_FILE_SIZE
         MAX_restore = MAX_FILE_SIZE
         good_max_file_size = bool(MAX_FILE_SIZE <= 2 ** 30)
         MAX_FILE_SIZE = 2 ** 8
         tmpmax = 'maxsize.txt'
         with open(tmpmax, 'w+b') as fd:
-            fd.write('abcd' * MAX_FILE_SIZE)  # ensure too large
+            fd.write(b'a' * (MAX_FILE_SIZE + 1))  # ensure too large
         with pytest.raises(ValueError):
             pad(tmpmax)
         with pytest.raises(ValueError):  # fake pubkey, just use tmpmax again
             encrypt(tmpmax, tmpmax)
         MAX_FILE_SIZE = MAX_restore
+
+    def test_big_file(self):
+        # create encrypt & decrypt 8G file; takes ~30G disk space, takes ~30min
+        pytest.skip()
+
+        _sysCall(['dd', 'if=/dev/zero', 'of=8gig.zeros',
+                  'bs=4096', 'count=2097152'])
+        pub, priv, pphr = _knownValues()[:3]
+        encrypt('8gig.zeros', pub)  # ~18 min
+        decrypt('8gig.enc', priv, pphr)
+        os.remove('8gig.enc')
+        os.remove('8gig.zeros')
+        os.remove('8gig.zeros' + META_EXT)
 
     def test_encrypt_decrypt_etc(self):
         # Lots of tests here (just to avoid re-generating keys a lot)
@@ -1697,9 +1713,7 @@ class Tests(object):
             fd.write('1')
         assert _zip_size(datafile) < 200  # 117 bytes
         global PAD_BYTE
-        PAD_BYTE = b'\1'
         pad(datafile, 16384)
-        PAD_BYTE = b'\0'
         assert os.stat(datafile)[stat.ST_SIZE] == 16384
         assert _zip_size(datafile) < 400  # fails, not small when compresses
 
