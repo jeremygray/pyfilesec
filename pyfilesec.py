@@ -947,6 +947,8 @@ def _encrypt_rsa_aes256cbc(datafile, pubkeyPem, OPENSSL=''):
               '-pass', 'stdin']
 
     pwd = _printablePwd(nbits=256)
+    # whitespace can do bad things in a pwd:
+    assert not re.search('\s', pwd)
     try:
         so = _sysCall(cmd_RSA, stdin=pwd)  # stderr is logged in _sysCall
         so = _sysCall(cmd_AES, stdin=pwd)
@@ -1589,11 +1591,21 @@ class Tests(object):
             fd.write(_printablePwd(180))
         pub1, priv1 = _genRsa(pubTmp1, prvTmp1, pphr1, testBits)
 
-        pubTmp2 = 'pubkey2 unic\xcc\x88de.pem'
-        prvTmp2 = 'prvkey2 unic\xcc\x88de.pem'
-        pphr2 = 'passphrs2 unic\xcc\x88de.txt'
+        pubTmp2 = 'pubkey2 unic\xcc\x88de.pem   '  # trailing whitespace in
+        prvTmp2 = 'prvkey2 unic\xcc\x88de.pem   '  # file names
+        pphr2 = 'passphrs2 unic\xcc\x88de.txt   '
         with open(pphr2, 'wb') as fd:
-            fd.write(_printablePwd(180))
+            fd.write('  ' + _printablePwd(180) + '   ')  # in actual passphrase
+        pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, testBits)
+
+        # test decrypt with GOOD passphrase, trailing whitespace:
+        dataEnc = encrypt(datafile, pub2)  # not keep=True
+        dataEncDec = decrypt(dataEnc, priv2, pphr=pphr2)
+        recoveredText = open(dataEncDec).read()
+        # file contents match:
+        assert recoveredText == secretText
+        # file name match: can FAIL due to utf-8 encoding issues
+        assert os.path.split(dataEncDec)[-1] == datafile
 
         # test decrypt with GOOD passphrase:
         dataEnc = encrypt(datafile, pub1)

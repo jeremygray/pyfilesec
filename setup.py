@@ -10,7 +10,6 @@ setup(
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
     py_modules=['pyfilesec'],
-    #packages=['pyfilesec'],
     classifiers=['Development Status :: 3 - Alpha',
                  'Programming Language :: Python :: 2.6',
                  'Programming Language :: Python :: 2.7',
@@ -24,8 +23,7 @@ setup(
                  'Topic :: Security'
                  ],
     keywords=['encryption', 'security', 'privacy', 'integrity', 'human subjects', 'research'],
-    url='https://github.com/jeremygray/pyfilesec',
-    license='LICENSE.txt',
+    url='https://github.com/jeremygray/pyFileSec',
     description='File privacy & integrity tools, e.g., for human-subjects research',
     long_description=open('README.txt').read(),
     install_requires=['ctypes'],

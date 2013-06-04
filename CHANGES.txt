@@ -3,10 +3,11 @@ Version 0.1
 
 v0.1.3
 ---------------------
-* FIX allow a _decrypt without a matching _encrypt function in codec registry
+* FIXED allow a _decrypt without a matching _encrypt function in codec registry
 * IMPROVED RSA key generation
 * IMPROVED use time.clock on win32
-* ADD more tests
+* ADDED more tests
+* IMPROVED send passphrases through stdin rather than require a file
 
 v0.1.2
 ---------------------
