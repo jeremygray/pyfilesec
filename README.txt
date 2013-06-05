@@ -23,7 +23,7 @@ The main functions provided include encryption: ``encrypt()``, ``decrypt()``,
 obscure file length: ``pad()``, securely remove files from disk: ``wipe()``,
 combine a set of files into a single archive file prior to encryption:
 ``archive()``, and display the meta-data associated with an encrypted file.
-Command-line / shell-script usage is also supported.
+Large files and command-line / shell-script usage are also supported.
 
 Public-key (asymmetric) encryption is used for security and flexibility,
 currently relying on calls to OpenSSL for all cryptography (RSA + AES256 --
@@ -31,10 +31,9 @@ an approach that is well-known and widely regarded). The aim is to provide an
 easily extensible framework for adding other encryption backends (e.g.,
 PyCrypto or GPG, should they be desired), without requiring changes to the API.
 
-The integrated test-suite passes on Mac OS (10.8.3) and Linux (CentOS 6.4,
-Debian squeeze, and Ubuntu 12.04), using 6 different versions of OpenSSL.
-Windows support will be added soon, and Python 3.x support looks easy (2to3
-passes now).
+The integrated test-suite passes on Mac OS (10.8) and Linux (CentOS 6.4,
+Debian squeeze, and Ubuntu 12.04), using 7 different versions of OpenSSL.
+Python 3.x support looks easy (2to3 passes now). Windows support forthcoming.
 
 Contributors
 -------------

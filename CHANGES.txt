@@ -4,9 +4,9 @@ Version 0.1
 v0.1.3
 ---------------------
 * FIXED allow a _decrypt without a matching _encrypt function in codec registry
-* IMPROVED RSA key generation
+* IMPROVED genRsaKeys()
 * IMPROVED use time.clock on win32
-* ADDED more tests; manual enc + dec of an 8G file went smoothly
+* ADDED more tests; 8G files ok
 * IMPROVED send passphrases through stdin rather than require a file
 
 v0.1.2
