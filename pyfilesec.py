@@ -493,21 +493,6 @@ def make_archive(paths, name='', keep=True):
     return name
 
 
-def _zip_size(paths, name=''):
-    """Make a .zip file and return its size.
-    """
-    if isinstance(paths, str):
-        paths = [paths]
-    if not name:
-        name = os.path.splitext(paths[0])[0] + '.zip'
-    zip_fd = zipfile.ZipFile(name, "w")
-    for p in paths:
-        zip_fd.write(p)
-    zip_fd.close()
-
-    return os.stat(name)[stat.ST_SIZE]
-
-
 def wipe(filename, cmdList=()):
     """Try to secure-delete a file; returns (status, link count, time taken).
 
@@ -1687,22 +1672,25 @@ class Tests(object):
         dataDec = decrypt(new_enc, priv1, pphr1,
                           dec_method='_decrypt_rsa_aes256cbc')
 
-    def X_test_enc_size(self):
-        pytest.skip()
-
-        # idea: check that encrypted data can't be compressed
+    def test_compressability(self):
+        # idea: check that encrypted is not compressable, cleartext is
         datafile = 'test_size'
         with open(datafile, 'wb') as fd:
-            fd.write('1')
-        assert _zip_size(datafile) < 200  # 117 bytes
-        global PAD_BYTE
-        pad(datafile, 16384)
-        assert os.stat(datafile)[stat.ST_SIZE] == 16384
-        assert _zip_size(datafile) < 400  # fails, not small when compresses
+            fd.write(b'1')
+        size_orig = getsize(datafile)
+        assert size_orig == 1
 
+        pad2len = 16384
+        pad(datafile, pad2len)  # should be very compressable, mostly padding
+        size_pad = getsize(datafile)
+        assert size_pad == pad2len
+        arc = make_archive(datafile)  # tgz compression
+        size_arc = getsize(arc)
+        assert 150 < size_arc < 200 < pad2len // 8
         pub = self._knownValues()[0]
-        dataEnc = encrypt(datafile, pub, keep=True)
-        assert _zip_size(datafile) < _zip_size(dataEnc)
+        enc = encrypt(datafile, pub)  # should not be compressable
+        size_enc = getsize(enc)
+        assert pad2len * 1.02 < size_enc < pad2len * 1.20  # 1.093
 
     def test_umask(self):
         assert PERMISSIONS == 0o600
