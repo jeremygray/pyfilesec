@@ -345,21 +345,21 @@ def _fatal(msg, err=ValueError):
     raise err(msg)
 
 
-if True:  # CONSTANTS (with code folding) ------------
+# CONSTANTS ------------ (with code folding) ------------
+if True:
     RSA_PADDING = '-oaep'  # actual arg for openssl rsautl in encrypt, decrypt
 
-    ARCHIVE_EXT = '.enc'   # extension for for tgz of AES, PWD.RSA, META
-    AES_EXT = '.aes256'  # extension for AES encrypted data file
-    PWD_EXT = 'pwd'     # extension for file containing password
-    RSA_EXT = '.rsa'    # extension for RSA-encrypted AES-password ciphertext
-    META_EXT = '.meta'  # extension for meta-data
+    ARCHIVE_EXT = '.enc'  # extension for for tgz of AES, PWD.RSA, META
+    AES_EXT = '.aes256'   # extension for AES encrypted data file
+    RSA_EXT = '.pwdrsa'   # extension for RSA-encrypted AES-pwd (ciphertext)
+    META_EXT = '.meta'    # extension for meta-data
 
-    # files larger than this size in bytes are likely fine; change to warning?
-    # 8G enc/dec ok: 64-bit mac, 8G RAM, 3G free, 32-bit python, openssl 0.9.8r
-    MAX_FILE_SIZE = 2 ** 30  # 1G
+    # warn that operations will take a while, check disk space, ...
+    LRG_FILE_WARN = 2 ** 24  # 17M; used in tests but not implemented elsewhere
+    MAX_FILE_SIZE = 2 ** 33  # 8G; larger maybe fine, untested, will affect pad
 
     # file-length padding:
-    PFS_PAD = lib_name + '_padded'  # label = 'file is padded by opensslwrap'
+    PFS_PAD = lib_name + '_padded'  # label = 'file is padded'
     PAD_STR = 'pad='    # label means 'pad length = \d\d\d\d\d\d\d\d\d\d bytes'
     PAD_BYTE = b'\0'    # actual byte to use; value unimportant
     assert not PAD_BYTE in PFS_PAD
@@ -376,6 +376,7 @@ if True:  # CONSTANTS (with code folding) ------------
     _hmac_trans_36 = "".join(chr(x ^ 0x36) for x in range(256))
     _hmac_blocksize = hashlib.sha256().block_size
 
+    whitespace_re = re.compile('\s')
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
 
     # wipe return codes:
@@ -911,7 +912,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub_pem, OPENSSL=''):
 
     # Define file paths:
     data_enc = _uniq_file(abspath(datafile) + AES_EXT)
-    pwd_rsa = _uniq_file(data_enc + PWD_EXT + RSA_EXT)
+    pwd_rsa = _uniq_file(data_enc + RSA_EXT)
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     if use_rsautl:
@@ -933,7 +934,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub_pem, OPENSSL=''):
 
     # Generate a password, ensure no whitespace (should never happen):
     pwd = _printable_pwd(nbits=256)
-    assert not re.search('\s', pwd)
+    assert not whitespace_re.search(pwd)
     try:
         # encrypt the password:
         _sysCall(cmd_RSA, stdin=pwd)
@@ -978,7 +979,7 @@ def _unpack(data_enc):
     for fname in fileList:
         if fname.endswith(AES_EXT):
             data_aes = os.path.join(tmp_dir, fname)
-        elif fname.endswith(PWD_EXT + RSA_EXT):
+        elif fname.endswith(RSA_EXT):
             pwdFileRsa = os.path.join(tmp_dir, fname)
         elif fname.endswith(META_EXT):
             meta_file = os.path.join(tmp_dir, fname)
@@ -1558,17 +1559,31 @@ class Tests(object):
         MAX_FILE_SIZE = MAX_restore
 
     def test_big_file(self):
-        # create encrypt & decrypt 8G file; takes ~30G disk space, takes ~30min
-        pytest.skip()
+        # create encrypt & decrypt 4G file; takes ~15G disk space, ~13min
 
-        _sysCall(['dd', 'if=/dev/zero', 'of=8gig.zeros',
-                  'bs=4096', 'count=2097152'])
-        pub, priv, pphr = _knownValues()[:3]
-        encrypt('8gig.zeros', pub)  # ~18 min
-        decrypt('8gig.enc', priv, pphr)
-        os.remove('8gig.enc')
-        os.remove('8gig.zeros')
-        os.remove('8gig.zeros' + META_EXT)
+        bs = 1024  # block size
+        #count = MAX_FILE_SIZE // (2 * bs)  # 4G total size
+        count = 1 + LRG_FILE_WARN // bs  # to test that warnings are triggered
+        #count = 1  # uncomment to test the test
+        size = bs * count  # bytes
+
+        # make a big ol' file:
+        try:
+            orig = 'bigfile.zeros'
+            enc = 'bigfile' + ARCHIVE_EXT
+            _sysCall(['dd', 'if=/dev/zero', 'of=%s' % orig,
+                      'bs=%d' % bs, 'count=%d' % count])
+            pub, priv, pphr = self._knownValues()[:3]
+            encrypt('%s' % orig, pub)
+            bigfile_size = getsize(enc)
+            decrypt(enc, priv, pphr)
+            bigfile_zeros_size = getsize(orig)
+        except:
+            os.remove('%s' % orig)
+            os.remove(enc)
+            os.remove('%s%s' % (orig, META_EXT))
+        assert bigfile_size > size
+        assert bigfile_zeros_size == size
 
     def test_encrypt_decrypt_etc(self):
         # Lots of tests here (just to avoid re-generating keys a lot)
