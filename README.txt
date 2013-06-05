@@ -43,3 +43,4 @@ Jeremy R. Gray - package author
 Thanks to
 ----------
 Michael Stone - awesome code review
+Sol Simpson - Windows compatibility
