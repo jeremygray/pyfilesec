@@ -104,20 +104,23 @@ else:
     get_time = time.time
 
 
-class PublicKeyTooShortError(Exception):
+class PyFileSecError(Exception):
+    """Base exception for pyFileSec errors."""
+
+class PublicKeyTooShortError(PyFileSecError):
     '''Error to indicate that a public key is not long enough.'''
 
-class DecryptError(Exception):
-    '''Error to signify that decryption failed.'''
+class DecryptError(PyFileSecError):
+    '''Error to indicate that decryption failed.'''
 
-class PrivateKeyError(Exception):
-    '''Error to signify that loading a private key failed.'''
+class PrivateKeyError(PyFileSecError):
+    '''Error to indicate that loading a private key failed.'''
 
-class InternalFormatError(Exception):
-    '''Error to indicate bad file name inside .tgz file.'''
+class InternalFormatError(PyFileSecError):
+    '''Error to indicate bad format or file name inside archive file.'''
 
-class PaddingError(Exception):
-    '''Error to indicate bad padding.'''
+class PaddingError(PyFileSecError):
+    '''Error to indicate bad file padding.'''
 
 
 class PFSCodecRegistry(object):
@@ -213,9 +216,20 @@ class PFSCodecRegistry(object):
         return fxn_name in self._functions
 
 
+class Umask(object):
+    def __init__(self, fxn):
+        self.fxn = fxn
+
+    def __call__(self, *args, **kwargs):
+        restore = os.umask(UMASK)
+        val = self.fxn(*args, **kwargs)
+        os.umask(restore)
+        return val
+
+
 def _setup_logging():
     # Logging:  stderr, or psychopy.logging if we're a PsychoPy module
-    class _log2stderr(object):
+    class _log2stdout(object):
         """Print all logging messages, regardless of log level.
         """
         @staticmethod
@@ -243,7 +257,7 @@ def _setup_logging():
         logging = _no_logging()
     else:
         msgfmt = "%.4f  " + loggingID + ": %s"
-        logging = _log2stderr()
+        logging = _log2stdout()
         if __name__ != '__main__':
             try:
                 from psychopy import logging
@@ -386,7 +400,7 @@ if True:
 
     # decrypted file status:
     PERMISSIONS = 0o600  # for decrypted file, no execute, no group, no other
-    UMASK = 0o777 - PERMISSIONS
+    UMASK = 0o077  # need u+x permission for diretories
 
 
 def _entropy_check():
@@ -465,6 +479,7 @@ def _printable_pwd(nbits=256):
     return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
 
 
+@Umask
 def make_archive(paths, name='', keep=True):
     """Make a tgz file from a list of paths, set permissions. Directories ok.
 
@@ -477,7 +492,6 @@ def make_archive(paths, name='', keep=True):
         paths = [paths]
     if not name:
         name = os.path.splitext(paths[0])[0].strip(os.sep) + '.tgz'
-    umask_restore = os.umask(UMASK)
     assert not isfile(name)
     tar_fd = tarfile.open(name, "w:gz")
     for p in paths:
@@ -488,7 +502,6 @@ def make_archive(paths, name='', keep=True):
             except OSError:
                 os.unlink(p)
     tar_fd.close()
-    os.umask(umask_restore)
     os.chmod(name, PERMISSIONS)  # redundant, but not enough on win?
 
     return name
@@ -646,7 +659,7 @@ def _get_metadata(datafile, dataEncFile, pubkey, encMethod,
 def load_metadata(md_file):
     """Convenience function to read meta-data from a file, return it as a dict.
     """
-    return json.load(open(md_file, 'r+b'))
+    return json.load(open(md_file, 'rb'))
 
 
 def log_metadata(md, log=True):
@@ -788,6 +801,7 @@ def _unpad_strict(filename, test=False):
     return getsize(filename)
 
 
+@Umask
 def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
             enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
     """Encrypt a file using AES-256, encrypt the password with RSA public-key.
@@ -904,6 +918,7 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
     return abspath(archive)
 
 
+@Umask
 def _encrypt_rsa_aes256cbc(datafile, pub_pem, OPENSSL=''):
     """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
     """
@@ -969,9 +984,7 @@ def _unpack(data_enc):
 
     # Extract:
     tmp_dir = mkdtemp()
-    umask_restore = os.umask(UMASK)
     tar.extractall(path=tmp_dir)  # extract from .tgz file
-    os.umask(umask_restore)
     tar.close()
 
     fileList = os.listdir(tmp_dir)
@@ -1023,6 +1036,7 @@ def _get_dec_method(meta_file, dec_method):
     return dec_method
 
 
+@Umask
 def decrypt(data_enc, priv_pem, pphr='', outFile='', dec_method=None):
     """Decrypt a file that was encoded using `encrypt()`.
 
@@ -1085,6 +1099,7 @@ def decrypt(data_enc, priv_pem, pphr='', outFile='', dec_method=None):
     return abspath(clear_text)
 
 
+@Umask
 def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
                            pphr=None, outFile='', OPENSSL=''):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
@@ -1122,7 +1137,6 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
 
     # retrieve password (to RAM), then use to decrypt the data file:
     try:
-        umask_restore = os.umask(UMASK)
         if pphr and not isfile(pphr):
             pwd, se_RSA = _sysCall(cmdRSA, stdin=pphr, stderr=True)  # want se
         else:
@@ -1137,7 +1151,6 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
         if 'pwd' in locals():
             del pwd  # might as well try
             # e.g., manual interrupt when queried for passphrase
-        os.umask(umask_restore)
 
     if se_RSA:
         if 'unable to load Private Key' in se_RSA:
@@ -1155,6 +1168,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
     return abspath(data_dec)
 
 
+@Umask
 def rotate(data_enc, old_priv, new_pub, pphr=None,
            keep=None, hmac_key=None, new_pad=None):
     """Swap old encryption for new (decrypt-then-re-encrypt).
@@ -1225,6 +1239,8 @@ def verify(filename, pub, sig):
     return result in ['Verification OK', 'Verified OK']
 
 
+# likely to remove this code, and refactor tests to use _genRsa2 (no file):
+@Umask
 def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     """For TESTS: generate new RSA pub and priv keys, return paths to files.
 
@@ -1243,34 +1259,31 @@ def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
             cmdEXTpub += ['-passin', 'file:' + pphr]
         _sysCall(cmdEXTpub)
     else:
-        # NOT TESTED
-        # Generate key pairs with passphrases from file:
-        #  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
-        #       -pkeyopt rsa_keygen_pubexp:3 -out privkey-ID.pem
-        #  openssl pkey -in privkey-ID.pem -des3 -out privpphr-ID.pem
-        #       -passout file:pphr.test
-        # Or just one command:
-        # openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
-        #       -pkeyopt rsa_keygen_pubexp:3 -out privpphr-ID.pem
-        #       -des3 -pass file:pphr.test
-        cmdGEN = [OPENSSL, 'genpkey', '-algorithm', 'RSA',
-                  '-pkeyopt', 'rsa_keygen_bits:' + str(bits),
-                  '-pkeyopt', 'rsa_keygen_pubexp:3',  # 3 OK if pad=OAEP
-                  '-out', priv]
-        _sysCall(cmdGEN)
+        raise NotImplementedError
 
+    return abspath(pub), abspath(priv)
+
+
+@Umask
+def _genRsa2(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
+    """Generate new RSA pub and priv keys, return paths to files.
+
+    pphr is expected to be in a string here.
+    """
+    if use_rsautl:
+        # Generate priv key:
+        cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
         if pphr:
-            cmdENC = [OPENSSL, 'pkey', '-in', priv, '-des3',  '-out',
-                      priv + '.des3', '-passout', 'file:' + pphr]
-            _sysCall(cmdENC)
-        if pphr:
-            assert 'ENCRYPTED' in open(priv + '.des3').read()
+            cmdGEN += ['-aes256', '-passout', 'stdin']
+        _sysCall(cmdGEN + [str(bits)], stdin=pphr)
 
         # Extract pub from priv:
-        cmdEXTpub = [OPENSSL, 'pkey', '-in', priv, '-out', pub, '-pubout']
+        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
         if pphr:
-            cmdEXTpub += ['-passin', 'file:' + pphr]
-        _sysCall(cmdEXTpub)
+            cmdEXTpub += ['-passin', 'stdin']
+        _sysCall(cmdEXTpub, stdin=pphr)
+    else:
+        raise NotImplementedError
 
     return abspath(pub), abspath(priv)
 
@@ -1338,23 +1351,10 @@ def genRsaKeys():
     print(msg)
 
     try:
-        umask_restore = os.umask(UMASK)
-        # Generate priv key:
-        cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
-        if pphr:
-            cmdGEN += ['-aes256', '-passout', 'stdin']
-        _sysCall(cmdGEN + [str(bits)], stdin=pphr)
-
-        # Extract pub from priv:
-        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
-        if pphr:
-            cmdEXTpub += ['-passin', 'stdin']
-        _sysCall(cmdEXTpub, stdin=pphr)
+        _genRsa2(pub, priv, pphr, bits)
     except:
         _cleanup('\n  > Removing temp files. Exiting. <')
         raise
-    finally:
-        os.umask(umask_restore)
 
     pub_msg = 'public key:  ' + pub
     print(pub_msg)
@@ -1717,12 +1717,12 @@ class Tests(object):
         size_enc = getsize(enc)
         assert pad2len * 1.02 < size_enc < pad2len * 1.20  # 1.093
 
-    def test_umask(self):
+    def test_permissions(self):
         assert PERMISSIONS == 0o600
-        assert UMASK == 0o777 - PERMISSIONS
+        assert UMASK == 0o077
 
         filename = 'umask_test'
-        pub, priv, pphr, __, __ = self._knownValues()
+        pub, priv, pphr = self._knownValues()[:3]
         umask_restore = os.umask(0o000)
         with open(filename, 'wb') as fd:
             fd.write('\0')
