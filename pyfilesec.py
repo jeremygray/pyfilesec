@@ -1450,6 +1450,16 @@ class Tests(object):
         return (abspath(pub), abspath(priv), abspath(pphr),
                 bits, (kwnSig0p9p8, kwnSig1p0))
 
+    def test_stdin(self):
+        # passwords are typically sent to openssl via stdin
+        msg = 'yello'
+        if sys.platform == 'win32':
+            cmd = ['findstr', '"' + msg + '"']
+        else:
+            cmd = ['grep', msg]
+        greeting = _sysCall(cmd, stdin=msg)
+        assert greeting == msg
+
     def test_codec_registry(self):
         # Test basic set-up:
         test_codec = PFSCodecRegistry()
