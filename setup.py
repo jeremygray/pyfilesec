@@ -26,5 +26,4 @@ setup(
     url='https://github.com/jeremygray/pyFileSec',
     description='File privacy & integrity tools, e.g., for human-subjects research',
     long_description=open('README.txt').read(),
-    #install_requires=['ctypes'],
 )

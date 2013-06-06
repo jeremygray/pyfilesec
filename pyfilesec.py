@@ -1863,23 +1863,17 @@ class Tests(object):
 
     def test_wipe_links(self):
         # Test whether can detect multiple links to a file when wipe()ing it:
-        if sys.platform in ['win32', 'cygwin']:
-            # from http://www.gossamer-threads.com/lists/python/dev/517504
-            def _CreateHardLink(src, dst):
-                import ctypes
-                if not ctypes.windll.kernel32.CreateHardLinkA(dst, src, 0):
-                    #pytest.skip()  # os.link not available on Windows
-                    raise OSError  # could not make os.link on win32
-            if not hasattr(os, 'link'):
-                os.link = _CreateHardLink
-
         tw_path = 'tmp_test_wipe'
         with open(tw_path, 'wb') as fd:
             fd.write(b'\0')
         assert isfile(tw_path)  # need a file or can't test
         numlinks = 2
         for i in range(numlinks):
-            os.link(tw_path, tw_path + 'hardlink' + str(i))
+            new = tw_path + 'hardlink' + str(i)
+            if sys.platform in ['win32']:
+                _sys_call(['fsutil', 'hardlink', 'create', new, tw_path])
+            else:
+                os.link(tw_path, new)
 
         hardlinks = os.stat(tw_path)[stat.ST_NLINK]
         code, links, __ = wipe(tw_path)
