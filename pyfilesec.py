@@ -461,6 +461,8 @@ def _sha256(filename, prepend='', raw=False):
 
 def hmac_sha256(key, filename):
     """Return a hash-based message authentication code (HMAC), using SHA256.
+
+    The key is a string value.
     """
     # openssl is 100x slower than pure python for small files
     # use openssl anyway for consistency
@@ -635,8 +637,7 @@ def _uniq_file(filename):
     return filename
 
 
-def _get_metadata(datafile, dataEncFile, pubkey, encMethod,
-                 date=True, hmac_key=None):
+def _get_metadata(datafile, data_enc, pub, enc_method, date=True, hmac=None):
     """Return info about an encryption context, as a {date-now: {info}} dict.
 
     If `date` is True, date-now is numerical date of the form
@@ -644,16 +645,17 @@ def _get_metadata(datafile, dataEncFile, pubkey, encMethod,
     If `date` is False, date-now is '(date-time suppressed)'. The date values
     are also keys to the meta-data dict, and their format is chosen so that
     they will sort to be in chronological order, even if the original
-    encryption date was suppressed (it comes first).
+    encryption date was suppressed (it comes first). Only do `date=False` for
+    the first initial encryption, not for rotation.
     """
 
     md = {'clear-text-file': abspath(datafile),
-        'sha256 of encrypted file': '%s' % _sha256(dataEncFile)}
-    if hmac_key:
-        hmac = hmac_sha256(hmac_key, dataEncFile)
-        md.update({'hmac-sha256 of encrypted file': hmac})
-    md.update({'sha256 of public key': _sha256(pubkey),
-        'encryption method': lib_name + '.' + encMethod,
+        'sha256 of encrypted file': '%s' % _sha256(data_enc)}
+    if hmac:
+        hmac_val = hmac_sha256(hmac, data_enc)
+        md.update({'hmac-sha256 of encrypted file': hmac_val})
+    md.update({'sha256 of public key': _sha256(pub),
+        'encryption method': lib_name + '.' + enc_method,
         'sha256 of lib %s' % lib_name: _sha256(lib_path),
         'rsa padding': RSA_PADDING,
         'max_file_size_limit': MAX_FILE_SIZE})
