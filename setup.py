@@ -4,8 +4,8 @@
 from distutils.core import setup
 
 setup(
-    name='pyFileSec',
-    version='0.1.3',
+    name='PyFileSec',
+    version='0.1.4',
     author='Jeremy R. Gray',
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
@@ -26,5 +26,5 @@ setup(
     url='https://github.com/jeremygray/pyFileSec',
     description='File privacy & integrity tools, e.g., for human-subjects research',
     long_description=open('README.txt').read(),
-    install_requires=['ctypes'],
+    #install_requires=['ctypes'],
 )

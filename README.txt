@@ -37,9 +37,10 @@ Python 3.x support looks easy (2to3 passes now). Windows support forthcoming.
 
 Contributors
 -------------
-Jeremy R. Gray - package author
+Jeremy R. Gray - package author, gpg key D934B0D7
 
 Thanks to
 ----------
 Michael Stone - awesome code review
+
 Sol Simpson - Windows compatibility

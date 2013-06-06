@@ -4,4 +4,10 @@ LICENSE.txt
 README.txt
 pyfilesec.py
 setup.py
-docs/pyfilesec.rst
+docs/build/html/_sources/faq.txt
+docs/build/html/_sources/index.txt
+docs/build/html/_sources/old_notes.txt
+docs/build/html/_sources/pyfilesec.txt
+docs/source/faq.rst
+docs/source/index.rst
+docs/source/old_notes.rst
