@@ -1407,6 +1407,7 @@ class Tests(object):
         global pytest
         import pytest
 
+        self.start_dir = os.getcwd()
         tmp = '.__öpensslwrap test__'
         shutil.rmtree(tmp, ignore_errors=True)
         os.mkdir(tmp)
@@ -1420,6 +1421,8 @@ class Tests(object):
         except:
             myhome = '/home/jgray/.__öpensslwrap test__'
             shutil.rmtree(myhome, ignore_errors=False)
+        finally:
+            os.chdir(self.start_dir)
 
     def _known_values(self):
         """Return tmp files with known keys, data, signature for testing.
