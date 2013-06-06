@@ -217,6 +217,8 @@ class PFSCodecRegistry(object):
 
 
 class Umask(object):
+    """Decorator for functions that create files.
+    """
     def __init__(self, fxn):
         self.fxn = fxn
 
@@ -248,9 +250,7 @@ def _setup_logging():
 
     loggingID = lib_name
     logging_t0 = get_time()
-    log_sysCalls = True
-    verbose = bool('--verbose' in sys.argv or '--test' in sys.argv or
-                   '--debug' in sys.argv)
+    verbose = bool('--verbose' in sys.argv or '--debug' in sys.argv)
     if '--verbose' in sys.argv:
         del(sys.argv[sys.argv.index('--verbose')])
     if not verbose:
@@ -263,16 +263,15 @@ def _setup_logging():
                 from psychopy import logging
             except:
                 pass
-    return logging, loggingID, logging_t0, log_sysCalls
+    return logging, loggingID, logging_t0
 
 
-def _sysCall(cmdList, stderr=False, stdin=''):
+def _sys_call(cmdList, stderr=False, stdin=''):
     """Run a system command via subprocess, return stdout [, stderr].
 
     stdin is optional string to pipe in. Will always log a non-empty stderr.
     """
-    if log_sysCalls:
-        logging.debug('_sysCall: %s' % (' '.join(cmdList)))
+    logging.debug('_sys_call: %s' % (' '.join(cmdList)))
 
     proc = subprocess.Popen(cmdList, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -288,6 +287,40 @@ def _sysCall(cmdList, stderr=False, stdin=''):
 def _get_openssl_info():
     """Find, check, and report info about the OpenSSL binary on this system.
     """
+    if sys.platform in ['win32']:
+        #  -- untested, just a guess at this point --
+        # use a bat file for openssl.cfg; create .bat if not found or broken:
+        libdir = os.path.split(os.path.abspath(__file__))[0]
+        bat_name = '_runopenssl.bat'
+        bat_file = os.path.join(libdir, bat_name)
+        if os.path.exists(bat_file):
+            test = _sys_call([bat_file, 'version'])
+            if not test.startswith('OpenSSL'):
+                os.unlink(bat_file)  # to trigger error warning
+        if not os.path.exists(bat_file):
+            logging.info('no working %s file; trying to recreate' % bat_name)
+            default = 'C:\\OpenSSL-Win32\\bin\\openssl.exe'
+            bat_str = """@echo off
+                set PATH=XXOPENSSL_PATHXX;%PATH%
+                set OPENSSL_CONF=XX-OPENSSL_PATH-XX\\openssl.cfg
+                START "" /b /wait openssl.exe %*""".replace('    ', '')
+            default_bat = bat_str.replace('XXOPENSSL_PATHXX', default)
+            with open(bat_file, 'wb') as fd:
+                fd.write(default_bat)
+            test = _sys_call([bat_file, 'version'])
+            if not test.startswith('OpenSSL'):
+                # `where` can take a while, avoid if at all possible
+                cmd = ['where', '/R', 'C:\\', 'openssl.exe']
+                where_out = _sys_call(cmd)
+                guess = where_out.splitlines()[0]
+                where_bat = bat_str.replace('XXOPENSSL_PATHXX', guess)
+                with open(bat_file, 'wb') as fd:
+                    fd.write(where_bat)
+                test = _sys_call([bat_file, 'version'])
+                if not test.startswith('OpenSSL'):
+                    os.unlink(bat_file)  # to trigger error warning
+            OPENSSL = bat_file
+        logging.info('using .bat file for OpenSSL: %s' % bat_file)
     for i, arg in enumerate(sys.argv):
         if arg.startswith('--openssl='):
             # spaces in path ok if parses as one argument
@@ -297,18 +330,12 @@ def _get_openssl_info():
             break
     else:
         if sys.platform not in ['win32']:
-            OPENSSL = _sysCall(['which', 'openssl'])
+            OPENSSL = _sys_call(['which', 'openssl'])
             if OPENSSL not in ['/usr/bin/openssl']:
                 msg = 'unexpected location for openssl binary: %s' % OPENSSL
                 logging.warning(msg)
         else:
-            guess = _sysCall(['where', '/r', 'C:\\', 'openssl'])  # vista+
-            if not (isfile(guess) and guess.endswith('openssl.exe')):
-                guess = 'C:/OpenSSL-Win32/bin/openssl.exe'
-                if not isfile(guess):
-                    cwd = os.path.split(os.path.abspath(__file__))[0]
-                    guess = os.path.join(cwd, os.path.abspath('openssl.exe'))
-            OPENSSL = guess
+            OPENSSL = bat_file
     if not isfile(OPENSSL):
         if sys.platform not in ['win32']:
             msg = 'Could not find openssl, tried: %s' % OPENSSL
@@ -319,7 +346,7 @@ def _get_openssl_info():
               'Try http://www.slproweb.com/products/Win32OpenSSL.html'
         _fatal(msg, RuntimeError)
 
-    openssl_version = _sysCall([OPENSSL, 'version'])
+    openssl_version = _sys_call([OPENSSL, 'version'])
     if openssl_version.lower() < 'openssl 0.9.8':
         _fatal('OpenSSL too old (%s)' % openssl_version, RuntimeError)
     logging.info('OpenSSL binary  = %s' % OPENSSL)
@@ -336,13 +363,13 @@ def _get_wipe_info():
     """Find and return into about secure file removal tools on this system.
     """
     if sys.platform in ['darwin']:
-        WIPE_TOOL = _sysCall(['which', 'srm'])
+        WIPE_TOOL = _sys_call(['which', 'srm'])
         WIPE_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
     elif sys.platform.startswith('linux'):
-        WIPE_TOOL = _sysCall(['which', 'shred'])
+        WIPE_TOOL = _sys_call(['which', 'shred'])
         WIPE_OPTS = ('-f', '-u', '-n', '7')
     elif sys.platform in ['win32', 'cygwin']:
-        guess = _sysCall(['where', '/r', 'C:\\', 'sdelete.exe'])  # vista+
+        guess = _sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])  # vista+
         WIPE_TOOL = guess
         WIPE_OPTS = ('-q', '-p', '7')
     else:
@@ -408,14 +435,14 @@ def _entropy_check():
     """
     if sys.platform == 'darwin':
         # SecurityServer daemon is supposed to ensure entropy is available:
-        ps = _sysCall(['ps', '-e'])
-        securityd = _sysCall(['which', 'securityd'])  # full path
+        ps = _sys_call(['ps', '-e'])
+        securityd = _sys_call(['which', 'securityd'])  # full path
         if securityd in ps:
             e = securityd + ' running'
         else:
             e = ''
     elif sys.platform.startswith('linux'):
-        avail = _sysCall(['cat', '/proc/sys/kernel/random/entropy_avail'])
+        avail = _sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
         e = 'entropy_avail: ' + avail
     else:
         e = '(unknown)'
@@ -462,7 +489,7 @@ def get_key_length(pubkey):
     """
     name = 'get_key_length'
     cmdGETMOD = [OPENSSL, 'rsa', '-modulus', '-in', pubkey, '-pubin', '-noout']
-    modulus = _sysCall(cmdGETMOD).replace('Modulus=', '')
+    modulus = _sys_call(cmdGETMOD).replace('Modulus=', '')
     if not modulus:
         _fatal(name + ': no RSA modulus in pub "%s" (bad .pem file?)' % pubkey)
     if not hexdigits_re.match(modulus):
@@ -563,7 +590,7 @@ def wipe(filename, cmdList=()):
             vals = (filename, inode, mount_path, inode)
             logging.warning(msg % vals)
     else:
-        links = _sysCall(['fsutil.exe', 'hardlink', 'list', abspath(filename)])
+        links = _sys_call(['fsutil.exe', 'hardlink', 'list', abspath(filename)])
         orig_links = len([f for f in links.splitlines() if f.strip()])
 
     if not cmdList:
@@ -573,7 +600,7 @@ def wipe(filename, cmdList=()):
 
     good_sys_call = False
     try:
-        __, err = _sysCall(cmdList, stderr=True)
+        __, err = _sys_call(cmdList, stderr=True)
         good_sys_call = not err
     except OSError as e:
         good_sys_call = False
@@ -952,9 +979,9 @@ def _encrypt_rsa_aes256cbc(datafile, pub_pem, OPENSSL=''):
     assert not whitespace_re.search(pwd)
     try:
         # encrypt the password:
-        _sysCall(cmd_RSA, stdin=pwd)
+        _sys_call(cmd_RSA, stdin=pwd)
         # encrypt the file, using password; takes a long time for large file:
-        _sysCall(cmd_AES, stdin=pwd)
+        _sys_call(cmd_AES, stdin=pwd)
         # better to return immediately, del(pwd); using stdin blocks return
     finally:
         if 'pwd' in locals():
@@ -963,16 +990,19 @@ def _encrypt_rsa_aes256cbc(datafile, pub_pem, OPENSSL=''):
     return abspath(data_enc), abspath(pwd_rsa)
 
 
+@Umask
 def _unpack(data_enc):
     """Extract files from archive, return paths to files.
     """
-    logging.debug('_unpack: start')
+    name = 'unpack'
+    logging.debug(name +': start')
 
     # Check for bad paths:
     if not data_enc or not isfile(data_enc):
         _fatal("could not find <file>%s '%s'" % (ARCHIVE_EXT, str(data_enc)))
     if not tarfile.is_tarfile(data_enc):
-        _fatal('%s not expected format (.tgz)' % data_enc, InternalFormatError)
+        _fatal(name +': %s not expected format (.tgz)' % data_enc,
+               InternalFormatError)
 
     # Check for bad internal paths:
     #    can't "with open(tarfile...) as tar" in python 2.6.6
@@ -980,11 +1010,12 @@ def _unpack(data_enc):
     badNames = [f for f in tar.getmembers()
                 if f.name[0] in ['.', os.sep] or f.name[1:3] == ':\\']
     if badNames:
-        _fatal('bad/dubious internal file names' % os.sep, InternalFormatError)
+        _fatal(name +': bad/dubious internal file names' % os.sep,
+               InternalFormatError)
 
     # Extract:
     tmp_dir = mkdtemp()
-    tar.extractall(path=tmp_dir)  # extract from .tgz file
+    tar.extractall(path=tmp_dir)
     tar.close()
 
     fileList = os.listdir(tmp_dir)
@@ -996,6 +1027,9 @@ def _unpack(data_enc):
             pwdFileRsa = os.path.join(tmp_dir, fname)
         elif fname.endswith(META_EXT):
             meta_file = os.path.join(tmp_dir, fname)
+        else:
+            _fatal(name +': unexpected file in archive',
+                   InternalFormatError)
 
     return data_aes, pwdFileRsa, meta_file
 
@@ -1138,10 +1172,10 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
     # retrieve password (to RAM), then use to decrypt the data file:
     try:
         if pphr and not isfile(pphr):
-            pwd, se_RSA = _sysCall(cmdRSA, stdin=pphr, stderr=True)  # want se
+            pwd, se_RSA = _sys_call(cmdRSA, stdin=pphr, stderr=True)  # want se
         else:
-            pwd, se_RSA = _sysCall(cmdRSA, stderr=True)  # want se, parse below
-        __, se_AES = _sysCall(cmdAES, stdin=pwd, stderr=True)
+            pwd, se_RSA = _sys_call(cmdRSA, stderr=True)  # want se, parse below
+        __, se_AES = _sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
         if isfile(data_dec):
             wipe(data_dec)
@@ -1213,9 +1247,9 @@ def sign(filename, priv, pphr=None):
     else:
         raise NotImplementedError
     if pphr:
-        _sysCall(cmd_SIGN, stdin=pphr)
+        _sys_call(cmd_SIGN, stdin=pphr)
     else:
-        _sysCall(cmd_SIGN)
+        _sys_call(cmd_SIGN)
     sig = open(sig_out, 'rb').read()
 
     return b64encode(sig)
@@ -1234,7 +1268,7 @@ def verify(filename, pub, sig):
                          '-signature', sig_file.name, filename]
         else:
             raise NotImplementedError
-        result = _sysCall(cmd_VERIFY)
+        result = _sys_call(cmd_VERIFY)
 
     return result in ['Verification OK', 'Verified OK']
 
@@ -1251,13 +1285,13 @@ def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
         cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
         if pphr:
             cmdGEN += ['-aes256', '-passout', 'file:' + pphr]
-        _sysCall(cmdGEN + [str(bits)])
+        _sys_call(cmdGEN + [str(bits)])
 
         # Extract pub from priv:
         cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
         if pphr:
             cmdEXTpub += ['-passin', 'file:' + pphr]
-        _sysCall(cmdEXTpub)
+        _sys_call(cmdEXTpub)
     else:
         raise NotImplementedError
 
@@ -1275,13 +1309,13 @@ def _genRsa2(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
         cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
         if pphr:
             cmdGEN += ['-aes256', '-passout', 'stdin']
-        _sysCall(cmdGEN + [str(bits)], stdin=pphr)
+        _sys_call(cmdGEN + [str(bits)], stdin=pphr)
 
         # Extract pub from priv:
         cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
         if pphr:
             cmdEXTpub += ['-passin', 'stdin']
-        _sysCall(cmdEXTpub, stdin=pphr)
+        _sys_call(cmdEXTpub, stdin=pphr)
     else:
         raise NotImplementedError
 
@@ -1353,6 +1387,7 @@ def genRsaKeys():
     try:
         _genRsa2(pub, priv, pphr, bits)
     except:
+        # might get a KeyboardInterrupt
         _cleanup('\n  > Removing temp files. Exiting. <')
         raise
 
@@ -1393,7 +1428,7 @@ class Tests(object):
             myhome = '/home/jgray/.__öpensslwrap test__'
             shutil.rmtree(myhome, ignore_errors=False)
 
-    def _knownValues(self):
+    def _known_values(self):
         """Return tmp files with known keys, data, signature for testing.
         This is a WEAK key, 1024 bits, for testing ONLY.
         """
@@ -1458,7 +1493,7 @@ class Tests(object):
             cmd = ['findstr', '"' + msg + '"']
         else:
             cmd = ['grep', msg]
-        greeting = _sysCall(cmd, stdin=msg)
+        greeting = _sys_call(cmd, stdin=msg)
         assert greeting == msg
 
     def test_codec_registry(self):
@@ -1481,7 +1516,7 @@ class Tests(object):
         # bit count using a known pub key
         logging.debug('test bit_count')
         os.chdir(mkdtemp())
-        pub, __, __, bits, __ = self._knownValues()
+        pub, __, __, bits, __ = self._known_values()
         assert int(bits) == get_key_length(pub)
 
     def test_padding(self):
@@ -1536,7 +1571,7 @@ class Tests(object):
 
     def test_signatures(self):
         # sign a known file with a known key. can we get known signature?
-        __, kwnPriv, kwnPphr, datum, kwnSigs = self._knownValues()
+        __, kwnPriv, kwnPphr, datum, kwnSigs = self._known_values()
         kwnData = 'knwSig'
         with open(kwnData, 'wb+') as fd:
             fd.write(datum)
@@ -1559,10 +1594,11 @@ class Tests(object):
         MAX_FILE_SIZE = MAX_restore
 
     def test_big_file(self):
-        # create encrypt & decrypt 4G file; takes ~15G disk space, ~13min
+        # by default, tests a file just over the LRG_FILE_WARN limit (17M)
+        # tweak to create encrypt & decrypt a 4G file, ~15G disk space, ~13min
 
         bs = 1024  # block size
-        #count = MAX_FILE_SIZE // (2 * bs)  # 4G total size
+        #count = MAX_FILE_SIZE // 2 // bs  # 4G total size
         count = 1 + LRG_FILE_WARN // bs  # to test that warnings are triggered
         #count = 1  # uncomment to test the test
         size = bs * count  # bytes
@@ -1571,9 +1607,9 @@ class Tests(object):
         try:
             orig = 'bigfile.zeros'
             enc = 'bigfile' + ARCHIVE_EXT
-            _sysCall(['dd', 'if=/dev/zero', 'of=%s' % orig,
+            _sys_call(['dd', 'if=/dev/zero', 'of=%s' % orig,
                       'bs=%d' % bs, 'count=%d' % count])
-            pub, priv, pphr = self._knownValues()[:3]
+            pub, priv, pphr = self._known_values()[:3]
             encrypt('%s' % orig, pub)
             bigfile_size = getsize(enc)
             decrypt(enc, priv, pphr)
@@ -1712,7 +1748,7 @@ class Tests(object):
         arc = make_archive(datafile)  # tgz compression
         size_arc = getsize(arc)
         assert 150 < size_arc < 200 < pad2len // 8
-        pub = self._knownValues()[0]
+        pub = self._known_values()[0]
         enc = encrypt(datafile, pub)  # should not be compressable
         size_enc = getsize(enc)
         assert pad2len * 1.02 < size_enc < pad2len * 1.20  # 1.093
@@ -1722,7 +1758,7 @@ class Tests(object):
         assert UMASK == 0o077
 
         filename = 'umask_test'
-        pub, priv, pphr = self._knownValues()[:3]
+        pub, priv, pphr = self._known_values()[:3]
         umask_restore = os.umask(0o000)
         with open(filename, 'wb') as fd:
             fd.write('\0')
@@ -1748,7 +1784,7 @@ class Tests(object):
         hmac_python = hmac_sha256(key, fd.name)
         hmac_python_bigkey = hmac_sha256(bigkey, fd.name)
         cmdDgst = [OPENSSL, 'dgst', '-sha256', '-hmac', key, fd.name]
-        hmac_openssl = _sysCall(cmdDgst)
+        hmac_openssl = _sys_call(cmdDgst)
         # avoid '==' to test because openssl 1.0.x returns this:
         # 'HMAC-SHA256(filename)= f7bc83f430538424b13298e6aa6fb143e97479db...'
         assert hmac_openssl.endswith(hm)
@@ -1769,13 +1805,13 @@ class Tests(object):
         # Encrypt:
         cmdLineCmd = [sys.executable, pathToSelf, 'encrypt', datafile,
                       pub1, '--openssl=' + OPENSSL]
-        dataEnc = _sysCall(cmdLineCmd).strip()
+        dataEnc = _sys_call(cmdLineCmd).strip()
         assert os.path.isfile(dataEnc)
 
         # Decrypt:
         cmdLineCmd = [sys.executable, pathToSelf, 'decrypt', dataEnc,
                       priv1, '--openssl=' + OPENSSL]
-        dataEncDec_cmdline = _sysCall(cmdLineCmd).strip()
+        dataEncDec_cmdline = _sys_call(cmdLineCmd).strip()
         assert os.path.isfile(dataEncDec_cmdline)
 
         # Both enc and dec need to succeed to recover the original text:
@@ -1839,8 +1875,8 @@ class Tests(object):
 
     def test_add_new_codec(self):
         import codecs
-        global _decrypt_rot13
         global _encrypt_rot13
+        global _decrypt_rot13
 
         def _encrypt_rot13(dataFile, *args, **kwargs):
             stuff = open(dataFile, 'rb').read()
@@ -2030,7 +2066,7 @@ class Tests(object):
 
 
 # Basic set-up (order matters) ------------------------------------------------
-logging, loggingID, logging_t0, log_sysCalls = _setup_logging()
+logging, loggingID, logging_t0 = _setup_logging()
 OPENSSL, openssl_version, use_rsautl = _get_openssl_info()
 have_wipe_tool, WIPE_TOOL, WIPE_OPTS = _get_wipe_info()
 
@@ -2041,10 +2077,14 @@ codec = PFSCodecRegistry(default_codec)
 if __name__ == '__main__':
     logging.info("%s with %s" % (lib_name, openssl_version))
     if '--debug' in sys.argv:
+        """Run tests with verbose logging.
+            $ python pyfilesec.py --debug > results.txt
+        """
         global pytest
         import pytest
 
-        t0 = get_time()
+        os.mkdir('debug_' + lib_name)
+        os.chdir('debug_' + lib_name)  # intermediate files get left inside
         ts = Tests()
         tests = [t for t in dir(ts) if t.startswith('test_')]
         for test in tests:
@@ -2053,7 +2093,7 @@ if __name__ == '__main__':
             except:
                 result = test + ' FAILED'
                 print(result)
-        logging.info("%.4fs for tests" % (get_time() - t0))
+        logging.info("%.4fs for tests" % (get_time() - logging_t0))
     elif '--genrsa' in sys.argv:
         """Walk through key generation.
         """
