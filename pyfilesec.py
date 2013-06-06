@@ -412,11 +412,6 @@ if True:
     # used if user suppresses the date; will sort before a numerical date:
     NO_DATE = '(date-time suppressed)'
 
-    # for python-based HMAC (from wikipedia):
-    _hmac_trans_5C = "".join(chr(x ^ 0x5c) for x in range(256))
-    _hmac_trans_36 = "".join(chr(x ^ 0x36) for x in range(256))
-    _hmac_blocksize = hashlib.sha256().block_size
-
     whitespace_re = re.compile('\s')
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
 
@@ -464,24 +459,19 @@ def _sha256(filename, prepend='', raw=False):
         return dgst.hexdigest()
 
 
-def hmac_sha256(key, valueFile):
+def hmac_sha256(key, filename):
     """Return a hash-based message authentication code (HMAC), using SHA256.
     """
-    # code from wikipedia, verified against openssl (see test_hmac)
-    # openssl works fine but is 100x slower than pure python for small files
-
+    # openssl is 100x slower than pure python for small files
+    # use openssl anyway for consistency
     if not key:
         return None
-    if getsize(valueFile) > MAX_FILE_SIZE:
+    if getsize(filename) > MAX_FILE_SIZE:
         _fatal('hmac_sha256: msg too large (> max file size)')
-    if len(key) > _hmac_blocksize:
-        key = hashlib.sha256(key).digest()
-    key += chr(0) * (_hmac_blocksize - len(key))
-    o_key_pad = key.translate(_hmac_trans_5C)  # see constants
-    i_key_pad = key.translate(_hmac_trans_36)
-    dgst = hashlib.sha256(o_key_pad + _sha256(valueFile, i_key_pad, True))
+    cmd_HMAC = [OPENSSL, 'dgst', '-sha256', '-hmac', key, filename]
+    hmac_openssl = _sys_call(cmd_HMAC)
 
-    return dgst.hexdigest()
+    return hmac_openssl
 
 
 def get_key_length(pubkey):
@@ -572,6 +562,7 @@ def wipe(filename, cmdList=()):
         file_in.seek(0)
 
     os.chmod(filename, 0o600)  # raises OSError if no file or cant change
+    filename = abspath(filename)
     t0 = get_time()
 
     # Try to detect & inform about hardlinks:
@@ -590,7 +581,7 @@ def wipe(filename, cmdList=()):
             vals = (filename, inode, mount_path, inode)
             logging.warning(msg % vals)
     else:
-        links = _sys_call(['fsutil.exe', 'hardlink', 'list', abspath(filename)])
+        links = _sys_call(['fsutil.exe', 'hardlink', 'list', filename])
         orig_links = len([f for f in links.splitlines() if f.strip()])
 
     if not cmdList:
@@ -995,13 +986,13 @@ def _unpack(data_enc):
     """Extract files from archive, return paths to files.
     """
     name = 'unpack'
-    logging.debug(name +': start')
+    logging.debug(name + ': start')
 
     # Check for bad paths:
     if not data_enc or not isfile(data_enc):
         _fatal("could not find <file>%s '%s'" % (ARCHIVE_EXT, str(data_enc)))
     if not tarfile.is_tarfile(data_enc):
-        _fatal(name +': %s not expected format (.tgz)' % data_enc,
+        _fatal(name + ': %s not expected format (.tgz)' % data_enc,
                InternalFormatError)
 
     # Check for bad internal paths:
@@ -1010,7 +1001,7 @@ def _unpack(data_enc):
     badNames = [f for f in tar.getmembers()
                 if f.name[0] in ['.', os.sep] or f.name[1:3] == ':\\']
     if badNames:
-        _fatal(name +': bad/dubious internal file names' % os.sep,
+        _fatal(name + ': bad/dubious internal file names' % os.sep,
                InternalFormatError)
 
     # Extract:
@@ -1028,7 +1019,7 @@ def _unpack(data_enc):
         elif fname.endswith(META_EXT):
             meta_file = os.path.join(tmp_dir, fname)
         else:
-            _fatal(name +': unexpected file in archive',
+            _fatal(name + ': unexpected file in archive',
                    InternalFormatError)
 
     return data_aes, pwdFileRsa, meta_file
@@ -1174,7 +1165,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
         if pphr and not isfile(pphr):
             pwd, se_RSA = _sys_call(cmdRSA, stdin=pphr, stderr=True)  # want se
         else:
-            pwd, se_RSA = _sys_call(cmdRSA, stderr=True)  # want se, parse below
+            pwd, se_RSA = _sys_call(cmdRSA, stderr=True)  # want se, parse
         __, se_AES = _sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
         if isfile(data_dec):
@@ -1771,25 +1762,42 @@ class Tests(object):
         os.umask(umask_restore)
 
     def test_hmac(self):
-        # widely used example = useful for validation
+        # verify openssl hmac usage against hmac code from wikipedia:
+        def _py_hmac_sha256(key, filename):
+            sha256 = hashlib.sha256
+            if len(key) > _hmac_blocksize:
+                key = sha256(key).digest()
+            key += chr(0) * (_hmac_blocksize - len(key))
+            o_key_pad = key.translate(_hmac_trans_5C)
+            i_key_pad = key.translate(_hmac_trans_36)
+            dgst = sha256(o_key_pad + _sha256(filename, i_key_pad, True))
+
+            return dgst.hexdigest()
+
+        _hmac_trans_5C = "".join(chr(x ^ 0x5c) for x in range(256))
+        _hmac_trans_36 = "".join(chr(x ^ 0x36) for x in range(256))
+        _hmac_blocksize = hashlib.sha256().block_size
+
         key = 'key'
         bigkey = key * _hmac_blocksize
+        # use a widely used example = useful for validation:
         value = "The quick brown fox jumps over the lazy dog"
         hm = 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
         hb = '69d6cdc2fef262d48a4b012df5327e9b1679b6e3c95b05c940a18374b059a5e7'
-
         tmp = 'hmac_test'
         with open(tmp, 'wb+') as fd:
             fd.write(value)
-        hmac_python = hmac_sha256(key, fd.name)
-        hmac_python_bigkey = hmac_sha256(bigkey, fd.name)
-        cmdDgst = [OPENSSL, 'dgst', '-sha256', '-hmac', key, fd.name]
-        hmac_openssl = _sys_call(cmdDgst)
+
+        hmac_python = _py_hmac_sha256(key, tmp)
+        hmac_python_bigkey = _py_hmac_sha256(bigkey, tmp)
+        hmac_openssl = hmac_sha256(key, tmp)
+        hmac_openssl_bigkey = hmac_sha256(bigkey, tmp)
         # avoid '==' to test because openssl 1.0.x returns this:
         # 'HMAC-SHA256(filename)= f7bc83f430538424b13298e6aa6fb143e97479db...'
         assert hmac_openssl.endswith(hm)
         assert hmac_python == hm
         assert hmac_python_bigkey == hb
+        assert hmac_openssl_bigkey.endswith(hb)
 
     def test_command_line(self):
         # send encrypt and decrypt commands via command line
