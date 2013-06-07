@@ -178,13 +178,17 @@ class PFSCodecRegistry(object):
             self._functions.update({key: fxn})
             fxn_info = '%s(): fxn id=%d' % (key, id(fxn))
             logging.info(self.name + ': registered %s' % fxn_info)
+
         # allow _dec without _enc, but not vice-verse:
         for key in list(new_functions.keys()):
             if key.startswith('_dec'):
                 continue
+            assert key.startswith('_enc')
             dec_twin = key.replace('_enc', '_dec', 1)
             if not dec_twin in list(self._functions.keys()):
                 _fatal('method "%s" incomplete codec pair' % key)
+            # ideally also check dec(enc(secret.txt, pub), priv, pphr)
+            # but this won't easily just work for rot13, gpg, etc
 
     def unregister(self, function_list):
         """Remove codec pairs from the registry based on keys.
@@ -248,7 +252,6 @@ def _setup_logging():
             pass
         error = warning = exp = data = info = debug
 
-    loggingID = lib_name
     logging_t0 = get_time()
     verbose = bool('--verbose' in sys.argv or '--debug' in sys.argv)
     if '--verbose' in sys.argv:
@@ -256,14 +259,14 @@ def _setup_logging():
     if not verbose:
         logging = _no_logging()
     else:
-        msgfmt = "%.4f  " + loggingID + ": %s"
+        msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
         if __name__ != '__main__':
             try:
                 from psychopy import logging
             except:
                 pass
-    return logging, loggingID, logging_t0
+    return logging, logging_t0
 
 
 def _sys_call(cmdList, stderr=False, stdin=''):
@@ -1529,7 +1532,7 @@ class Tests(object):
         # passwords are typically sent to openssl via stdin
         msg = 'yello'
         if sys.platform == 'win32':
-            cmd = ['findstr', '"' + msg + '"']
+            cmd = ['findstr', msg]
         else:
             cmd = ['grep', msg]
         greeting = _sys_call(cmd, stdin=msg)
@@ -1827,15 +1830,15 @@ class Tests(object):
 
         filename = 'umask_test'
         pub, priv, pphr = self._known_values()[:3]
-        umask_restore = os.umask(0o000)
+        umask_restore = os.umask(0o000)  # need permissive to test
         with open(filename, 'wb') as fd:
-            fd.write('\0')
-        assert _get_permissions(filename) == 0o666  # lack execute
+            fd.write(b'\0')
+        assert _get_permissions(filename) == 0o666  # is permissive for test
         enc = encrypt(filename, pub)
-        assert _get_permissions(enc) == PERMISSIONS
+        assert _get_permissions(enc) == PERMISSIONS  # restricted
         assert not os.path.isfile(filename)
         dec = decrypt(enc, priv, pphr)
-        assert _get_permissions(dec) == PERMISSIONS
+        assert _get_permissions(dec) == PERMISSIONS  # restricted
         os.umask(umask_restore)
 
     def test_hmac(self):
@@ -2121,7 +2124,7 @@ class Tests(object):
 
 
 # Basic set-up (order matters) ------------------------------------------------
-logging, loggingID, logging_t0 = _setup_logging()
+logging, logging_t0 = _setup_logging()
 OPENSSL, openssl_version, use_rsautl = _get_openssl_info()
 destroy_TOOL, destroy_OPTS = _get_destroy_info()
 
