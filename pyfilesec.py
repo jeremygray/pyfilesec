@@ -359,24 +359,26 @@ def _get_openssl_info():
     return OPENSSL, openssl_version, use_rsautl
 
 
-def _get_wipe_info():
+def _get_destroy_info():
     """Find and return into about secure file removal tools on this system.
     """
     if sys.platform in ['darwin']:
-        WIPE_TOOL = _sys_call(['which', 'srm'])
-        WIPE_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
+        destroy_TOOL = _sys_call(['which', 'srm'])
+        destroy_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
     elif sys.platform.startswith('linux'):
-        WIPE_TOOL = _sys_call(['which', 'shred'])
-        WIPE_OPTS = ('-f', '-u', '-n', '7')
-    elif sys.platform in ['win32', 'cygwin']:
+        destroy_TOOL = _sys_call(['which', 'shred'])
+        destroy_OPTS = ('-f', '-u', '-n', '7')
+    elif sys.platform in ['win32']:
         guess = _sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])  # vista+
-        WIPE_TOOL = guess
-        WIPE_OPTS = ('-q', '-p', '7')
+        destroy_TOOL = guess
+        destroy_OPTS = ('-q', '-p', '7')
     else:
-        WIPE_TOOL = None
-        WIPE_OPTS = ()
-    have_wipe_tool = WIPE_TOOL and isfile(WIPE_TOOL)
-    return have_wipe_tool, WIPE_TOOL, WIPE_OPTS
+        destroy_TOOL = ''
+        destroy_OPTS = ()
+    if not isfile(destroy_TOOL):
+        destroy_TOOL = ''
+
+    return destroy_TOOL, destroy_OPTS
 
 
 def _fatal(msg, err=ValueError):
@@ -415,8 +417,8 @@ if True:
     whitespace_re = re.compile('\s')
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
 
-    # wipe return codes:
-    pfs_WIPED = 1
+    # destroy() return codes:
+    pfs_DESTROYED = 1
     pfs_UNLINKED = 0
     pfs_UNKNOWN = -1
 
@@ -520,7 +522,7 @@ def make_archive(paths, name='', keep=True):
     return name
 
 
-def wipe(filename, cmdList=()):
+def destroy(filename, cmdList=()):
     """Try to secure-delete a file; returns (status, link count, time taken).
 
     Calls an OS-specific secure-delete utility, defaulting to::
@@ -529,29 +531,31 @@ def wipe(filename, cmdList=()):
         Linux:   /usr/bin/shred -f -u -n 7 filename
         Windows: sdelete.exe    -q -p 7 filename
 
-    If these are not available, `wipe` will warn and fall through to trying
-    to merely overwrite the data with 0's.
+    If these are not available, `destroy` will warn and fall through to trying
+    to merely overwrite the data with 0's (with unknown effectiveness)
 
     As an alternative, a custom command sequence can be specified::
 
         cmdList = (command, option1, option2, ..., filename)
 
-    Ideally avoid the need to wipe files. Keep all sensitive data in RAM.
+    Ideally avoid the need to destroy files. Keep all sensitive data in RAM.
     File systems that are journaled, have RAID, are mirrored, or other back-up
     are much trickier to secure-delete.
 
-    `wipe` may fail to remove all traces of a file if multiple hard-links
-    exist for the file. For this reason, the original link count is
-    returned.
+    `destroy` may fail to remove all traces of a file if multiple hard-links
+    exist for the file. For this reason, the original link count is returned.
+    In the case of multiple hardlinks, Linux (shred) and Windows (sdelete)
+    do appear to destroy the data, whereas Mac (srm) will not.
 
     The time required can help confirm whether it was a secure removal (slow)
     or an ordinary removal (unlinking is fast).
 
-    If an open file-descriptor is given instead of a filename, wipe() will try
-    to secure-delete the contents and close the file. This is intended to be
-    useful when working with NamedTemporaryFiles, which vanish when closed.
+    If an open file-descriptor is given instead of a filename, destroy() will
+    try to secure-delete the contents and close the file. This is intended to
+    be useful when working with NamedTemporaryFiles, which vanish when closed.
     """
 
+    name = 'destroy'
     got_file = hasattr(filename, 'file') and hasattr(filename, 'close')
     if got_file:
         filename, file_in = filename.name, filename
@@ -571,7 +575,7 @@ def wipe(filename, cmdList=()):
             mount_path = abspath(filename)
             while not os.path.ismount(mount_path):
                 mount_path = os.path.dirname(mount_path)
-            msg = """wipe: '%s' (inode %d) has other hardlinks:
+            msg = name + """: '%s' (inode %d) has other hardlinks:
                 `find %s -xdev -inum %d`""".replace('    ', '')
             inode = file_stat[stat.ST_INO]
             vals = (filename, inode, mount_path, inode)
@@ -581,9 +585,9 @@ def wipe(filename, cmdList=()):
         orig_links = len([f for f in links.splitlines() if f.strip()])
 
     if not cmdList:
-        cmdList = (WIPE_TOOL,) + WIPE_OPTS + (filename,)
+        cmdList = (destroy_TOOL,) + destroy_OPTS + (filename,)
     else:
-        logging.info('wipe: %s' % ' '.join(cmdList))
+        logging.info(name + ': %s' % ' '.join(cmdList))
 
     good_sys_call = False
     try:
@@ -591,8 +595,8 @@ def wipe(filename, cmdList=()):
         good_sys_call = not err
     except OSError as e:
         good_sys_call = False
-        logging.warning('wipe: %s' % e)
-        logging.warning('wipe: %s' % ' '.join(cmdList))
+        logging.warning(name + ': %s' % e)
+        logging.warning(name + ': %s' % ' '.join(cmdList))
     finally:
         if got_file:
             try:
@@ -603,11 +607,11 @@ def wipe(filename, cmdList=()):
                 pass  # gives an OSError but has done something
         if not isfile(filename):
             if good_sys_call:
-                return pfs_WIPED, orig_links, get_time() - t0
+                return pfs_DESTROYED, orig_links, get_time() - t0
             return pfs_UNKNOWN, orig_links, get_time() - t0
 
     # file should have been overwritten and removed; if not...
-    logging.warning('wipe: falling through to 1 pass of zeros')
+    logging.warning(name + ': falling through to 1 pass of zeros')
     with open(filename, 'wb') as fd:
         fd.write(chr(0) * getsize(filename))
     shutil.rmtree(filename, ignore_errors=True)
@@ -781,7 +785,7 @@ def _unpad_strict(filename, test=False):
         except PaddingError:
             padded = False
 
-    Truncates the file to remove padding; does not wipe.
+    Truncates the file to remove padding; does not `destroy` the padding.
     """
     name = 'unpad: '
     logging.debug(name + 'start, file="%s"' % filename)
@@ -808,7 +812,13 @@ def _unpad_strict(filename, test=False):
         if test:
             logging.info(name + 'test only, file unchanged')
         else:
-            # trim the padding length info; does not wipe padding info
+            # try to overwrite padding info, unknown effectiveness
+            overwrite = min(PAD_LEN, filelen - new_length)
+            if overwrite > 0:
+                for i in range(7):
+                    fd.seek(filelen - overwrite)
+                    fd.write(_printable_pwd(overwrite * 4))
+            # trim the padding length info
             fd.truncate(new_length)
             logging.info(name + 'truncated the file to remove padding')
 
@@ -920,14 +930,14 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
 
     if not keep:
         # secure-delete unencrypted original, unless encrypt did not succeed:
-        ok_to_wipe = (ok_encrypt and
+        ok_to_destroy = (ok_encrypt and
                       isfile(archive) and
                       os.stat(archive)[stat.ST_SIZE])
-        if ok_to_wipe:
-            wipe(datafile)
-            logging.info(name + 'wiped original file')
+        if ok_to_destroy:
+            destroy(datafile)
+            logging.info(name + 'destroy()ed original file')
         else:
-            logging.error(name + 'retaining original file, not wipe()d')
+            logging.error(name + 'retaining original file, not destroy()ed')
 
     return abspath(archive)
 
@@ -1165,7 +1175,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
         __, se_AES = _sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
         if isfile(data_dec):
-            wipe(data_dec)
+            destroy(data_dec)
         _fatal('%s: Could not decrypt (exception in RSA or AES step)' % name,
                DecryptError)
     finally:
@@ -1202,9 +1212,9 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
     By default the old encrypted file will be retained, to ensure data is
     not destroyed. Yet this of itself is not ideal because key rotation is
     typically done when the old keys are no longer considered secure. To
-    have the old encrypted file wiped as part of rotation, give the private key
-    (`priv_new`, and new passphrase `pphr_new` as needed). If it successfully
-    decrypts, as determined by matching hash values, `rotate` will also wipe
+    have the old encrypted file destroyed as part of rotation, give the private
+    key (`priv_new`, new passphrase `pphr_new` as needed). If it successfully
+    decrypts, as determined by matching hash values, `rotate` will also destroy
     (secure delete) the old encrypted file. That is, conceptually there are
     three separate steps, with `rotate()` only doing rotation by default. To
     do the other two, it needs the private key of the new file in order to
@@ -1227,27 +1237,27 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
         new_enc = encrypt(file_dec, pub_new, date=True, meta=md,
                              keep=False, hmac_key=hmac_new)
     finally:
-        # Never want the intermediate decrypted stuff; encrypt() will wipe it
-        # but might be an exception before get to encrypt()
+        # Never want the intermediate decrypted stuff; encrypt() will destroy
+        # it but might be an exception before get to encrypt()
         if isfile(file_dec):
-            wipe(file_dec)
+            destroy(file_dec)
         if isfile(old_meta):
-            wipe(old_meta)
+            destroy(old_meta)
 
-    # Check the rotation if given a key to do so; wipe data_enc if safe to do:
+    # Check the rotation if given a key to do so; destroy data_enc if safe:
     if priv_new:
         # if a hash of decrypted file is good, delete original data_enc
         new_dec = decrypt(new_enc, priv_new, pphr=pphr_new)
         hash_new = _sha256(new_dec)
-        wipe(new_dec)  # just wanted to get a hash
+        destroy(new_dec)  # just wanted to get a hash
         new_meta = new_dec + META_EXT
         if isfile(new_meta):
-            wipe(new_meta)
+            destroy(new_meta)
         if hash_new != hash_old:
             _fatal(name + ': failed to verify, retaining original')
         else:
             logging.info(name + ': verified, deleting original')
-            wipe(data_enc)
+            destroy(data_enc)
 
     return new_enc
 
@@ -1360,7 +1370,7 @@ def genRsaKeys():
     def _cleanup(msg):
         print(msg)
         try:
-            wipe(priv)
+            destroy(priv)
         except:
             pass
         try:
@@ -1736,7 +1746,7 @@ class Tests(object):
         second_enc = rotate(first_enc, priv1, pub2, pphr_old=pphr1,
                             pad_new=8192)
         third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr2,
-                           priv_new=priv1, pphr_new=pphr1,  # = wipe original
+                           priv_new=priv1, pphr_new=pphr1,  # = destroy orig
                            pad_new=16384, hmac_new='key')
         # padding affects .enc file size, values vary a little from run to run
         assert getsize(first_enc) < getsize(third_enc)
@@ -1869,23 +1879,23 @@ class Tests(object):
         recoveredText = open(dataEncDec_cmdline).read()
         assert recoveredText == secretText
 
-    def test_wipe(self):
-        # see if it takes at least 50x longer to wipe() than unlink a file
-        # if so, WIPE_TOOL is doing something, hopefully its a secure delete
+    def test_destroy(self):
+        # see if it takes at least 50x longer to destroy() than unlink a file
+        # if so, destroy_TOOL is doing something, hopefully its a secure delete
 
-        if sys.platform == 'win32' and not have_wipe_tool:
+        if sys.platform == 'win32' and not destroy_TOOL:
             pytest.skip()
 
-        tw_path = 'tmp_test_wipe'
+        tw_path = 'tmp_test_destroy'
         tw_reps = 3
-        wipe_times = []
+        destroy_times = []
         for i in range(tw_reps):
             with open(tw_path, 'wb') as fd:
                 fd.write(b'\0')
-            code, links, t1 = wipe(tw_path)
-            assert code == pfs_WIPED
+            code, links, t1 = destroy(tw_path)
+            assert code == pfs_DESTROYED
             assert links == 1
-            wipe_times.append(t1)
+            destroy_times.append(t1)
         unlink_times = []
         for i in range(tw_reps):
             with open(tw_path, 'wb') as fd:
@@ -1893,15 +1903,15 @@ class Tests(object):
             t0 = get_time()
             os.unlink(tw_path)
             unlink_times.append(get_time() - t0)
-        avg_wipe = sum(wipe_times) / tw_reps
+        avg_destroy = sum(destroy_times) / tw_reps
         avg_unlink = sum(unlink_times) / tw_reps
 
-        assert min(wipe_times) > 10 * max(unlink_times)
-        assert avg_wipe > 50 * avg_unlink  # 1000x mac, mostly 200x CentOS VM
+        assert min(destroy_times) > 10 * max(unlink_times)
+        assert avg_destroy > 50 * avg_unlink
 
-    def test_wipe_links(self):
-        # Test whether can detect multiple links to a file when wipe()ing it:
-        tw_path = 'tmp_test_wipe'
+    def test_destroy_links(self):
+        # Test detection of multiple links to a file when destroy()ing it:
+        tw_path = 'tmp_test_destroy'
         with open(tw_path, 'wb') as fd:
             fd.write(b'\0')
         assert isfile(tw_path)  # need a file or can't test
@@ -1914,7 +1924,7 @@ class Tests(object):
                 os.link(tw_path, new)
 
         hardlinks = os.stat(tw_path)[stat.ST_NLINK]
-        code, links, __ = wipe(tw_path)
+        code, links, __ = destroy(tw_path)
         assert links == numlinks + 1  # +1 for itself
         assert links == hardlinks
 
@@ -2113,7 +2123,7 @@ class Tests(object):
 # Basic set-up (order matters) ------------------------------------------------
 logging, loggingID, logging_t0 = _setup_logging()
 OPENSSL, openssl_version, use_rsautl = _get_openssl_info()
-have_wipe_tool, WIPE_TOOL, WIPE_OPTS = _get_wipe_info()
+destroy_TOOL, destroy_OPTS = _get_destroy_info()
 
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
