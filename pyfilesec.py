@@ -1191,32 +1191,63 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
 
 @Umask
 def rotate(data_enc, priv_old, pub_new, pphr_old=None,
-           hmac_key=None, new_pad=None):
+           priv_new=None, pphr_new=None,
+           hmac_new=None, pad_new=None):
     """Swap old encryption for new (decrypt-then-re-encrypt).
 
-    Returns the path to new encrypted file. A new meta-data entry is added
+    Returns the path to the new encrypted file. A new meta-data entry is added
     alongside the existing one. If `new_pad` is given, the padding will be
     updated prior to re-encryption.
 
-    For data safety, the old encrypted version will always be retained. You
-    can rotate the encryption, verify for yourself that it succeeded, and then
-    secure delete (wipe) the old encrypted files. These are three separate
-    steps, with `rotate()` only doing rotation.
+    By default the old encrypted file will be retained, to ensure data is
+    not destroyed. Yet this of itself is not ideal because key rotation is
+    typically done when the old keys are no longer considered secure. To
+    have the old encrypted file wiped as part of rotation, give the private key
+    (`priv_new`, and new passphrase `pphr_new` as needed). If it successfully
+    decrypts, as determined by matching hash values, `rotate` will also wipe
+    (secure delete) the old encrypted file. That is, conceptually there are
+    three separate steps, with `rotate()` only doing rotation by default. To
+    do the other two, it needs the private key of the new file in order to
+    confirm the new encryption. Only if this is provided and succeeds will the
+    original file be destroyed. Note that padding a file will change the hash
+    value, so the hash of the original is taken after rotating the padding.
     """
-    logging.debug('rotate: start')
+    name = 'rotate'
+    logging.debug(name + ': start')
     file_dec = decrypt(data_enc, priv_old, pphr=pphr_old)
-    old_meta_file = file_dec + META_EXT
+    try:
+        old_meta = file_dec + META_EXT
 
-    # Always store the date of the rotation
-    md = load_metadata(old_meta_file)
-    if new_pad > 0:
-        pad(file_dec, new_pad)
-    new_enc = encrypt(file_dec, pub_new, date=True, meta=md,
-                         keep=False, hmac_key=hmac_key)
+        # Always store the date of the rotation
+        md = load_metadata(old_meta)
+        if pad_new > 0:  # can be -1
+            pad(file_dec, pad_new)
+        # for verification, only hash after changing the padding
+        hash_old = _sha256(file_dec)
+        new_enc = encrypt(file_dec, pub_new, date=True, meta=md,
+                             keep=False, hmac_key=hmac_new)
+    finally:
+        # Never want the intermediate decrypted stuff; encrypt() will wipe it
+        # but might be an exception before get to encrypt()
+        if isfile(file_dec):
+            wipe(file_dec)
+        if isfile(old_meta):
+            wipe(old_meta)
 
-    # Never want the intermediate decrypted file to remain:
-    if isfile(file_dec):
-        wipe(file_dec)
+    # Check the rotation if given a key to do so; wipe data_enc if safe to do:
+    if priv_new:
+        # if a hash of decrypted file is good, delete original data_enc
+        new_dec = decrypt(new_enc, priv_new, pphr=pphr_new)
+        hash_new = _sha256(new_dec)
+        wipe(new_dec)  # just wanted to get a hash
+        new_meta = new_dec + META_EXT
+        if isfile(new_meta):
+            wipe(new_meta)
+        if hash_new != hash_old:
+            _fatal(name + ': failed to verify, retaining original')
+        else:
+            logging.info(name + ': verified, deleting original')
+            wipe(data_enc)
 
     return new_enc
 
@@ -1705,14 +1736,15 @@ class Tests(object):
         second_enc = rotate(first_enc, priv1, pub2, pphr_old=pphr1,
                             pad_new=8192)
         third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr2,
+                           priv_new=priv1, pphr_new=pphr1,  # = wipe original
                            pad_new=16384, hmac_new='key')
         # padding affects .enc file size, values vary a little from run to run
-        assert getsize(first_enc) < getsize(second_enc) < getsize(third_enc)
+        assert getsize(first_enc) < getsize(third_enc)
 
-        # TO-DO: more rotate tests:
-        # 1) verify original not deleted
-        # 2) verify that passing priv_new, pphr_new verifies the hash
-        #   and deletes orig file
+        # verify original encrypted file is not deleted by default:
+        assert isfile(first_enc)
+        # verify that passing priv_new deletes original enc file:
+        assert not isfile(second_enc)
 
         dec_rot3 = decrypt(third_enc, priv1, pphr=pphr1)
         assert not open(dec_rot3).read() == secretText  # dec but still padded
