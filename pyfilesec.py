@@ -1221,21 +1221,6 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
     return new_enc
 
 
-def rotate_all(data_enc_list, priv_old, pub_new, pphr_old=None,
-               hmac_key=None, new_pad=None):
-    """Convenience function to rotate the encryption on a list of files.
-
-    Eg, every other year regenerate an RSA key pair and rotate the encryption.
-    """
-    new_list = []
-    for data_enc in data_enc_list:
-        new_enc = rotate(data_enc, priv_old, pub_new, pphr_old,
-                     hmac_key, new_pad)
-        new_list.append(new_enc)
-
-    return new_list
-
-
 def sign(filename, priv, pphr=None):
     """Sign a given file with a private key, via `openssl dgst`.
 
