@@ -1619,7 +1619,7 @@ class Tests(object):
         assert bigfile_size > size
         assert bigfile_zeros_size == size
 
-    def test_encrypt_decrypt_etc(self):
+    def test_encrypt_decrypt(self):
         # Lots of tests here (just to avoid re-generating keys a lot)
         secretText = 'secret snippet %.6f' % get_time()
         datafile = 'cleartext unic\xcc\x88de.txt'
@@ -1685,14 +1685,34 @@ class Tests(object):
         assert not verify(pub1, pub2, sig2)
         assert not verify(datafile, pub2, sig2)
 
+    def test_rotate(self):
+        # Set-up:
+        secretText = 'secret snippet %.6f' % get_time()
+        datafile = 'cleartext unic\xcc\x88de.txt'
+        with open(datafile, 'w+b') as fd:
+            fd.write(secretText)
+        pub1, priv1, pphr1, testBits = self._known_values()[:4]
+
+        pubTmp2 = 'pubkey2 unic\xcc\x88de.pem   '  # trailing whitespace in
+        prvTmp2 = 'prvkey2 unic\xcc\x88de.pem   '  # file names
+        pphr2 = 'passphrs2 unic\xcc\x88de.txt   '
+        with open(pphr2, 'wb') as fd:
+            fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
+        pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, 1024)
+
         # Rotate encryption including padding change:
         first_enc = encrypt(datafile, pub1, date=False)
         second_enc = rotate(first_enc, priv1, pub2, pphr_old=pphr1,
-                            new_pad=8192)
-        third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr1,
-                           new_pad=16384, hmac_key='key')
+                            pad_new=8192)
+        third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr2,
+                           pad_new=16384, hmac_new='key')
         # padding affects .enc file size, values vary a little from run to run
         assert getsize(first_enc) < getsize(second_enc) < getsize(third_enc)
+
+        # TO-DO: more rotate tests:
+        # 1) verify original not deleted
+        # 2) verify that passing priv_new, pphr_new verifies the hash
+        #   and deletes orig file
 
         dec_rot3 = decrypt(third_enc, priv1, pphr=pphr1)
         assert not open(dec_rot3).read() == secretText  # dec but still padded
@@ -1712,6 +1732,13 @@ class Tests(object):
                  if 'hmac-sha256 of encrypted file' in list(md[d].keys())]
         assert len(hmacs) == 1
 
+    def test_misc(self):
+        secretText = 'secret snippet %.6f' % get_time()
+        datafile = 'cleartext unic\xcc\x88de.txt'
+        with open(datafile, 'w+b') as fd:
+            fd.write(secretText)
+        pub1, priv1, pphr1, testBits = self._known_values()[:4]
+
         # Should be able to suppress meta-data file:
         new_enc = encrypt(datafile, pub1, meta=False, keep=True)
         data_enc, pwdFileRsa, metaFile = _unpack(new_enc)
@@ -1722,7 +1749,7 @@ class Tests(object):
         assert isfile(datafile)
 
         # Check size of RSA-pub encrypted password for AES256:
-        assert os.path.getsize(pwdFileRsa) == testBits // 8
+        assert os.path.getsize(pwdFileRsa) == int(testBits) // 8
 
         # Non-existent decMethod should fail:
         with pytest.raises(ValueError):
