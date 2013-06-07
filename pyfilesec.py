@@ -444,19 +444,15 @@ def _entropy_check():
     return e
 
 
-def _sha256(filename, prepend='', raw=False):
-    """Return sha256 hexdigest of a file, using a buffered digest.
+def _sha256(filename):
+    """Return sha256 hex-digest of a file, buffered for large files.
     """
     # from stackoverflow:
     dgst = hashlib.sha256()
-    dgst.update(prepend)
     with open(filename, mode='rb') as fd:
         for buf in iter(partial(fd.read, 2048), b''):  # null byte sentinel
             dgst.update(buf)
-    if raw:
-        return dgst.digest()
-    else:
-        return dgst.hexdigest()
+    return dgst.hexdigest()
 
 
 def hmac_sha256(key, filename):
@@ -464,8 +460,6 @@ def hmac_sha256(key, filename):
 
     The key is a string value.
     """
-    # openssl is 100x slower than pure python for small files
-    # use openssl anyway for consistency
     if not key:
         return None
     if getsize(filename) > MAX_FILE_SIZE:
@@ -1767,42 +1761,18 @@ class Tests(object):
         os.umask(umask_restore)
 
     def test_hmac(self):
-        # verify openssl hmac usage against hmac code from wikipedia:
-        def _py_hmac_sha256(key, filename):
-            sha256 = hashlib.sha256
-            if len(key) > _hmac_blocksize:
-                key = sha256(key).digest()
-            key += chr(0) * (_hmac_blocksize - len(key))
-            o_key_pad = key.translate(_hmac_trans_5C)
-            i_key_pad = key.translate(_hmac_trans_36)
-            dgst = sha256(o_key_pad + _sha256(filename, i_key_pad, True))
-
-            return dgst.hexdigest()
-
-        _hmac_trans_5C = "".join(chr(x ^ 0x5c) for x in range(256))
-        _hmac_trans_36 = "".join(chr(x ^ 0x36) for x in range(256))
-        _hmac_blocksize = hashlib.sha256().block_size
-
+        # verify openssl hmac usage against a widely used example:
         key = 'key'
-        bigkey = key * _hmac_blocksize
-        # use a widely used example = useful for validation:
         value = "The quick brown fox jumps over the lazy dog"
         hm = 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
         hb = '69d6cdc2fef262d48a4b012df5327e9b1679b6e3c95b05c940a18374b059a5e7'
         tmp = 'hmac_test'
         with open(tmp, 'wb+') as fd:
             fd.write(value)
-
-        hmac_python = _py_hmac_sha256(key, tmp)
-        hmac_python_bigkey = _py_hmac_sha256(bigkey, tmp)
         hmac_openssl = hmac_sha256(key, tmp)
-        hmac_openssl_bigkey = hmac_sha256(bigkey, tmp)
         # avoid '==' to test because openssl 1.0.x returns this:
         # 'HMAC-SHA256(filename)= f7bc83f430538424b13298e6aa6fb143e97479db...'
         assert hmac_openssl.endswith(hm)
-        assert hmac_python == hm
-        assert hmac_python_bigkey == hb
-        assert hmac_openssl_bigkey.endswith(hb)
 
     def test_command_line(self):
         # send encrypt and decrypt commands via command line
