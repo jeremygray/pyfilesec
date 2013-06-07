@@ -563,7 +563,7 @@ def wipe(filename, cmdList=()):
 
     # Try to detect & inform about hardlinks:
     # srm will detect but not affect those links or the inode data
-    # shred will blast the inode's data, but not unlink other links
+    # shred and fsutil will blast the inode's data, but not unlink other links
     if sys.platform != 'win32':
         file_stat = os.stat(filename)
         orig_links = file_stat[stat.ST_NLINK]
@@ -713,7 +713,7 @@ def pad(filename, size=16384, test=False, strict=True):
     To make unpadding easier and more robust (= facilitate human inspection),
     the end bytes provide the number of padding bytes that were added, plus an
     identifier. 10 digits is not hard-coded as 10, but as the length of
-    str(max_file_size), where max_file_size is 1G by default (2**30). Changes
+    str(max_file_size), where max_file_size is 8G by default. Changes
     to the max file size can thus cause pad / unpad failures.
 
     Special size values:
@@ -816,7 +816,7 @@ def _unpad_strict(filename, test=False):
 
 
 @Umask
-def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
+def encrypt(datafile, pub, meta=True, date=True, keep=False,
             enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
     """Encrypt a file using AES-256, encrypt the password with RSA public-key.
 
@@ -829,7 +829,7 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
     By default, the original plaintext is secure-deleted after encryption (see
     parameter `keep=False`).
 
-    Files larger than 1G (2^30 bytes, before encryption) will raise a
+    Files larger than 8G before encryption will raise a
     ValueError. To mask small file sizes, `pad()` them to a desired minimum
     size before calling `encrypt()`. To encrypt a directory, first tar or zip
     it to create a single file, which you can then `encrypt()`.
@@ -839,8 +839,8 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
         `datafile`:
             The path (name) of the original plaintext file to be encrypted.
             NB: To encrypt a whole directory, first convert it to a single
-            file (using zip or tar czf), then encrypt the .zip or .tar file.
-        `pubkeyPem`:
+            file (using `archive`), then encrypt the archive file.
+        `pub`:
             The public key to use, specified as the path to a .pem file. The
             minimum recommended key length is 2048 bits; 1024 is allowed but
             strongly discouraged as it is not secure.
@@ -857,19 +857,20 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
         `keep`:
             False = remove original (unencrypted) file
             True  = leave original file
-        `encMethod`:
+        `enc_method`:
             name of the function / method to use (currently only one option)
         `hmac_key`:
-            key to use for HMAC-SHA256; if provided a HMAC will be generated
-            and stored with the meta-data
+            optional key to use for HMAC-SHA256, post-encryption; if a key is
+            provided, the HMAC will be generated and stored with the meta-data
+            (encrypt-then-MAC).
 
     """
     name = 'encrypt: '
     logging.debug(name + 'start')
     if not codec.is_registered(enc_method):
         _fatal(name + "requested encMethod '%s' not registered" % enc_method)
-    if not pub_pem or not isfile(pub_pem):
-        _fatal(name + "no public-key.pem; file '%s' not found" % pub_pem)
+    if not pub or not isfile(pub):
+        _fatal(name + "no public-key.pem; file '%s' not found" % pub)
     if not datafile or not isfile(datafile):
         _fatal(name + "no data; file '%s' not found" % datafile)
 
@@ -879,7 +880,7 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
         _fatal(name + "file too large (max size %d bytes)" % MAX_FILE_SIZE)
 
     # Refuse to proceed without a pub key of sufficient bits:
-    bits = get_key_length(pub_pem)
+    bits = get_key_length(pub)
     logging.info(name + 'pubkey length %d' % bits)
     if bits < 1024:
         _fatal("public key < 1024 bits; too short!", PublicKeyTooShortError)
@@ -890,7 +891,7 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
 
     # Do the encryption, using a registered `encMethod`:
     ENCRYPT_FXN = codec.get_function(enc_method)
-    data_enc, pwd_rsa = ENCRYPT_FXN(datafile, pub_pem, OPENSSL)
+    data_enc, pwd_rsa = ENCRYPT_FXN(datafile, pub, OPENSSL)
     ok_encrypt = (isfile(data_enc) and
                     os.stat(data_enc)[stat.ST_SIZE] and
                     isfile(pwd_rsa) and
@@ -899,8 +900,7 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
     # Get and save meta-data (including HMAC):
     if meta:
         metadata = os.path.split(datafile)[1] + META_EXT
-        md = _get_metadata(datafile, data_enc, pub_pem, enc_method,
-                           date, hmac_key)
+        md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
         if not isinstance(meta, dict):
             logging.warning(name + 'non-dict value for meta; using {}')
             meta = {}
@@ -933,7 +933,7 @@ def encrypt(datafile, pub_pem, meta=True, date=True, keep=False,
 
 
 @Umask
-def _encrypt_rsa_aes256cbc(datafile, pub_pem, OPENSSL=''):
+def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
     """
     name = '_encrypt_rsa_aes256cbc'
@@ -947,7 +947,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub_pem, OPENSSL=''):
     if use_rsautl:
         cmd_RSA = [OPENSSL, 'rsautl',
               '-out', pwd_rsa,
-              '-inkey', pub_pem,
+              '-inkey', pub,
               '-keyform', 'PEM',
               '-pubin',
               RSA_PADDING, '-encrypt']
@@ -1058,7 +1058,7 @@ def _get_dec_method(meta_file, dec_method):
 
 
 @Umask
-def decrypt(data_enc, priv_pem, pphr='', outFile='', dec_method=None):
+def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     """Decrypt a file that was encoded using `encrypt()`.
 
     To get the data back, need two files: `data.enc` and `privkey.pem`.
@@ -1071,11 +1071,11 @@ def decrypt(data_enc, priv_pem, pphr='', outFile='', dec_method=None):
     name = 'decrypt: '
     logging.debug(name + 'start')
 
-    priv = abspath(priv_pem)
+    priv = abspath(priv)
     data_enc = abspath(data_enc)
     if pphr and isfile(pphr):
         pphr = open(abspath(pphr), 'rb').read()
-    elif 'ENCRYPTED' in open(priv_pem, 'r').read().upper():
+    elif 'ENCRYPTED' in open(priv, 'r').read().upper():
         _fatal(name + 'missing passphrase (encrypted privkey)', DecryptError)
 
     # Extract files from the archive (dataFileEnc) into the same directory,
@@ -1121,8 +1121,8 @@ def decrypt(data_enc, priv_pem, pphr='', outFile='', dec_method=None):
 
 
 @Umask
-def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
-                           pphr=None, outFile='', OPENSSL=''):
+def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
+                           outFile='', OPENSSL=''):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
     """
     name = '_decrypt_rsa_aes256cbc'
@@ -1140,7 +1140,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
     if use_rsautl:
         cmdRSA = [OPENSSL, 'rsautl',
                   '-in', pwd_rsa,
-                  '-inkey', priv_pem]
+                  '-inkey', priv]
         if pphr:
             if isfile(pphr):
                 logging.warning(name + ': reading passphrase from file')
@@ -1190,7 +1190,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv_pem,
 
 
 @Umask
-def rotate(data_enc, old_priv, new_pub, pphr=None,
+def rotate(data_enc, priv_old, pub_new, pphr_old=None,
            keep=None, hmac_key=None, new_pad=None):
     """Swap old encryption for new (decrypt-then-re-encrypt).
 
@@ -1200,14 +1200,14 @@ def rotate(data_enc, old_priv, new_pub, pphr=None,
     If `new_pad` is given, the padding will be update prior to re-encryption.
     """
     logging.debug('rotate (beta): start')
-    file_dec = decrypt(data_enc, old_priv, pphr=pphr)
+    file_dec = decrypt(data_enc, priv_old, pphr=pphr_old)
     old_meta_file = file_dec + META_EXT
 
     # seem best to always store the date of the rotation
     md = load_metadata(old_meta_file)
     if new_pad > 0:
         pad(file_dec, new_pad)
-    new_enc = encrypt(file_dec, new_pub, date=True, meta=md,
+    new_enc = encrypt(file_dec, pub_new, date=True, meta=md,
                          keep=False, hmac_key=hmac_key)
     if isfile(file_dec):
         wipe(file_dec)
@@ -1251,8 +1251,8 @@ def verify(filename, pub, sig):
         sig_file.write(b64decode(sig))
         sig_file.seek(0)
         if use_rsautl:
-            cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform', 'PEM',
-                         '-signature', sig_file.name, filename]
+            cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform',
+                          'PEM', '-signature', sig_file.name, filename]
         else:
             raise NotImplementedError
         result = _sys_call(cmd_VERIFY)
@@ -1275,7 +1275,8 @@ def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
         _sys_call(cmdGEN + [str(bits)])
 
         # Extract pub from priv:
-        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
+        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
+                     '-pubout', '-out', pub]
         if pphr:
             cmdEXTpub += ['-passin', 'file:' + pphr]
         _sys_call(cmdEXTpub)
@@ -1299,7 +1300,8 @@ def _genRsa2(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
         _sys_call(cmdGEN + [str(bits)], stdin=pphr)
 
         # Extract pub from priv:
-        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
+        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
+                     '-pubout', '-out', pub]
         if pphr:
             cmdEXTpub += ['-passin', 'stdin']
         _sys_call(cmdEXTpub, stdin=pphr)
@@ -1325,12 +1327,12 @@ def genRsaKeys():
         except:
             pass
         try:
-            os.unlink(pub)
+            os.unlink(pub_pem)
         except:
             pass
 
-    pub = abspath(_uniq_file('pub_RSA.pem'))  # ensure unique, abspath
-    priv = pub.replace('pub_RSA', 'priv_RSA')  # ensure a matched pair
+    pub_pem = abspath(_uniq_file('pub_RSA.pem'))  # ensure unique, abspath
+    priv = pub_pem.replace('pub_RSA', 'priv_RSA')  # ensure a matched pair
     if os.path.exists(priv):
         msg = ('RSA key generation.\n  %s already exists\n' % priv +
                '  > Clean up files and try again. Exiting. <')
@@ -1679,8 +1681,8 @@ class Tests(object):
 
         # Rotate encryption including padding change:
         first_enc = encrypt(datafile, pub1, date=False)
-        second_enc = rotate(first_enc, priv1, pub2, pphr=pphr1, new_pad=8192)
-        third_enc = rotate(second_enc, priv2, pub1, pphr=pphr1, new_pad=16384,
+        second_enc = rotate(first_enc, priv1, pub2, pphr_old=pphr1, new_pad=8192)
+        third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr1, new_pad=16384,
                            hmac_key='key')
         # padding affects .enc file size, values vary a little from run to run
         assert getsize(first_enc) < getsize(second_enc) < getsize(third_enc)
