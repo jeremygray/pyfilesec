@@ -1191,28 +1191,49 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
 
 @Umask
 def rotate(data_enc, priv_old, pub_new, pphr_old=None,
-           keep=None, hmac_key=None, new_pad=None):
+           hmac_key=None, new_pad=None):
     """Swap old encryption for new (decrypt-then-re-encrypt).
 
     Returns the path to new encrypted file. A new meta-data entry is added
-    alongside the existing one.
+    alongside the existing one. If `new_pad` is given, the padding will be
+    updated prior to re-encryption.
 
-    If `new_pad` is given, the padding will be update prior to re-encryption.
+    For data safety, the old encrypted version will always be retained. You
+    can rotate the encryption, verify for yourself that it succeeded, and then
+    secure delete (wipe) the old encrypted files. These are three separate
+    steps, with `rotate()` only doing rotation.
     """
-    logging.debug('rotate (beta): start')
+    logging.debug('rotate: start')
     file_dec = decrypt(data_enc, priv_old, pphr=pphr_old)
     old_meta_file = file_dec + META_EXT
 
-    # seem best to always store the date of the rotation
+    # Always store the date of the rotation
     md = load_metadata(old_meta_file)
     if new_pad > 0:
         pad(file_dec, new_pad)
     new_enc = encrypt(file_dec, pub_new, date=True, meta=md,
                          keep=False, hmac_key=hmac_key)
+
+    # Never want the intermediate decrypted file to remain:
     if isfile(file_dec):
         wipe(file_dec)
 
     return new_enc
+
+
+def rotate_all(data_enc_list, priv_old, pub_new, pphr_old=None,
+               hmac_key=None, new_pad=None):
+    """Convenience function to rotate the encryption on a list of files.
+
+    Eg, every other year regenerate an RSA key pair and rotate the encryption.
+    """
+    new_list = []
+    for data_enc in data_enc_list:
+        new_enc = rotate(data_enc, priv_old, pub_new, pphr_old,
+                     hmac_key, new_pad)
+        new_list.append(new_enc)
+
+    return new_list
 
 
 def sign(filename, priv, pphr=None):
@@ -1681,9 +1702,10 @@ class Tests(object):
 
         # Rotate encryption including padding change:
         first_enc = encrypt(datafile, pub1, date=False)
-        second_enc = rotate(first_enc, priv1, pub2, pphr_old=pphr1, new_pad=8192)
-        third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr1, new_pad=16384,
-                           hmac_key='key')
+        second_enc = rotate(first_enc, priv1, pub2, pphr_old=pphr1,
+                            new_pad=8192)
+        third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr1,
+                           new_pad=16384, hmac_key='key')
         # padding affects .enc file size, values vary a little from run to run
         assert getsize(first_enc) < getsize(second_enc) < getsize(third_enc)
 
