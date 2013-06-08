@@ -1206,7 +1206,8 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
             del pwd  # might as well try
             # e.g., manual interrupt when queried for passphrase
 
-    if se_RSA:
+    se_RSA = se_RSA.replace("Loading 'screen' into random state - done", '')
+    if se_RSA.strip():
         if 'unable to load Private Key' in se_RSA:
             _fatal('%s: unable to load Private Key' % name, PrivateKeyError)
         elif 'RSA operation error' in se_RSA:
@@ -1567,10 +1568,10 @@ class Tests(object):
         # passwords are typically sent to openssl via stdin
         msg = 'yello'
         if sys.platform == 'win32':
-            cmd = ['findstr', msg]
+            cmd = 'findstr'
         else:
-            cmd = ['grep', msg]
-        greeting = _sys_call(cmd, stdin=msg)
+            cmd = 'grep'
+        greeting = _sys_call([cmd, msg], stdin=msg)
         assert greeting == msg
 
     def test_codec_registry(self):
