@@ -291,39 +291,36 @@ def _get_openssl_info():
     """Find, check, and report info about the OpenSSL binary on this system.
     """
     if sys.platform in ['win32']:
-        #  -- untested, just a guess at this point --
-        # use a bat file for openssl.cfg; create .bat if not found or broken:
+        # use a bat file for openssl.cfg; create .bat if not found or broken
+        # might have to move to os.environ['HOME'] to ensure write permission
         libdir = os.path.split(os.path.abspath(__file__))[0]
-        bat_name = '_runopenssl.bat'
-        bat_file = os.path.join(libdir, bat_name)
-        if os.path.exists(bat_file):
-            test = _sys_call([bat_file, 'version'])
-            if not test.startswith('OpenSSL'):
-                os.unlink(bat_file)  # to trigger error warning
-        if not os.path.exists(bat_file):
+        bat_name = '_openssl.bat'
+        OPENSSL = os.path.join(libdir, bat_name)
+        if not os.path.exists(OPENSSL):
             logging.info('no working %s file; trying to recreate' % bat_name)
-            default = 'C:\\OpenSSL-Win32\\bin\\openssl.exe'
-            bat_str = """@echo off
-                set PATH=XXOPENSSL_PATHXX;%PATH%
-                set OPENSSL_CONF=XX-OPENSSL_PATH-XX\\openssl.cfg
-                START "" /b /wait openssl.exe %*""".replace('    ', '')
-            default_bat = bat_str.replace('XXOPENSSL_PATHXX', default)
-            with open(bat_file, 'wb') as fd:
-                fd.write(default_bat)
-            test = _sys_call([bat_file, 'version'])
+            default = 'C:\\OpenSSL-Win32\\bin'
+            openssl_expr = 'XX-OPENSSL_PATH-XX'
+            bat = """@echo off
+                set PATH=""" + openssl_expr + """;%PATH%
+                set OPENSSL_CONF=""" + openssl_expr + """\\openssl.cfg
+                START "" /b /wait openssl.exe %*"""
+            default = bat.replace(openssl_expr, default).replace('    ', '')
+            with open(OPENSSL, 'wb') as fd:
+                fd.write(default)
+            test = _sys_call([OPENSSL, 'version'])
             if not test.startswith('OpenSSL'):
-                # `where` can take a while, avoid if at all possible
-                cmd = ['where', '/R', 'C:\\', 'openssl.exe']
+                # locate and cache result, takes 5-6 seconds:
+                cmd = ['where', '/r', 'C:\\', 'openssl.exe']
                 where_out = _sys_call(cmd)
-                guess = where_out.splitlines()[0]
-                where_bat = bat_str.replace('XXOPENSSL_PATHXX', guess)
-                with open(bat_file, 'wb') as fd:
+                if not where_out.strip().endswith('openssl.exe'):
+                    _fatal('Failed to find OpenSSL.exe.\n' +
+                           'Please install under C:\ and try again.')
+                guess = where_out.splitlines()[0]  # take first match
+                guess_path = guess.replace(os.sep + 'openssl.exe', '')
+                where_bat = bat.replace(openssl_expr, guess_path)
+                with open(OPENSSL, 'wb') as fd:
                     fd.write(where_bat)
-                test = _sys_call([bat_file, 'version'])
-                if not test.startswith('OpenSSL'):
-                    os.unlink(bat_file)  # to trigger error warning
-            OPENSSL = bat_file
-        logging.info('using .bat file for OpenSSL: %s' % bat_file)
+        logging.info('will use .bat file for OpenSSL: %s' % OPENSSL)
     for i, arg in enumerate(sys.argv):
         if arg.startswith('--openssl='):
             # spaces in path ok if parses as one argument
@@ -337,16 +334,10 @@ def _get_openssl_info():
             if OPENSSL not in ['/usr/bin/openssl']:
                 msg = 'unexpected location for openssl binary: %s' % OPENSSL
                 logging.warning(msg)
-        else:
-            OPENSSL = bat_file
+        #else:
+        #    OPENSSL = bat_file  # already set
     if not isfile(OPENSSL):
-        if sys.platform not in ['win32']:
-            msg = 'Could not find openssl, tried: %s' % OPENSSL
-        else:
-            msg = 'Could not find openssl.exe\n' +\
-              'Expecting C:\\OpenSSL-Win32\\bin\\openssl.exe, ' +\
-              'or %s\\openssl.exe\n' % cwd +\
-              'Try http://www.slproweb.com/products/Win32OpenSSL.html'
+        msg = 'Could not find openssl, tried: %s' % OPENSSL
         _fatal(msg, RuntimeError)
 
     openssl_version = _sys_call([OPENSSL, 'version'])
@@ -372,8 +363,19 @@ def _get_destroy_info():
         destroy_TOOL = _sys_call(['which', 'shred'])
         destroy_OPTS = ('-f', '-u', '-n', '7')
     elif sys.platform in ['win32']:
-        guess = _sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])  # vista+
-        destroy_TOOL = guess
+        libdir = os.path.split(os.path.abspath(__file__))[0]
+        default = os.path.join(libdir, '_sdelete.bat')
+        if not isfile(default):
+            guess = _sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
+            if not guess.strip().endswith('sdelete.exe'):
+                _fatal('''Failed to find sdelete.exe. Please install ''' +
+                       '''under C:\, run manually, and accept the terms.''')
+            bat = """START "" /b /wait SDELETE %*""".replace('SDELETE', guess)
+            with open(default, 'wb') as fd:
+                fd.write(bat)
+        destroy_TOOL = default
+        sd_version = _sys_call([destroy_TOOL]).splitlines()[2]
+        logging.info('Found ' + sd_version)
         destroy_OPTS = ('-q', '-p', '7')
     else:
         destroy_TOOL = ''
