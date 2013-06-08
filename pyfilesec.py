@@ -416,8 +416,11 @@ if True:
     # 10 = # digits in max file size, also works for 4G files
     #  2 = # extra bytes, one at end, one between PAD_STR and PFS_PAD labels
 
+    # value to use for missing meta-data:
+    META_DATA_UNKNOWN = '(meta-data unknown)'
+
     # used if user suppresses the date; will sort before a numerical date:
-    NO_DATE = '(date-time suppressed)'
+    DATE_UNKNOWN = '(date-time unknown)'
 
     whitespace_re = re.compile('\s')
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
@@ -640,6 +643,12 @@ def _uniq_file(filename):
     return filename
 
 
+def _get_no_metadata():
+    """Return valid meta-data format, with no data
+    """
+    return {'meta-data %s' % DATE_UNKNOWN: META_DATA_UNKNOWN}
+
+
 def _get_metadata(datafile, data_enc, pub, enc_method, date=True, hmac=None):
     """Return info about an encryption context, as a {date-now: {info}} dict.
 
@@ -670,7 +679,7 @@ def _get_metadata(datafile, data_enc, pub, enc_method, date=True, hmac=None):
             # only want ms precision for testing, which can easily
             # generate two files within ms of each other
     else:
-        now = NO_DATE
+        now = DATE_UNKNOWN
     md.update({'encrypted year-month-day-localtime-Hm.s.ms': now,
         'openssl version': openssl_version,
         'platform': sys.platform,
@@ -860,11 +869,18 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
             minimum recommended key length is 2048 bits; 1024 is allowed but
             strongly discouraged as it is not secure.
         `meta`:
-            If `True`, include meta-data as plaintext in the archive::
+            If `True` or a dict, include meta-data plaintext in the archive::
+
                 original file name & sha256 of encrypted
                 platform & date
                 openssl version, padding
                 pubkey info (to aid in key rotation)
+
+                If given a dict, the dict will be updated with new meta-data.
+                This allows all meta-data to be retained from the initial
+                encryption and multiple rotations of the encryption.
+
+            If `False`, explicitly indicate that the meta-data were suppressed.
         `date`:
             True mean save the date in the clear-text meta-data.
             Use False if the date is sensitive.
@@ -913,12 +929,14 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
                     os.stat(pwd_rsa)[stat.ST_SIZE] >= 128)
 
     # Get and save meta-data (including HMAC):
-    if meta:
+    if not meta:
+        md = _get_no_metadata()
+    else:
         metadata = os.path.split(datafile)[1] + META_EXT
         md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
         if not isinstance(meta, dict):
-            logging.warning(name + 'non-dict value for meta; using {}')
-            meta = {}
+            logging.warning(name + 'non-dict value for meta; using default')
+            meta = _get_no_metadata()
         meta.update(md)
         with open(metadata, 'w+b') as fd:
             json.dump(meta, fd)
@@ -1210,22 +1228,28 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
            hmac_new=None, pad_new=None):
     """Swap old encryption for new (decrypt-then-re-encrypt).
 
-    Returns the path to the new encrypted file. A new meta-data entry is added
-    alongside the existing one. If `new_pad` is given, the padding will be
-    updated prior to re-encryption.
+    Returns the path to the "same" underlying file (i.e., same contents, new
+    encryption). New meta-data are added alongside the original meta-data. If
+    `new_pad` is given, the padding will be updated to the new value prior to
+    re-encryption.
 
-    By default the old encrypted file will be retained, to ensure data is
-    not destroyed. Yet this of itself is not ideal because key rotation is
-    typically done when the old keys are no longer considered secure. To
-    have the old encrypted file destroyed as part of rotation, give the private
-    key (`priv_new`, new passphrase `pphr_new` as needed). If it successfully
-    decrypts, as determined by matching hash values, `rotate` will also destroy
-    (secure delete) the old encrypted file. That is, conceptually there are
-    three separate steps, with `rotate()` only doing rotation by default. To
-    do the other two, it needs the private key of the new file in order to
-    confirm the new encryption. Only if this is provided and succeeds will the
-    original file be destroyed. Note that padding a file will change the hash
-    value, so the hash of the original is taken after rotating the padding.
+    Conceptually there are three separate steps: rotate, verify the new file,
+    and destroy the old file. By default, `rotate()` will only do rotation. To
+    do the other two steps, `rotate()` requires an existence proof that the new
+    encrypted file can be decrypted. If decrypting the new file succeeds (which
+    requires `priv_new` and `pphr_new`), then original file will be destroyed.
+
+    The dilemma is that it would be highly undesirable to re-encrypt the data
+    with a new public key for which the private key is not available. But
+    simply retaining the original encrypted file is also not ideal: Key
+    rotation is typically done when the old keys are no longer considered
+    secure. It is desirable to destroy the old encrypted file as soon as it is
+    safe to do so. Hashes are used to determine whether the file contents match
+    (ignoring possible differences in padding).
+
+    `rotate()` will generally try to be permissive about its inputs, so that
+    its easy to rotate the encryption to recover from some internal formatting
+    errors.
     """
     name = 'rotate'
     logging.debug(name + ': start')
@@ -1234,7 +1258,16 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
         old_meta = file_dec + META_EXT
 
         # Always store the date of the rotation
-        md = load_metadata(old_meta)
+        if isfile(old_meta):
+            try:
+                md = load_metadata(old_meta)
+                if not type(md) == dict:
+                    raise InternalFormatError
+            except:
+                logging.error(name + ': failed to read metadata from file')
+                md = _get_no_metadata()
+        else:
+            md = _get_no_metadata()
         if pad_new > 0:  # can be -1
             pad(file_dec, pad_new)
         # for verification, only hash after changing the padding
@@ -1242,8 +1275,8 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
         new_enc = encrypt(file_dec, pub_new, date=True, meta=md,
                              keep=False, hmac_key=hmac_new)
     finally:
-        # Never want the intermediate decrypted stuff; encrypt() will destroy
-        # it but might be an exception before get to encrypt()
+        # Never want the intermediate clear-text; encrypt() will destroy
+        # it but there might be an exception before getting to encrypt()
         if isfile(file_dec):
             destroy(file_dec)
         if isfile(old_meta):
@@ -1772,12 +1805,15 @@ class Tests(object):
         dates = list(md.keys())
         hashes = [md[d]['sha256 of encrypted file'] for d in dates]
         assert len(hashes) == len(set(hashes)) == 3
-        assert ('meta-data %s' % NO_DATE) in dates
+        assert ('meta-data %s' % DATE_UNKNOWN) in dates
 
         # Should be only one hmac-sha256 present; hashing tested in test_hmac:
         hmacs = [md[d]['hmac-sha256 of encrypted file'] for d in dates
                  if 'hmac-sha256 of encrypted file' in list(md[d].keys())]
         assert len(hmacs) == 1
+
+    def test_no_metadata(self):
+        raise NotImplementedError
 
     def test_misc(self):
         secretText = 'secret snippet %.6f' % get_time()
