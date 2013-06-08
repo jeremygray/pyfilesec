@@ -1685,10 +1685,16 @@ class Tests(object):
         try:
             orig = 'bigfile.zeros'
             enc = 'bigfile' + ARCHIVE_EXT
-            _sys_call(['dd', 'if=/dev/zero', 'of=%s' % orig,
+            if sys.platform == 'win32':
+                with open(orig, 'wb') as fd:
+                    zeros = b'\0' * bs
+                    for i in range(count):
+                        fd.write(zeros)
+            else:
+                _sys_call(['dd', 'if=/dev/zero', 'of=%s' % orig,
                       'bs=%d' % bs, 'count=%d' % count])
             pub, priv, pphr = self._known_values()[:3]
-            encrypt('%s' % orig, pub)
+            encrypt(orig, pub)
             bigfile_size = getsize(enc)
             decrypt(enc, priv, pphr)
             bigfile_zeros_size = getsize(orig)
