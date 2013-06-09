@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""pyFileSec: File privacy & integrity tools, e.g., for human-subjects research
+"""pyFileSec: File-oriented privacy & integrity management tools
 """
 
  # Copyright (c) Jeremy R. Gray, 2013
@@ -35,7 +35,6 @@ from os.path import abspath, isfile, getsize
 import stat
 import shutil
 import tarfile
-import zipfile
 import re
 from random import SystemRandom
 sysRand = SystemRandom()
@@ -98,10 +97,18 @@ if python_version < '3.':
     input23 = raw_input
 else:
     input23 = input
+
 if sys.platform == 'win32':
     get_time = time.clock
+    from win32com.shell import shell
+    user_can_admin = shell.IsUserAnAdmin()
+    user_can_link = user_can_admin  # for fsutil hardlink
+    if not user_can_link:
+        logging.warn('%s: No admin priv; cannot check hardlinks' % lib_name)
 else:
     get_time = time.time
+    user_can_admin = False  # not known; not needed
+    user_can_link = True
 
 
 class PyFileSecError(Exception):
@@ -220,7 +227,7 @@ class PFSCodecRegistry(object):
         return fxn_name in self._functions
 
 
-class Umask(object):
+class SetUmask(object):
     """Decorator for functions that create files.
     """
     def __init__(self, fxn):
@@ -502,7 +509,7 @@ def _printable_pwd(nbits=256):
     return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
 
 
-@Umask
+@SetUmask
 def make_archive(paths, name='', keep=True):
     """Make a tgz file from a list of paths, set permissions. Directories ok.
 
@@ -576,21 +583,17 @@ def destroy(filename, cmdList=()):
     # Try to detect & inform about hardlinks:
     # srm will detect but not affect those links or the inode data
     # shred and fsutil will blast the inode's data, but not unlink other links
-    if sys.platform != 'win32':
+    orig_links = _get_hardlink_count(filename)
+    if sys.platform != 'win32' and orig_links > 1:
+        mount_path = abspath(filename)
+        while not os.path.ismount(mount_path):
+            mount_path = os.path.dirname(mount_path)
+        msg = name + """: '%s' (inode %d) has other hardlinks:
+            `find %s -xdev -inum %d`""".replace('    ', '')
         file_stat = os.stat(filename)
-        orig_links = file_stat[stat.ST_NLINK]
-        if orig_links > 1:
-            mount_path = abspath(filename)
-            while not os.path.ismount(mount_path):
-                mount_path = os.path.dirname(mount_path)
-            msg = name + """: '%s' (inode %d) has other hardlinks:
-                `find %s -xdev -inum %d`""".replace('    ', '')
-            inode = file_stat[stat.ST_INO]
-            vals = (filename, inode, mount_path, inode)
-            logging.warning(msg % vals)
-    else:
-        links = _sys_call(['fsutil.exe', 'hardlink', 'list', filename])
-        orig_links = len([f for f in links.splitlines() if f.strip()])
+        inode = file_stat[stat.ST_INO]
+        vals = (filename, inode, mount_path, inode)
+        logging.warning(msg % vals)
 
     if not cmdList:
         cmdList = (destroy_TOOL,) + destroy_OPTS + (filename,)
@@ -628,8 +631,32 @@ def destroy(filename, cmdList=()):
     return pfs_UNKNOWN, orig_links, get_time() - t0
 
 
-def _get_permissions(filename):
+def _get_file_permissions(filename):
     return int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+
+
+def _set_file_permissions(filename, mode):
+    pass
+    # import win32security  # looks interesting
+    # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
+    #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
+    # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
+    # win32security.GetFileSecurity(filename, info)
+    # win32security.SetFileSecurity
+
+
+def _get_hardlink_count(filename):
+    if sys.platform == 'win32':
+        if user_can_link:
+            cmd = ('fsutil', 'hardlink', 'list', filename)
+            links = _sys_call(cmd)
+            count = len([f for f in links.splitlines() if f.strip()])
+        else:
+            logging.warn('need to be an admin to use fsutil.exe (hardlink)')
+            count = -1
+    else:
+        count = os.stat(filename)[stat.ST_NLINK]
+    return count
 
 
 def _uniq_file(filename):
@@ -839,7 +866,7 @@ def _unpad_strict(filename, test=False):
     return getsize(filename)
 
 
-@Umask
+@SetUmask
 def encrypt(datafile, pub, meta=True, date=True, keep=False,
             enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
     """Encrypt a file using AES-256, encrypt the password with RSA public-key.
@@ -965,7 +992,7 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
     return abspath(archive)
 
 
-@Umask
+@SetUmask
 def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
     """
@@ -1010,7 +1037,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     return abspath(data_enc), abspath(pwd_rsa)
 
 
-@Umask
+@SetUmask
 def _unpack(data_enc):
     """Extract files from archive, return paths to files.
     """
@@ -1090,7 +1117,7 @@ def _get_dec_method(meta_file, dec_method):
     return dec_method
 
 
-@Umask
+@SetUmask
 def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     """Decrypt a file that was encoded using `encrypt()`.
 
@@ -1153,7 +1180,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     return abspath(clear_text)
 
 
-@Umask
+@SetUmask
 def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
                            outFile='', OPENSSL=''):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
@@ -1223,7 +1250,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
     return abspath(data_dec)
 
 
-@Umask
+@SetUmask
 def rotate(data_enc, priv_old, pub_new, pphr_old=None,
            priv_new=None, pphr_new=None,
            hmac_new=None, pad_new=None):
@@ -1347,7 +1374,7 @@ def verify(filename, pub, sig):
 
 
 # likely to remove this code, and refactor tests to use _genRsa2 (no file):
-@Umask
+@SetUmask
 def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     """For TESTS: generate new RSA pub and priv keys, return paths to files.
 
@@ -1372,7 +1399,7 @@ def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     return abspath(pub), abspath(priv)
 
 
-@Umask
+@SetUmask
 def _genRsa2(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     """Generate new RSA pub and priv keys, return paths to files.
 
@@ -1484,6 +1511,10 @@ def genRsaKeys():
 
 class Tests(object):
     """Test suite for py.test
+
+    - unicode in paths fail on win32
+    - permissions fail on win32
+    - fsutil need admin priv on win32
     """
     def setup_class(self):
         global pytest
@@ -1564,15 +1595,19 @@ class Tests(object):
         return (abspath(pub), abspath(priv), abspath(pphr),
                 bits, (kwnSig0p9p8, kwnSig1p0))
 
-    def test_stdin(self):
+    def test_stdin_pipeout(self):
         # passwords are typically sent to openssl via stdin
-        msg = 'yello'
-        if sys.platform == 'win32':
-            cmd = 'findstr'
-        else:
-            cmd = 'grep'
-        greeting = _sys_call([cmd, msg], stdin=msg)
-        assert greeting == msg
+        msg = 'echo'
+        cmd = ('grep', 'findstr')[sys.platform == 'win32']
+        echo = _sys_call([cmd, msg], stdin=msg)
+        assert echo == msg
+
+    def test_unicode_path_read_write(self):
+        tmp = ' ¡pathol☢gical filename! '
+        with open(tmp, 'wb') as fd:
+            fd.write(b'\0')
+        with open(tmp, 'rb') as fd:
+            b = fd.read()
 
     def test_codec_registry(self):
         # Test basic set-up:
@@ -1820,7 +1855,7 @@ class Tests(object):
         assert len(hmacs) == 1
 
     def test_no_metadata(self):
-        raise NotImplementedError
+        pytest.skip()
 
     def test_misc(self):
         secretText = 'secret snippet %.6f' % get_time()
@@ -1878,12 +1913,13 @@ class Tests(object):
         umask_restore = os.umask(0o000)  # need permissive to test
         with open(filename, 'wb') as fd:
             fd.write(b'\0')
-        assert _get_permissions(filename) == 0o666  # is permissive for test
+        assert _get_file_permissions(filename) == 0o666  # permissive to test
         enc = encrypt(filename, pub)
-        assert _get_permissions(enc) == PERMISSIONS  # restricted
+        # os.chmod(enc, PERMISSIONS)  # even this fails win32 as admin
+        assert _get_file_permissions(enc) == PERMISSIONS  # fails win32
         assert not os.path.isfile(filename)
         dec = decrypt(enc, priv, pphr)
-        assert _get_permissions(dec) == PERMISSIONS  # restricted
+        assert _get_file_permissions(dec) == PERMISSIONS  # restricted
         os.umask(umask_restore)
 
     def test_hmac(self):
@@ -1959,6 +1995,9 @@ class Tests(object):
 
     def test_destroy_links(self):
         # Test detection of multiple links to a file when destroy()ing it:
+
+        if not user_can_link:
+            pytest.skip()  # need admin priv for fsutil
         tw_path = 'tmp_test_destroy'
         with open(tw_path, 'wb') as fd:
             fd.write(b'\0')
@@ -1971,7 +2010,7 @@ class Tests(object):
             else:
                 os.link(tw_path, new)
 
-        hardlinks = os.stat(tw_path)[stat.ST_NLINK]
+        hardlinks = _get_hardlink_count(tw_path)
         code, links, __ = destroy(tw_path)
         assert links == numlinks + 1  # +1 for itself
         assert links == hardlinks

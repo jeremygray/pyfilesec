@@ -16,7 +16,7 @@ setup(
                  'Programming Language :: Python :: 3',
                  'Operating System :: POSIX :: Linux',
                  'Operating System :: MacOS :: MacOS X',
-                 #'Operating System :: Microsoft :: Windows',  # soon!
+                 'Operating System :: Microsoft :: Windows',
                  'Intended Audience :: Science/Research',
                  'Intended Audience :: System Administrators',
                  'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
@@ -24,7 +24,8 @@ setup(
                  'Topic :: System :: Systems Administration',
                  'Topic :: Security'
                  ],
-    keywords=['encryption', 'security', 'privacy', 'integrity', 'human subjects', 'research'],
+    keywords=['encryption', 'security', 'privacy', 'integrity',
+              'human subjects', 'research'],
     url='https://github.com/jeremygray/pyFileSec',
     description='File-oriented privacy & integrity management tools',
     long_description=open('README.txt').read(),
