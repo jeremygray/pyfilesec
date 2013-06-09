@@ -652,7 +652,7 @@ def _get_hardlink_count(filename):
             links = _sys_call(cmd)
             count = len([f for f in links.splitlines() if f.strip()])
         else:
-            logging.warn('need to be an admin to use fsutil.exe (hardlink)')
+            logging.warning('need to be an admin to use fsutil.exe (hardlink)')
             count = -1
     else:
         count = os.stat(filename)[stat.ST_NLINK]
@@ -1521,7 +1521,7 @@ class Tests(object):
         import pytest
 
         self.start_dir = os.getcwd()
-        tmp = '.__öpensslwrap test__'
+        tmp = '.__opensslwrap test__'
         shutil.rmtree(tmp, ignore_errors=True)
         os.mkdir(tmp)
         self.tmp = abspath(tmp)
@@ -1532,7 +1532,7 @@ class Tests(object):
             shutil.rmtree(self.tmp, ignore_errors=False)
             # CentOS + py2.6 says Tests has no attr self.tmp
         except:
-            myhome = '/home/jgray/.__öpensslwrap test__'
+            myhome = '/home/jgray/.__opensslwrap test__'
             shutil.rmtree(myhome, ignore_errors=False)
         finally:
             os.chdir(self.start_dir)
@@ -1743,21 +1743,21 @@ class Tests(object):
     def test_encrypt_decrypt(self):
         # Lots of tests here (just to avoid re-generating keys a lot)
         secretText = 'secret snippet %.6f' % get_time()
-        datafile = 'cleartext unic\xcc\x88de.txt'
+        datafile = 'cleartext unicode.txt'
         with open(datafile, 'w+b') as fd:
             fd.write(secretText)
 
         testBits = 2048  # fine to test with 1024 and 4096
-        pubTmp1 = 'pubkey1 unic\xcc\x88de.pem'
-        prvTmp1 = 'prvkey1 unic\xcc\x88de.pem'
-        pphr1 = 'passphrs1 unic\xcc\x88de.txt'
+        pubTmp1 = 'pubkey1 unicode.pem'
+        prvTmp1 = 'prvkey1 unicode.pem'
+        pphr1 = 'passphrs1 unicode.txt'
         with open(pphr1, 'wb') as fd:
             fd.write(_printable_pwd(180))
         pub1, priv1 = _genRsa(pubTmp1, prvTmp1, pphr1, testBits)
 
-        pubTmp2 = 'pubkey2 unic\xcc\x88de.pem   '  # trailing whitespace in
-        prvTmp2 = 'prvkey2 unic\xcc\x88de.pem   '  # file names
-        pphr2 = 'passphrs2 unic\xcc\x88de.txt   '
+        pubTmp2 = 'pubkey2 unicode.pem   '  # trailing whitespace in
+        prvTmp2 = 'prvkey2 unicode.pem   '  # file names
+        pphr2 = 'passphrs2 unicode.txt   '
         with open(pphr2, 'wb') as fd:
             fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
         pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, testBits)
@@ -1809,14 +1809,14 @@ class Tests(object):
     def test_rotate(self):
         # Set-up:
         secretText = 'secret snippet %.6f' % get_time()
-        datafile = 'cleartext unic\xcc\x88de.txt'
+        datafile = 'cleartext unicode.txt'
         with open(datafile, 'w+b') as fd:
             fd.write(secretText)
         pub1, priv1, pphr1, testBits = self._known_values()[:4]
 
-        pubTmp2 = 'pubkey2 unic\xcc\x88de.pem   '  # trailing whitespace in
-        prvTmp2 = 'prvkey2 unic\xcc\x88de.pem   '  # file names
-        pphr2 = 'passphrs2 unic\xcc\x88de.txt   '
+        pubTmp2 = 'pubkey2 unicode.pem   '  # trailing whitespace in
+        prvTmp2 = 'prvkey2 unicode.pem   '  # file names
+        pphr2 = 'passphrs2 unicode.txt   '
         with open(pphr2, 'wb') as fd:
             fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
         pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, 1024)
@@ -1859,7 +1859,7 @@ class Tests(object):
 
     def test_misc(self):
         secretText = 'secret snippet %.6f' % get_time()
-        datafile = 'cleartext unic\xcc\x88de.txt'
+        datafile = 'cleartext unicode.txt'
         with open(datafile, 'w+b') as fd:
             fd.write(secretText)
         pub1, priv1, pphr1, testBits = self._known_values()[:4]
@@ -2209,6 +2209,8 @@ class Tests(object):
 
 # Basic set-up (order matters) ------------------------------------------------
 logging, logging_t0 = _setup_logging()
+if not user_can_link:
+    logging.warning('%s: No admin priv; cannot check hardlinks' % lib_name)
 OPENSSL, openssl_version, use_rsautl = _get_openssl_info()
 destroy_TOOL, destroy_OPTS = _get_destroy_info()
 
