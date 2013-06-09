@@ -103,8 +103,6 @@ if sys.platform == 'win32':
     from win32com.shell import shell
     user_can_admin = shell.IsUserAnAdmin()
     user_can_link = user_can_admin  # for fsutil hardlink
-    if not user_can_link:
-        logging.warn('%s: No admin priv; cannot check hardlinks' % lib_name)
 else:
     get_time = time.time
     user_can_admin = False  # not known; not needed
@@ -1602,12 +1600,19 @@ class Tests(object):
         echo = _sys_call([cmd, msg], stdin=msg)
         assert echo == msg
 
-    def test_unicode_path_read_write(self):
+    def test_unicode_path_openssl(self):
         tmp = ' ¡pathol☢gical filename! '
+
+        # test basic file read-write:
         with open(tmp, 'wb') as fd:
             fd.write(b'\0')
         with open(tmp, 'rb') as fd:
             b = fd.read()
+
+        # test whether encrypt can handle it:
+        pub = self._known_values()[0]
+        enc = encrypt(tmp, pub)  # seems like tarfile fails here
+        assert isfile(enc)
 
     def test_codec_registry(self):
         # Test basic set-up:
@@ -1939,7 +1944,7 @@ class Tests(object):
     def test_command_line(self):
         # send encrypt and decrypt commands via command line
 
-        datafile = 'cleartext unicöde.txt'
+        datafile = 'cleartext unicode.txt'
         secretText = 'secret snippet %.6f' % get_time()
         with open(datafile, 'wb') as fd:
             fd.write(secretText)
@@ -1978,7 +1983,7 @@ class Tests(object):
                 fd.write(b'\0')
             code, links, t1 = destroy(tw_path)
             assert code == pfs_DESTROYED
-            assert links == 1
+            # assert links == 1  # separate test
             destroy_times.append(t1)
         unlink_times = []
         for i in range(tw_reps):
@@ -1996,12 +2001,14 @@ class Tests(object):
     def test_destroy_links(self):
         # Test detection of multiple links to a file when destroy()ing it:
 
-        if not user_can_link:
-            pytest.skip()  # need admin priv for fsutil
         tw_path = 'tmp_test_destroy'
         with open(tw_path, 'wb') as fd:
             fd.write(b'\0')
         assert isfile(tw_path)  # need a file or can't test
+        if not user_can_link:
+            code, links, __ = destroy(tw_path)
+            assert links == -1
+            pytest.skip()  # need admin priv for fsutil
         numlinks = 2
         for i in range(numlinks):
             new = tw_path + 'hardlink' + str(i)
