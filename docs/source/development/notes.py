@@ -36,6 +36,7 @@
     - command line options:
         -h | --help, --verbose, --version, --debug
         --openssl=/path/to/openssl  (eg: /usr/local/ssl/bin/openssl )
+        --genrsa
     - PEP8 compliant code (almost)
 
     To be added to documentation:
@@ -45,9 +46,13 @@
     - the command-line mode means that non-python programs can access pyfilesec
       functions if they can do system calls.
     - RSA pub-key is thought to be medium-term-secure if 2048+ bits;
-      see http://www.keylength.com
+        see http://www.keylength.com
+        keys generated with poor sources of randomness will be weaker, so to
+        achieve an effective 2048-bit key a 4096-bit key is not unreasonable.
+        8192 is included as a proof-of-feasability, not because its necessary.
     - tries to use 256 bits for the openssl enc password using
         random.SystemRandon.getrandbits(nbits)
+    - no attempt made to mitigate side-channel attacks
     - *.enc files are simply .tgz files, "tar xvf filename.enc"
     - file time-stamps will leak date-time info even if you set date=False
     - Need to watch that the orig file path doesn't contain anything sensitive;
@@ -68,47 +73,79 @@
         http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html)
     - tests for randomness quality could only catch really egregious cases, do
         not seem worth doing
-    - a minimal custom codec is provided (see tests) as proof of concept:
+    - a minimal custom codec is provided (see tests) as proof of feasability:
         Strongly suggest only add another codec if its demonstrably better than
         RSA+AES256. The point of the codec is to provide a transition path in
-        the event that the current choice becomes weak. The point is not to
+        the event that the current choice is discovered to be weak. The point is not to
         provide flexibility for the sake of flexiblity, but rather to give an
         escape hatch: Demonstrate future-proofing, but don't use it until
-        forced. You might be forced by a company or university policy for
+        forced to use it. You might be forced by a company or university policy for
         example (e.g., only using a specific approved version of pgp).
-    - add generate RSA keys options and documentation; its not easy to export
-        PEM format from GPG, you get PGP-format .asc
+    - add generate RSA keys documentation; its not easy to export
+        PEM format from GPG, you get PGP-format .asc; not east to import either.
         docs: note that a good entropy source is not trivial, and getting a
         hardware RNG is the way to go for demanding applications.
+    - documentation: when is HMAC or other integrity assurance most useful?
+        time-based HMAC string: retrieve from remote server that logs the request
+        (time, IP address, and actual HMAC key), then also logs upload time of
+        the encrypted file
+        
     - References:
-        1. N. Ferguson, B. Schneier, & T. Kohno 2010. Cryptographic
-            engineering. Wiley Publishing Inc: Indianapolis IN, USA
-        2. http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html
+        1. N. Ferguson, B. Schneier, & T. Kohno. 2010. Cryptographic
+            engineering: Design prinicples and practical applications.
+            Wiley Publishing Inc: Indianapolis IN, USA
+            ==> recommend RSA-oaep + AES256-CBC
+            ==> use 256 bits to be more sure of getting 128-bit protection
+        2. Colin Percival.
+            ==> recommend AES256-CTR + separate HMAC, talk about "small attack surface"
+            Posted at 2009-06-11 14:20
+              http://www.daemonology.net/blog/2009-06-11-cryptographic-right-answers.html
+            Posted at 2009-06-24 22:15. Encrypt-then-MAC.
+              http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html
 
-    - tested with 6 versions of openssl, on Mac OS X and 3 linux distributions:
-        OpenSSL 0.9.8r  8 Feb 2011     Mac 10.8.3, python 2.7.3
-        OpenSSL 1.0.1e 11 Feb 2013     same Mac, openssl via macports
-        OpenSSL 1.1.0-dev xx XXX xx    same Mac, clone from github & compile
-        OpenSSL 1.0.0-fips 29 Mar 2010 CentOS 6.4, python 2.6.6
-        OpenSSL 1.0.1  14 Mar 2012     Ubuntu 12.04.2 LTS, python 2.7.3
-        OpenSSL 0.9.8o 01 June 2010    Debian (squeeze), python 2.6.6
-      Using rsautl passes on all platforms tested to date; pkeyutl does not.
-      Recovering a known file signature only works if the reference sig was
-      created by the same version (0.9.8r vs 1.0.*).
 
-    To-do near-term:
-    - test everything on Windows, esp mkdtemp, sdelete (what default path?)
-        random.SystemRandom(), openssl (what install dir?),
-        hardlink detection (in wipe), umask, padding,
-        time.time/time.clock (now used in wipe as well),
-        how long does 'where /r C:\ openssl.exe' take?
-    - add tests for:
-        preserve orig file in case of failed encryption
+    TO-DO NEAR TERM (0.2 release):
+    - win32:
+        verify error
+    - missing or bad metadata:
+        raise InternalFormatError to have no metadata
+        need explicit md = {'(date unknown)', None}
+    - command line
     - docs
-    - refactor to avoid passphrase in file, use stdin
+        filesec.png is taken directly from crystal project icons
+        index.html
+        Installation
+        Usage
+        - as library
+        - command line
+        Key generation & handling
+        Performance
+        
 
-    Medium-term:
-    - tarfile.TarInfo() for managing owner, permissions, time, etc
+    Medium-term (0.3 - 0.5):
+    - willing to support PyCrypto: if you have it through Enthought Canopy
+        is easier than installing openssl on win32
+    - willing to support gpg for RSA encryption of the AES password
+        check for gpg version issues with this approach
+        "   --passphrase-fd n
+                Read the passphrase from file descriptor n.
+            --passphrase-file file
+                Read the passphrase from file file.
+
+        encrypt:
+        recipient_ID = pubkeyPem  # not a .pem, like BE98EFB5
+        cmd_GPG = ['gpg', '-e', '-r', recipient_ID, datafile]
+
+        decrypt:
+        recipient_ID = privkeyPem  # but its a GPG id, like BE98EFB5
+        cmd_GPG = ['gpg', '-u', recipient_ID, '-d', '--passphrase-fd', '0', datafileEnc]
+        pwd = _sysCall(cmd_GPG, stdin=passphrase)
+        # cmd_GPG = ['gpg', '-u', recipient_ID, '-o', datafileDec, '-d', '--passphrase-fd', '0', datafileEnc]
+        # _sysCall(cmd_GPG, stdin=passphrase)
+        
+        return datafileDec
+    - test on Python 3.2
+    - use zip instead of tar; tarfile.TarInfo() for managing owner, permissions, time, etc
     - sphinx docs
     - make _encrypt_x / _decrypt_x truly modular, pass in all needed values
     - MS: CBC is not so great here, esp. if you care about data integrity and
@@ -119,24 +156,27 @@
           https://github.com/jedisct1/libsodium
         # JRG: unclear about the issue; only because CBC does not do HMAC?
         # OpenSSL added GCM support in 1.0.1;
-        # by default macs are still on 0.9.8r
+        # by default macs are still on 0.9.8r (or 0.9.8x for 10.8.4)
         # the design decision to stick with openssl still seems reasonable;
-        #    supporting a pycrypto backend might be useful
-        # encrypt-then-MAC is robust as separate steps
+        #    supporting a pycrypto backend might be good
+        # encrypt-then-MAC has some merits as separate steps
         # see http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html
       could add _encrypt_aes256gcm function if this becomes urgent
 
     Long-term (think about):
+    - refactor _enc _dec into their own files, get hash, store hash in codec
+        registry and meta-data
     - first-run / --setup wizard:
         run self-tests
         enable / disable RSA key generation; don't want to generate keys all
           the time or haphazardly; key proliferation is a bad thing
         set / confirm paths to openssl, sdelete
         add alias to __file__ to shell path for command line usage
+        basic benchmarking of performance time to enc/dec by file size so that
+          can make inferences about time based on file size when running
     - more to pkeyutl instead of rsautl when possible; currently not:
         -decrypt with passphrase seems to fail, maybe -sign as well
     - use zip instead of tar for file bundle, easier to work with items in mem
-    - documentation: when is HMAC or other integrity assurance most useful?
     - decrypt to a tempfile.SpooledTemporaryFile() instead of cleartext file
     - rewrite enc / dec as a class
 

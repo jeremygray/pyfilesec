@@ -1540,7 +1540,7 @@ class Tests(object):
             # CentOS + py2.6 says Tests has no attr self.tmp
         except:
             myhome = '/home/jgray/__pyfilesec test__'
-            shutil.rmtree(myhome, ignore_errors=False)
+            shutil.rmtree(myhome, ignore_errors=True)
         finally:
             os.chdir(self.start_dir)
 

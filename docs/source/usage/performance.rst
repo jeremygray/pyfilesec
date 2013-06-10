@@ -29,8 +29,8 @@ tested yet.
 
 With one exception, the specific version of OpenSSL does not matter. The
 known exception is that there are incompatibilities between v0.9.x and v1.0.x
-when using sign / verify. Tested with 7 versions of openssl, running on Mac OS
-X and 3 linux distributions:
+when using sign / verify. Tested with 9 versions of openssl, running on Mac OS
+X (10.8), 3 linux distributions, and Windows 7::
 
     OpenSSL 0.9.8r  8 Feb 2011     Mac 10.8.3, python 2.7.3
     OpenSSL 0.9.8x 10 May 2012     Mac 10.8.4, python 2.7.3
@@ -39,6 +39,8 @@ X and 3 linux distributions:
     OpenSSL 1.0.0-fips 29 Mar 2010 CentOS 6.4, python 2.6.6
     OpenSSL 1.0.1  14 Mar 2012     Ubuntu 12.04.2 LTS, python 2.7.3
     OpenSSL 0.9.8o 01 June 2010    Debian (squeeze), python 2.6.6
+    OpenSSL 1.0.1e Light           Windows 7, python 2.7.3
+    OpenSSL 1.0.1e                 same Windows
 
 Encryption is basically linear in time and disk space (file size; times
 will vary with CPU, disk speed, etc)::

@@ -3,6 +3,7 @@
 *.log
 *.orig
 *__pycache__*
+*__pyfilesec test__*
 .coverage
 .idea
 dist
