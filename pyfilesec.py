@@ -373,13 +373,14 @@ def _get_destroy_info():
         if not isfile(default):
             guess = _sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
             if not guess.strip().endswith('sdelete.exe'):
-                _fatal('''Failed to find sdelete.exe. Please install ''' +
-                       '''under C:\, run manually, and accept the terms.''')
-            bat = """START "" /b /wait SDELETE %*""".replace('SDELETE', guess)
+                _fatal('Failed to find sdelete.exe. Please install ' +
+                       'under C:\\, run it manually to accept the terms.')
+            bat = """@echo off
+                START "" /b /wait SDELETE %*""".replace('SDELETE', guess)
             with open(default, 'wb') as fd:
                 fd.write(bat)
         destroy_TOOL = default
-        sd_version = _sys_call([destroy_TOOL]).splitlines()[2]
+        sd_version = _sys_call([destroy_TOOL]).splitlines()[0]
         logging.info('Found ' + sd_version)
         destroy_OPTS = ('-q', '-p', '7')
     else:
@@ -1164,10 +1165,18 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
         # Rename decrypted and meta files:
         _new_path = os.path.join(dest_dir, data_dec.split(os.sep)[-1])
         clear_text = _uniq_file(_new_path)
-        os.rename(data_dec, clear_text)
+        try:
+            os.rename(data_dec, clear_text)
+        except OSError:
+            shutil.copy(data_dec, clear_text)
+            destroy(data_dec)
         if meta_file:
             newMeta = _uniq_file(clear_text + META_EXT)
-            os.rename(meta_file, newMeta)
+            try:
+                os.rename(meta_file, newMeta)
+            except OSError:
+                shutil.copy(meta_file, newMeta)
+                destroy(meta_file)
     finally:
         try:
             os.chmod(clear_text, PERMISSIONS)  # should be done
@@ -1438,12 +1447,12 @@ def genRsaKeys():
         except:
             pass
         try:
-            os.unlink(pub_pem)
+            os.unlink(pub)
         except:
             pass
 
-    pub_pem = abspath(_uniq_file('pub_RSA.pem'))  # ensure unique, abspath
-    priv = pub_pem.replace('pub_RSA', 'priv_RSA')  # ensure a matched pair
+    pub = abspath(_uniq_file('pub_RSA.pem'))  # ensure unique, abspath
+    priv = pub.replace('pub_RSA', 'priv_RSA')  # ensure a matched pair
     if os.path.exists(priv):
         msg = ('RSA key generation.\n  %s already exists\n' % priv +
                '  > Clean up files and try again. Exiting. <')
@@ -1601,18 +1610,26 @@ class Tests(object):
         assert echo == msg
 
     def test_unicode_path_openssl(self):
-        tmp = ' ¡pathol☢gical filename! '
+        stuff = b'\0'
+        for filename in ['normal', ' ¡pathol☢gical filename!  ']:
+            u = _uniq_file(filename)
+            assert u == filename
 
-        # test basic file read-write:
-        with open(tmp, 'wb') as fd:
-            fd.write(b'\0')
-        with open(tmp, 'rb') as fd:
-            b = fd.read()
+            # test basic file read-write:
+            with open(filename, 'wb') as fd:
+                fd.write(stuff)
+            with open(filename, 'rb') as fd:
+                b = fd.read()
+            # test whether archive works:
+            t = make_archive(filename)
 
-        # test whether encrypt can handle it:
-        pub = self._known_values()[0]
-        enc = encrypt(tmp, pub)  # seems like tarfile fails here
-        assert isfile(enc)
+            # test whether encrypt can handle it:
+            pub, priv, pphr = self._known_values()[:3]
+            enc = encrypt(filename, pub)  # tarfile fails here with bad filename
+            assert isfile(enc)
+
+            dec = decrypt(enc, priv, pphr)
+            assert stuff == open(dec, 'rb').read()
 
     def test_codec_registry(self):
         # Test basic set-up:
@@ -1748,22 +1765,22 @@ class Tests(object):
     def test_encrypt_decrypt(self):
         # Lots of tests here (just to avoid re-generating keys a lot)
         secretText = 'secret snippet %.6f' % get_time()
-        datafile = 'cleartext unicode.txt'
+        datafile = 'cleartext no unicode.txt'
         with open(datafile, 'w+b') as fd:
             fd.write(secretText)
 
         testBits = 2048  # fine to test with 1024 and 4096
-        pubTmp1 = 'pubkey1 unicode.pem'
-        prvTmp1 = 'prvkey1 unicode.pem'
-        pphr1 = 'passphrs1 unicode.txt'
+        pubTmp1 = 'pubkey1 no unicode.pem'
+        prvTmp1 = 'prvkey1 no unicode.pem'
+        pphr1 = 'passphrs1 no unicode.txt'
         with open(pphr1, 'wb') as fd:
             fd.write(_printable_pwd(180))
         pub1, priv1 = _genRsa(pubTmp1, prvTmp1, pphr1, testBits)
 
-        pubTmp2 = 'pubkey2 unicode.pem   '  # trailing whitespace in
-        prvTmp2 = 'prvkey2 unicode.pem   '  # file names
+        pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
+        prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
         pphr2 = 'passphrs2 unicode.txt   '
-        with open(pphr2, 'wb') as fd:
+        with open(pphr2, 'wno b') as fd:
             fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
         pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, testBits)
 
@@ -1814,14 +1831,14 @@ class Tests(object):
     def test_rotate(self):
         # Set-up:
         secretText = 'secret snippet %.6f' % get_time()
-        datafile = 'cleartext unicode.txt'
+        datafile = 'cleartext no unicode.txt'
         with open(datafile, 'w+b') as fd:
             fd.write(secretText)
         pub1, priv1, pphr1, testBits = self._known_values()[:4]
 
-        pubTmp2 = 'pubkey2 unicode.pem   '  # trailing whitespace in
-        prvTmp2 = 'prvkey2 unicode.pem   '  # file names
-        pphr2 = 'passphrs2 unicode.txt   '
+        pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
+        prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
+        pphr2 = 'passphrs2 no unicode.txt   '
         with open(pphr2, 'wb') as fd:
             fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
         pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, 1024)
@@ -1913,7 +1930,7 @@ class Tests(object):
         assert PERMISSIONS == 0o600
         assert UMASK == 0o077
 
-        filename = 'umask_test'
+        filename = 'umask_test no unicode'
         pub, priv, pphr = self._known_values()[:3]
         umask_restore = os.umask(0o000)  # need permissive to test
         with open(filename, 'wb') as fd:
@@ -1933,7 +1950,7 @@ class Tests(object):
         value = "The quick brown fox jumps over the lazy dog"
         hm = 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
         hb = '69d6cdc2fef262d48a4b012df5327e9b1679b6e3c95b05c940a18374b059a5e7'
-        tmp = 'hmac_test'
+        tmp = 'hmac_test no unicode'
         with open(tmp, 'wb+') as fd:
             fd.write(value)
         hmac_openssl = hmac_sha256(key, tmp)
@@ -1944,7 +1961,7 @@ class Tests(object):
     def test_command_line(self):
         # send encrypt and decrypt commands via command line
 
-        datafile = 'cleartext unicode.txt'
+        datafile = 'cleartext no unicode.txt'
         secretText = 'secret snippet %.6f' % get_time()
         with open(datafile, 'wb') as fd:
             fd.write(secretText)
@@ -1975,7 +1992,7 @@ class Tests(object):
         if sys.platform == 'win32' and not destroy_TOOL:
             pytest.skip()
 
-        tw_path = 'tmp_test_destroy'
+        tw_path = 'tmp_test_destroy no unicode'
         tw_reps = 3
         destroy_times = []
         for i in range(tw_reps):
@@ -2001,7 +2018,7 @@ class Tests(object):
     def test_destroy_links(self):
         # Test detection of multiple links to a file when destroy()ing it:
 
-        tw_path = 'tmp_test_destroy'
+        tw_path = 'tmp_test_destroy no unicode'
         with open(tw_path, 'wb') as fd:
             fd.write(b'\0')
         assert isfile(tw_path)  # need a file or can't test
