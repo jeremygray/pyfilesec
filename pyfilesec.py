@@ -1528,7 +1528,7 @@ class Tests(object):
         import pytest
 
         self.start_dir = os.getcwd()
-        tmp = '.__opensslwrap test__'
+        tmp = '__pyfilesec test__'
         shutil.rmtree(tmp, ignore_errors=True)
         os.mkdir(tmp)
         self.tmp = abspath(tmp)
@@ -1539,7 +1539,7 @@ class Tests(object):
             shutil.rmtree(self.tmp, ignore_errors=False)
             # CentOS + py2.6 says Tests has no attr self.tmp
         except:
-            myhome = '/home/jgray/.__opensslwrap test__'
+            myhome = '/home/jgray/__pyfilesec test__'
             shutil.rmtree(myhome, ignore_errors=False)
         finally:
             os.chdir(self.start_dir)
@@ -1779,8 +1779,8 @@ class Tests(object):
 
         pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
         prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
-        pphr2 = 'passphrs2 unicode.txt   '
-        with open(pphr2, 'wno b') as fd:
+        pphr2 = 'passphrs2 no unicode.txt   '
+        with open(pphr2, 'wb') as fd:
             fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
         pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, testBits)
 
