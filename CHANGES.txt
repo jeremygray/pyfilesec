@@ -1,8 +1,13 @@
 Version 0.1
 ===========
 
+v0.1.6
+---------------------
+
 v0.1.5
 ---------------------
+* ADDED initial Windows support; most tests pass except unusual filename, verify, file permissions
+* DOCS notes and prep for sphinx-based documentation
 
 v0.1.4
 ---------------------

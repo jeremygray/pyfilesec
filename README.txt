@@ -8,8 +8,8 @@ level of privacy (AES256), capable of protecting confidential information from
 inspection or accidental disclosure. Integrity assurance may be useful in
 archival and provenance applications.
 
-The motivation for developing pyFileSec is to better secure research data from
-human subjects, e.g., in combination with PsychoPy or the Open Science
+The motivation for developing pyFileSec is to better secure research data obtained
+from human subjects, e.g., in combination with PsychoPy or the Open Science
 Framework. The hope is that pyFileSec will be more widely useful. Command-line
 usage will make it accessible from non-python programs (e.g., EPrime via the
 ``Shell()`` command).
