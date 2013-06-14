@@ -1367,7 +1367,9 @@ def verify(filename, pub, sig):
     """
     name = 'verify'
     logging.debug(name + ': start')
-    with NamedTemporaryFile() as sig_file:
+
+    if sys.platform == 'win32':
+        sig_file = open('tmp' + str(get_time()), 'w+b')
         sig_file.write(b64decode(sig))
         sig_file.seek(0)
         if use_rsautl:
@@ -1376,6 +1378,18 @@ def verify(filename, pub, sig):
         else:
             raise NotImplementedError
         result = _sys_call(cmd_VERIFY)
+        sig_file.close()
+        os.unlink(sig_file.name)
+    else:
+        with NamedTemporaryFile() as sig_file:
+            sig_file.write(b64decode(sig))
+            sig_file.seek(0)
+            if use_rsautl:
+                cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform',
+                              'PEM', '-signature', sig_file.name, filename]
+            else:
+                raise NotImplementedError
+            result = _sys_call(cmd_VERIFY)
 
     return result in ['Verification OK', 'Verified OK']
 
