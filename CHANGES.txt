@@ -3,6 +3,7 @@ Version 0.1
 
 v0.1.6
 ---------------------
+* FIXED verify() works on Windows 7
 
 v0.1.5
 ---------------------
