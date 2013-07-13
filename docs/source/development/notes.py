@@ -26,8 +26,6 @@
     - many additional tests, including whitespace + unicode in paths
     - always chmod decrypted files to 0o600; set umask beforehand
     - try to secure-remove decrypted file if get an exception during decryption
-    - set file size limited to 1G; likely could go larger but need to consider
-      speed (so does not appear to just hang), free RAM, 32 vs 64-bit, etc
     - can now pad files to be a specific file-size, and unpad. can change the
       padding when rotating the encryption
     - py.test compatible
@@ -52,7 +50,7 @@
         8192 is included as a proof-of-feasability, not because its necessary.
     - tries to use 256 bits for the openssl enc password using
         random.SystemRandon.getrandbits(nbits)
-    - no attempt made to mitigate side-channel attacks
+    - no attempt made to mitigate side-channel attacks (out of scope)
     - *.enc files are simply .tgz files, "tar xvf filename.enc"
     - file time-stamps will leak date-time info even if you set date=False
     - Need to watch that the orig file path doesn't contain anything sensitive;
@@ -60,8 +58,8 @@
     - file length is not obscured by default; typically in psych / human neuro,
       the file length would not tell you a lot about its contents, although
       there could be exceptions, e.g., for criminal records. for this reason,
-      `pad()` and `_unpad_strict()` are provided, but the onus is on the user
-      them. Call before `encrypt()` and after `decrypt()`.
+      `pad()` is provided, but the onus is on the user. Call before `encrypt()`
+      and after `decrypt()`.
     - to encrypt a directory, the user must first bundle it as a single file,
       e.g., using opensslwrap.archive(dir_path), and then encrypt that. *But*
       you must also manage any desired file clean-up / secure delete of the
@@ -89,7 +87,8 @@
         time-based HMAC string: retrieve from remote server that logs the request
         (time, IP address, and actual HMAC key), then also logs upload time of
         the encrypted file
-        
+    - approach: http://wiki.openssl.org/index.php/EVP_Asymmetric_Encryption_and_Decryption_of_an_Envelope
+
     - References:
         1. N. Ferguson, B. Schneier, & T. Kohno. 2010. Cryptographic
             engineering: Design prinicples and practical applications.
@@ -103,14 +102,14 @@
             Posted at 2009-06-24 22:15. Encrypt-then-MAC.
               http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html
 
-
-    TO-DO NEAR TERM (0.2 release):
-    - win32:
-        verify error
+    TO-DO NEAR TERM (milestone 0.2 release):
     - missing or bad metadata:
+        internalFormatError to have other than 3 files in the .archive:
+            encrypted data, encrypted password, meta-data
+            in future, meta-data could become a zip or tar file if need extensibility
         raise InternalFormatError to have no metadata
         need explicit md = {'(date unknown)', None}
-    - command line
+    - command line: enc, dec, rotate, pad, genrsa, destroy
     - docs
         filesec.png is taken directly from crystal project icons
         index.html
@@ -120,9 +119,10 @@
         - command line
         Key generation & handling
         Performance
-        
 
-    Medium-term (0.3 - 0.5):
+    Medium-term (milestone 0.3 - 0.5):
+    - fix win32 unicode filename
+    - win32 file permissions (win32security)
     - willing to support PyCrypto: if you have it through Enthought Canopy
         is easier than installing openssl on win32
     - willing to support gpg for RSA encryption of the AES password
@@ -142,7 +142,7 @@
         pwd = _sysCall(cmd_GPG, stdin=passphrase)
         # cmd_GPG = ['gpg', '-u', recipient_ID, '-o', datafileDec, '-d', '--passphrase-fd', '0', datafileEnc]
         # _sysCall(cmd_GPG, stdin=passphrase)
-        
+
         return datafileDec
     - test on Python 3.2
     - use zip instead of tar; tarfile.TarInfo() for managing owner, permissions, time, etc
@@ -177,14 +177,32 @@
     - more to pkeyutl instead of rsautl when possible; currently not:
         -decrypt with passphrase seems to fail, maybe -sign as well
     - use zip instead of tar for file bundle, easier to work with items in mem
-    - decrypt to a tempfile.SpooledTemporaryFile() instead of cleartext file
+    - encrypt/decrypt from/to a tempfile.SpooledTemporaryFile() instead of cleartext file
     - rewrite enc / dec as a class
 
+    OpenSSL entropy:
+    Jakob Bohm jb-openssl@wisemo.com via openssl.org posted
+        "When you use the "openssl genrsa" commandline command, it will load some
+        random bytes from /dev/random or /dev/urandom
+        and use those to seed the OpenSSL PRNG, which in turn is used to generate
+        the private key.
+
+        /dev/random and /dev/urandom reseed themselves from hardware as necessary.
+
+        If you have a source of entropy other than /dev/random, you can pass it
+        to "openssl genrsa -rand YourEntropyFile" and it will be used to seed
+        the OpenSSL PRNG, by making "openssl genrsa" call RAND_add().
+
+        If you have a source of entropy other than /dev/random and want to use
+        it as an additonal seed for /dev/random, just use the non-openssl command
+        "cat YourEntropyFile > /dev/random", in fact that is what most
+        good hardware entropy device drivers do."
+
     Related projects:
-    pyOpenSSL - "thin wrapper around (a subset of) the OpenSSL library"
-    pycrypto - complete, need to compile; might be a backend but it seems
-        like should always prefer OpenSSL if at all possible
+    **pycrypto** - complete, need to compile; might be a good alternative backend,
+        comes in Enthought Canopy; good to support a non-OpenSSL way to encrypt
+        (because want modularity)
     M2Crypto - "M2Crypto is the most complete Python wrapper for OpenSSL"
-    pycryptopp - not complete enough: "AES, XSalsa20, and Ed25519 signatures."
+    pyOpenSSL - "thin wrapper around (a subset of) the OpenSSL library"
     pycogworks.crypto - interesting but no crypto except an ID generator
 """

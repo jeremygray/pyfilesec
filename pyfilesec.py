@@ -479,7 +479,7 @@ def hmac_sha256(key, filename):
     if not key:
         return None
     if getsize(filename) > MAX_FILE_SIZE:
-        _fatal('hmac_sha256: msg too large (> max file size)')
+        _fatal('hmac_sha256: file too large (> max file size)')
     cmd_HMAC = [OPENSSL, 'dgst', '-sha256', '-hmac', key, filename]
     hmac_openssl = _sys_call(cmd_HMAC)
 
@@ -999,7 +999,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
 
     # Define file paths:
     data_enc = _uniq_file(abspath(datafile + AES_EXT))
-    pwd_rsa = data_enc + RSA_EXT
+    pwd_rsa = data_enc + RSA_EXT  # path to RSA-encrypted session key
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     if use_rsautl:
@@ -1019,7 +1019,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
               '-out', data_enc,
               '-pass', 'stdin']
 
-    # Generate a password, ensure no whitespace (should never happen):
+    # Generate a password (digital envelope "session" key):
     pwd = _printable_pwd(nbits=256)
     assert not whitespace_re.search(pwd)
     try:
@@ -1222,7 +1222,8 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
               '-out', data_dec,
               '-pass', 'stdin']
 
-    # retrieve password (to RAM), then use to decrypt the data file:
+    # decrypt pwd (digital envelope "session" key) to RAM using private key
+    # then use pwd to decrypt the ciphertext file (data_enc):
     try:
         if pphr and not isfile(pphr):
             pwd, se_RSA = _sys_call(cmdRSA, stdin=pphr, stderr=True)  # want se
@@ -1237,9 +1238,10 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
     finally:
         if 'pwd' in locals():
             del pwd  # might as well try
-            # e.g., manual interrupt when queried for passphrase
 
-    se_RSA = se_RSA.replace("Loading 'screen' into random state - done", '')
+    if sys.platform == 'win32':
+        unhelpful_glop = "Loading 'screen' into random state - done"
+        se_RSA = se_RSA.replace(unhelpful_glop, '')
     if se_RSA.strip():
         if 'unable to load Private Key' in se_RSA:
             _fatal('%s: unable to load Private Key' % name, PrivateKeyError)

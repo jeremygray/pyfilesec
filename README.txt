@@ -11,13 +11,13 @@ archival and provenance applications.
 The motivation for developing pyFileSec is to better secure research data obtained
 from human subjects, e.g., in combination with PsychoPy or the Open Science
 Framework. The hope is that pyFileSec will be more widely useful. Command-line
-usage will make it accessible from non-python programs (e.g., EPrime via the
-``Shell()`` command).
+usage will make it accessible from non-python programs, such as EPrime via the
+``Shell()`` command.
 
 Several excellent Python packages are available for encryption. However, file
 security requires far more than just encryption. The main and potentially
-unique contribution of pyFileSec is that it aspires to provide secure file
-management tools having a low barrier to entry. These considerations motivate
+unique contribution of pyFileSec is that it aspires to provide secure file-
+management with a low barrier to entry. These considerations motivate
 many of the design choices.
 
 The main functions provided include encryption: ``encrypt()``, ``decrypt()``,
@@ -34,15 +34,15 @@ easily extensible framework for adding other encryption backends (e.g.,
 PyCrypto or GPG, should they be desired), without requiring changes to the API.
 
 The integrated test-suite passes on **Mac OS X** (10.8) and **Linux** (CentOS 6.4,
-Debian squeeze, and Ubuntu 12.04). Most tests pass on **Windows** 7 (exceptions:
-``verify()``, filenames with spaces and unicode, and file permissions). Tested
-using 9 versions of OpenSSL, including a compiled development release.
+Debian squeeze, and Ubuntu 12.04). Most tests pass on **Windows** 7 (except filenames
+with unicode, and file permissions). Tested using 9 versions of OpenSSL,
+including a compiled development release.
 Python 3.x support looks easy (``2to3`` passes now).
 
 Milestones:
 
-- 0.2.0  Documentation, complete Windows and command-line support.
-- 0.3.0  Python 3, and alternative encryption backend (``PyCrypto`` or ``GPG``)
+- 0.2.0  Documentation, command-line support. Move to beta status.
+- 0.3.0  Windows file-permissions, Python 3, and alternative encryption backend
 
 Contributors
 -------------
