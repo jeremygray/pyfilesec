@@ -37,7 +37,7 @@
         --genrsa
     - PEP8 compliant code (almost)
     - gc.set_debug(gc.DEBUG_LEAK) shows nothing uncollectable during
-        "python pyfilesec.py --debug"
+        "python pyfilesec.py debug"
 
     To be added to documentation:
     - an encrypted or decrypted file will be created in the same directory as
@@ -63,7 +63,7 @@
       `pad()` is provided, but the onus is on the user. Call before `encrypt()`
       and after `decrypt()`.
     - to encrypt a directory, the user must first bundle it as a single file,
-      e.g., using opensslwrap.archive(dir_path), and then encrypt that. *But*
+      e.g., using make_archive(dir_path), and then encrypt that. *But*
       you must also manage any desired file clean-up / secure delete of the
       orig files. `encrypt()` only secure-deletes the original of the file
       that it was requested to encrypt.
@@ -122,6 +122,7 @@
         - command line
         Key generation & handling
         Performance
+        - some gc.uncollectables (GzipFile instance) on linux with py 2.6.6
 
     Medium-term (milestone 0.3 - 0.5):
     - fix win32 unicode filename

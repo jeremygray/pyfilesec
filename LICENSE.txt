@@ -21,7 +21,6 @@ INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WITH RESPECT
 TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE USE OF THE SOFTWARE, EVEN
 IF THE COPYRIGHT HOLDER HAS BEEN OR IS HEREAFTER ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGES.
-"""
 
 In basic terms, this allows you to use, redistribute, add to, modify, or even
 sell, PyFileSec or any of it's components. If you do release any such
@@ -30,4 +29,3 @@ distribution and must also license your product under the GNU GPL.
 
 For the complete text of the GPL license see
 http://www.gnu.org/copyleft/gpl.html
-

@@ -1478,9 +1478,9 @@ def genRsaKeys():
         return None, None
 
     print('\nRSA key generation. Will try to create two files:')
-    pub_msg = '  pub  = %s' % pub #os.path.split(pub)#[1]
+    pub_msg = '  pub  = %s' % pub  # os.path.split(pub)#[1]
     print(pub_msg)
-    priv_msg = '  priv = %s' % priv #os.path.split(priv)#[1]
+    priv_msg = '  priv = %s' % priv  # os.path.split(priv)#[1]
     print(priv_msg)
     print('To proceed, enter a passphrase (16+ chars, return to generate).')
     pphr = getpass.getpass('Passphrase: ')
@@ -2277,7 +2277,6 @@ if __name__ == '__main__':
         global pytest
         import pytest
         import gc
-
         gc.enable()
         gc.set_debug(gc.DEBUG_LEAK)
 
@@ -2356,4 +2355,4 @@ if __name__ == '__main__':
             raise ValueError('No action requested (command line).')
 
         result = fxn(args.filename, **kw)
-        print result
+        print(result)
