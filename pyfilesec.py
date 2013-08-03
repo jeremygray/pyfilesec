@@ -452,6 +452,8 @@ def _entropy_check():
             e = securityd + ' running'
         else:
             e = ''
+        rdrand = _sys_call(['sysctl', 'hw.optional.rdrand'])
+        e += '; rdrand: ' + rdrand
     elif sys.platform.startswith('linux'):
         avail = _sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
         e = 'entropy_avail: ' + avail
