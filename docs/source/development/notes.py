@@ -113,7 +113,6 @@
             in future, meta-data could become a zip or tar file if need extensibility
         raise InternalFormatError to have no metadata
         need explicit md = {'(date unknown)', None}
-    - command line: enc, dec, rotate, pad, genrsa, destroy
     - docs
         filesec.png is taken directly from crystal project icons
         index.html

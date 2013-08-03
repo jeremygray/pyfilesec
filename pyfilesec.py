@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.1.6'
+__version__ = '0.1.7'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
@@ -64,41 +64,42 @@ def _parse_args():
     parser = argparse.ArgumentParser(
         description='File-oriented privacy & integrity management library.',
         epilog="See https://pypi.python.org/pypi/pyFileSec/")
-    parser.add_argument('--version', action='version',
-        version='%s %s' % (lib_name, __version__))
+    parser.add_argument('filename', help='path to file to process, "genrsa", or "debug"')
+    parser.add_argument('--version', action='version', version=__version__)
+    parser.add_argument('--verbose', action='store_true', help='print logging info to stdout')
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--encrypt', help='encrypt with RSA + AES256 (-u [-o][-m][-n][-c][-z][-e][-k])')
-    group.add_argument('--decrypt', help='use private key to decrypt (-v [-o][-d][-r])')
-    group.add_argument('--rotate', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
-    group.add_argument('--sign', help='sign file / make signature (-v [-r])')
-    group.add_argument('--verify', help='verify a signature using public key (-u -g)')
-    group.add_argument('--pad', help='obscure file length by padding with bytes ([-z])')
-    group.add_argument('--destroy', help='secure delete', nargs=1)
-    group.add_argument('--genrsa', action='store_true', help='enter command-line dialog to generate an RSA key pair')
-    group.add_argument('--debug', help='run suite of self-tests (requires pytest), verbose output', action="store_true")
+    group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-o][-m][-n][-c][-z][-e][-k])')
+    group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v [-o][-d][-r])')
+    group.add_argument('--rotate', action='store_true', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
+    group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r])')
+    group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -g)')
+    group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
+    group.add_argument('--destroy', action='store_true', help='secure delete')
 
     parser.add_argument('--openssl', help='specify path of the openssl binary to use')
-    #parser.add_argument('-i', '--in', help='path to file to work on (plain or cipher text)')
     parser.add_argument('-o', '--out', help='path name for generated (output) file')
     parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
-    #parser.add_argument('-U', '--pubn', help='path to new public key (.pem file)')
+    parser.add_argument('-U', '--pubn', help='path to new public key (.pem file)')
     parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
     parser.add_argument('-V', '--nprv', help='path to new private key (--rotate only)')
     parser.add_argument('-r', '--pphr', help='path to file containing passphrase for private key')
     parser.add_argument('-R', '--nppr', help='path to file containing passphrase for new priv key')
-    #parser.add_argument('-e', '--enc', help='register encryption m, nargs=1ethod to use')
-    #parser.add_argument('-d', '--dec', help='register decryption method to use')
     parser.add_argument('-m', '--meta', help='False to suppress saving meta-data with encrypted file')
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
-    parser.add_argument('-s', '--sig', help='path to signature file (for --verify)')
+    parser.add_argument('-s', '--sig', help='path to signature file (input file for --verify)')
     parser.add_argument('-z', '--size', type=int, help='num bytes for --pad, default 16384; unpad = 0 or -1')
     parser.add_argument('-n', '--nodate', action='store_true', help='do not save encryption date in the meta-data')
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after encryption')
+    #parser.add_argument('-e', '--enc', help='register encryption m, nargs=1ethod to use')
+    #parser.add_argument('-d', '--dec', help='register decryption method to use')
 
     return parser.parse_args()
 
-args = _parse_args()
+if __name__ == "__main__":
+    args = _parse_args()
+else:
+    args = None
 
 if python_version() < '2.6.6':
     raise RuntimeError('Requires python 2.6+')
@@ -267,9 +268,7 @@ def _setup_logging():
         error = warning = exp = data = info = debug
 
     logging_t0 = get_time()
-    verbose = bool('--verbose' in sys.argv or '--debug' in sys.argv)
-    if '--verbose' in sys.argv:
-        del(sys.argv[sys.argv.index('--verbose')])
+    verbose = args and bool(args.verbose or args.filename == 'debug')
     if not verbose:
         logging = _no_logging()
     else:
@@ -304,7 +303,7 @@ def _sys_call(cmdList, stderr=False, stdin=''):
 def _get_openssl_info():
     """Find, check, and report info about the OpenSSL binary on this system.
     """
-    if args.openssl:
+    if args and args.openssl:
         OPENSSL = args.openssl
         logging.info('Option requesting openssl executable: ' + OPENSSL)
     elif sys.platform not in ['win32']:
@@ -1340,7 +1339,7 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
     return new_enc
 
 
-def sign(filename, priv, pphr=None):
+def sign(filename, priv, pphr=None, out=None):
     """Sign a given file with a private key, via `openssl dgst`.
 
     Get a digest of the file, sign the digest, return base64-encoded signature.
@@ -1364,11 +1363,17 @@ def sign(filename, priv, pphr=None):
         _sys_call(cmd_SIGN)
     sig = open(sig_out, 'rb').read()
 
+    if out:
+        with open(out, 'wb)') as fd:
+            fd.write(b64encode(sig))
+        return out
     return b64encode(sig)
 
 
 def verify(filename, pub, sig):
-    """Verify signature of filename using pubkey; expects a base64-encoded sig.
+    """Verify signature of filename using pubkey
+
+    `sig` should be a base64-encoded signature, or a path to a signature file.
     """
     name = 'verify'
     logging.debug(name + ': start, file ' + filename)
@@ -1377,6 +1382,8 @@ def verify(filename, pub, sig):
     else:
         raise NotImplementedError
 
+    if isfile(sig):
+        sig = open(sig, 'rb').read()
     with NamedTemporaryFile(delete=False) as sig_file:
         sig_file.write(b64decode(sig))
     result = _sys_call(cmd_VERIFY + ['-signature', sig_file.name, filename])
@@ -1437,7 +1444,7 @@ def _genRsa2(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
 
 
 def genRsaKeys():
-    """Dialog to generate an RSA key pair, PEM format.
+    """Command line dialog to generate an RSA key pair, PEM format.
 
     Limited to 2048, 4096, 8192 bits; 1024 is not secure for medium-term
     storage, and 16384 bits is impractical. Require or generate a passphrase.
@@ -1456,18 +1463,24 @@ def genRsaKeys():
         except:
             pass
 
-    pub = abspath(_uniq_file('pub_RSA.pem'))  # ensure unique, abspath
-    priv = pub.replace('pub_RSA', 'priv_RSA')  # ensure a matched pair
+    # use args for filenames if given explicitly:
+    pub = args.pub or abspath(_uniq_file('pub_RSA.pem'))  # ensure unique
+    priv = args.priv or pub.replace('pub_RSA', 'priv_RSA')  # matched pair
+    pub = abspath(pub)
+    priv = abspath(priv)
+    if pub == priv:
+        priv += '_priv.pem'
+
     if os.path.exists(priv):
         msg = ('RSA key generation.\n  %s already exists\n' % priv +
                '  > Clean up files and try again. Exiting. <')
         print(msg)
         return None, None
 
-    print('RSA key generation. Will try to create two files:')
-    pub_msg = '  %s   = %s' % (os.path.split(pub)[1], pub)
+    print('\nRSA key generation. Will try to create two files:')
+    pub_msg = '  pub  = %s' % pub #os.path.split(pub)#[1]
     print(pub_msg)
-    priv_msg = '  %s  = %s' % (os.path.split(priv)[1], priv)
+    priv_msg = '  priv = %s' % priv #os.path.split(priv)#[1]
     print(priv_msg)
     print('To proceed, enter a passphrase (16+ chars, return to generate).')
     pphr = getpass.getpass('Passphrase: ')
@@ -1519,6 +1532,10 @@ def genRsaKeys():
     print(warn_msg)
 
     return pub, priv
+
+
+def getVersion():
+    return tuple(map(int, __version__.split('.')))
 
 
 class Tests(object):
@@ -1978,14 +1995,14 @@ class Tests(object):
         datafile = abspath(datafile)
 
         # Encrypt:
-        cmdLineCmd = [sys.executable, pathToSelf, 'encrypt', datafile,
-                      pub1, '--openssl=' + OPENSSL]
+        cmdLineCmd = [sys.executable, pathToSelf, datafile, '--encrypt',
+                      '--pub', pub1, '--openssl=' + OPENSSL]
         dataEnc = _sys_call(cmdLineCmd).strip()
         assert os.path.isfile(dataEnc)
 
         # Decrypt:
-        cmdLineCmd = [sys.executable, pathToSelf, 'decrypt', dataEnc,
-                      priv1, '--openssl=' + OPENSSL]
+        cmdLineCmd = [sys.executable, pathToSelf, dataEnc, '--decrypt',
+                      '--priv', priv1, '--openssl=' + OPENSSL]
         dataEncDec_cmdline = _sys_call(cmdLineCmd).strip()
         assert os.path.isfile(dataEncDec_cmdline)
 
@@ -2253,7 +2270,7 @@ codec = PFSCodecRegistry(default_codec)
 
 if __name__ == '__main__':
     logging.info("%s with %s" % (lib_name, openssl_version))
-    if args.debug:
+    if args.filename == 'debug':
         """Run tests with verbose logging; check for memory leaks using gc.
             $ python pyfilesec.py --debug > results.txt
         """
@@ -2275,32 +2292,68 @@ if __name__ == '__main__':
                 result = test + ' FAILED'
                 print(result)
         logging.info("%.4fs for tests" % (get_time() - logging_t0))
-    elif args.genrsa:
-        """Walk through key generation.
+    elif args.filename == 'genrsa':
+        """Walk through key generation on command line.
         """
         genRsaKeys()
     else:
-        """encrypt, decrypt, pad, unpad, sign, verify, rotate
+        """Call requested function with arguments, return result (to stdout)
+
+        Functions: encrypt, decrypt, rotate, pad, sign, verify, destroy
         """
-        logging.info(OPENSSL)
+        fxn = None  # becomes the actual function
+        kw = {}  # kwargs for fxn
+
+        # "kw.update()" ==> required args, use kw even though its position-able
+        # "arg and kw.update(arg)" ==> optional args; watch out for value == 0
+
+        # mutually exclusive args.fxn:
         if args.encrypt:
-            filename = args.encrypt.pop(0)
-            pub = args.encrypt.pop(0)[4:]  # remove pub=
-            print a
+            fxn = encrypt
+            # convenience arg: call pad the file prior to encryption
+            if args.size >= -1:
+                pad(filename, size=args.size)
+            kw.update({'pub': args.pub})
+            args.keep and kw.update({'keep': args.keep})
+            args.meta and kw.update({'meta': args.meta})
+            args.hmac and kw.update({'hmac_key': args.hmac})
+        elif args.decrypt:
+            fxn = decrypt
+            kw.update({'priv': args.priv})
+            args.pphr and kw.update({'pphr': args.pphr})
+            args.out and kw.update({'outFile': args.out})
+        elif args.rotate:
+            fxn = rotate
+            kw.update({'priv_old': args.priv})
+            kw.update({'pub_new': args.pubn})
+            args.pphr and kw.update({'pphr_old': args.pphr})
+            args.nppr and kw.update({'pphr_new': args.nppr})
+            args.nprv and kw.update({'priv_new': args.nprv})
+            args.nppr and kw.update({'pphr_new': args.nppr})
+            args.keep and kw.update({'keep': args.keep})
+            args.meta and kw.update({'meta': args.meta})
+            args.hmac and kw.update({'hmac_new': args.hmac})
+            if args.size >= -1:
+                kw.update({'pad_new': args.size})
+        elif args.pad:
+            fxn = pad
+            if args.size >= -1:
+                kw.update({'size': args.size})
+            elif args.size is not None:
+                raise ValueError('bad argument for -z/--size to pad')
+        elif args.sign:
+            fxn = sign
+            kw.update({'priv': args.priv})
+            args.pphr and kw.update({'pphr': args.pphr})
+            args.out and kw.update({'out': args.out})
+        elif args.verify:
+            fxn = verify
+            kw.update({'pub': args.pub})
+            kw.update({'sig': args.sig})
+        elif args.destroy:
+            fxn = destroy
+        else:
+            raise ValueError('No action requested (command line).')
 
-            print 'encrypt(%s, pub="%s")' % (filename, pub), args.encrypt
-
-            result = e(args.encrypt)
-        #elif cmd in ['dec', 'decrypt']:
-        #    result = decrypt(*args)
-        #elif cmd == 'pad':
-        #    result = pad(*args)
-        #elif cmd == 'unpad':
-        #    result = pad(*args, size=0)
-        #elif cmd == 'sign':
-        #    result = sign(*args)
-        #elif cmd == 'verify':
-        #    result = verify(*args)
-        #elif cmd == 'rotate':
-        #    result = rotate(*args)
+        result = fxn(args.filename, **kw)
         print result
