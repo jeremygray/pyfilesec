@@ -1136,7 +1136,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     data_enc = abspath(data_enc)
     if pphr and isfile(pphr):
         pphr = open(abspath(pphr), 'rb').read()
-    elif 'ENCRYPTED' in open(priv, 'r').read().upper():
+    elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
         _fatal(name + 'missing passphrase (encrypted privkey)', DecryptError)
 
     # Extract files from the archive (dataFileEnc) into the same directory,
@@ -1392,37 +1392,11 @@ def verify(filename, pub, sig):
     return result in ['Verification OK', 'Verified OK']
 
 
-# likely to remove this code, and refactor tests to use _genRsa2 (no file):
 @SetUmask
 def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
-    """For TESTS: generate new RSA pub and priv keys, return paths to files.
-
-    pphr is expected to be in a FILE here.
-    """
-    if use_rsautl:
-        # Generate priv key:
-        cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
-        if pphr:
-            cmdGEN += ['-aes256', '-passout', 'file:' + pphr]
-        _sys_call(cmdGEN + [str(bits)])
-
-        # Extract pub from priv:
-        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
-                     '-pubout', '-out', pub]
-        if pphr:
-            cmdEXTpub += ['-passin', 'file:' + pphr]
-        _sys_call(cmdEXTpub)
-    else:
-        raise NotImplementedError
-
-    return abspath(pub), abspath(priv)
-
-
-@SetUmask
-def _genRsa2(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     """Generate new RSA pub and priv keys, return paths to files.
 
-    pphr is expected to be in a string here.
+    pphr should be a string containing the actual passphrase (if desired).
     """
     if use_rsautl:
         # Generate priv key:
@@ -1512,7 +1486,7 @@ def genRsaKeys():
     print(msg)
 
     try:
-        _genRsa2(pub, priv, pphr, bits)
+        _genRsa(pub, priv, pphr, bits)
     except:
         # might get a KeyboardInterrupt
         _cleanup('\n  > Removing temp files. Exiting. <')
@@ -1794,16 +1768,12 @@ class Tests(object):
         testBits = 2048  # fine to test with 1024 and 4096
         pubTmp1 = 'pubkey1 no unicode.pem'
         prvTmp1 = 'prvkey1 no unicode.pem'
-        pphr1 = 'passphrs1 no unicode.txt'
-        with open(pphr1, 'wb') as fd:
-            fd.write(_printable_pwd(180))
+        pphr1 = _printable_pwd(180)
         pub1, priv1 = _genRsa(pubTmp1, prvTmp1, pphr1, testBits)
 
         pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
         prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
-        pphr2 = 'passphrs2 no unicode.txt   '
-        with open(pphr2, 'wb') as fd:
-            fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
+        pphr2 = '  ' + _printable_pwd(180) + '   '  # spaces in pphr
         pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, testBits)
 
         # test decrypt with GOOD passphrase, trailing whitespace:
@@ -1860,9 +1830,7 @@ class Tests(object):
 
         pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
         prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
-        pphr2 = 'passphrs2 no unicode.txt   '
-        with open(pphr2, 'wb') as fd:
-            fd.write('  ' + _printable_pwd(180) + '   ')  # spaces in pphr
+        pphr2 = '  ' + _printable_pwd(180) + '   '  # spaces in pphr
         pub2, priv2 = _genRsa(pubTmp2, prvTmp2, pphr2, 1024)
 
         # Rotate encryption including padding change:
@@ -2272,7 +2240,7 @@ if __name__ == '__main__':
     logging.info("%s with %s" % (lib_name, openssl_version))
     if args.filename == 'debug':
         """Run tests with verbose logging; check for memory leaks using gc.
-            $ python pyfilesec.py --debug > results.txt
+            $ python pyfilesec.py debug > results.txt
         """
         global pytest
         import pytest
@@ -2303,13 +2271,13 @@ if __name__ == '__main__':
         fxn = None  # becomes the actual function
         kw = {}  # kwargs for fxn
 
-        # "kw.update()" ==> required args, use kw even though its position-able
+        # "kw.update()" ==> required arg, use kw even though its position-able
         # "arg and kw.update(arg)" ==> optional args; watch out for value == 0
 
         # mutually exclusive args.fxn:
         if args.encrypt:
             fxn = encrypt
-            # convenience arg: call pad the file prior to encryption
+            # convenience arg: pad the file prior to encryption
             if args.size >= -1:
                 pad(filename, size=args.size)
             kw.update({'pub': args.pub})
