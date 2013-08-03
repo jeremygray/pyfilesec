@@ -73,24 +73,24 @@ def _parse_args():
     group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v [-o][-d][-r])')
     group.add_argument('--rotate', action='store_true', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
     group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r])')
-    group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -g)')
+    group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -s)')
     group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
     group.add_argument('--destroy', action='store_true', help='secure delete')
 
     parser.add_argument('--openssl', help='specify path of the openssl binary to use')
     parser.add_argument('-o', '--out', help='path name for generated (output) file')
     parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
-    parser.add_argument('-U', '--pubn', help='path to new public key (.pem file)')
+    parser.add_argument('-U', '--npub', help='path to new public key (.pem file)')
     parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
     parser.add_argument('-V', '--nprv', help='path to new private key (--rotate only)')
     parser.add_argument('-r', '--pphr', help='path to file containing passphrase for private key')
     parser.add_argument('-R', '--nppr', help='path to file containing passphrase for new priv key')
-    parser.add_argument('-m', '--meta', help='False to suppress saving meta-data with encrypted file')
+    parser.add_argument('-m', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
-    parser.add_argument('-s', '--sig', help='path to signature file (input file for --verify)')
-    parser.add_argument('-z', '--size', type=int, help='num bytes for --pad, default 16384; unpad = 0 or -1')
-    parser.add_argument('-n', '--nodate', action='store_true', help='do not save encryption date in the meta-data')
-    parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after encryption')
+    parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
+    parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
+    parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
+    parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
     #parser.add_argument('-e', '--enc', help='register encryption m, nargs=1ethod to use')
     #parser.add_argument('-d', '--dec', help='register decryption method to use')
 
@@ -2282,7 +2282,8 @@ if __name__ == '__main__':
                 pad(filename, size=args.size)
             kw.update({'pub': args.pub})
             args.keep and kw.update({'keep': args.keep})
-            args.meta and kw.update({'meta': args.meta})
+            meta = not args.nometa
+            meta and kw.update({'meta': meta})
             args.hmac and kw.update({'hmac_key': args.hmac})
         elif args.decrypt:
             fxn = decrypt
@@ -2292,13 +2293,14 @@ if __name__ == '__main__':
         elif args.rotate:
             fxn = rotate
             kw.update({'priv_old': args.priv})
-            kw.update({'pub_new': args.pubn})
+            kw.update({'pub_new': args.npub})
             args.pphr and kw.update({'pphr_old': args.pphr})
             args.nppr and kw.update({'pphr_new': args.nppr})
             args.nprv and kw.update({'priv_new': args.nprv})
             args.nppr and kw.update({'pphr_new': args.nppr})
             args.keep and kw.update({'keep': args.keep})
-            args.meta and kw.update({'meta': args.meta})
+            meta = not args.nometa
+            meta and kw.update({'meta': meta})
             args.hmac and kw.update({'hmac_new': args.hmac})
             if args.size >= -1:
                 kw.update({'pad_new': args.size})
