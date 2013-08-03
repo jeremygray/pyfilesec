@@ -745,15 +745,14 @@ def pad(filename, size=16384, test=False, strict=True):
     file sizes exceeding `size` (and hence leak the size of the original file),
     use `strict=False`.
 
-    Padding format: file + n bytes + pad=10-digits + byte + PFS_PAD + byte
+    Padding format: file + n bytes + pad = 10-digits + byte + PFS_PAD + byte
     n is selected to make the new file size == `size`.
 
     `test` allows for testing whether the `size` is adequate to obscure
     the file size. This is similar to testing getsize(file) > size,
     except that `test` also takes into account the padding-size info that is
-    stored as part of the padding (36 bytes, unless max file size is not the
-    default of 1G). So its getsize(file) > size - 36. Testing succeeded
-    if no PaddingError is raised.
+    stored as part of the padding (36 bytes). So its
+    getsize(file) > size - 36. Testing succeeded if no PaddingError is raised.
 
     To make unpadding easier and more robust (= facilitate human inspection),
     the end bytes provide the number of padding bytes that were added, plus an

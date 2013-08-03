@@ -24,7 +24,7 @@
     - sign & verify now use openssl 'dgst' instead of 'rsautl'.
         beware of openssl version issues in signatures
     - many additional tests, including whitespace + unicode in paths
-    - always chmod decrypted files to 0o600; set umask beforehand
+    - always chmod decrypted files to 0o600 (*nix); set umask beforehand
     - try to secure-remove decrypted file if get an exception during decryption
     - can now pad files to be a specific file-size, and unpad. can change the
       padding when rotating the encryption
@@ -36,6 +36,8 @@
         --openssl=/path/to/openssl  (eg: /usr/local/ssl/bin/openssl )
         --genrsa
     - PEP8 compliant code (almost)
+    - gc.set_debug(gc.DEBUG_LEAK) shows nothing uncollectable during
+        "python pyfilesec.py --debug"
 
     To be added to documentation:
     - an encrypted or decrypted file will be created in the same directory as
@@ -101,6 +103,8 @@
               http://www.daemonology.net/blog/2009-06-11-cryptographic-right-answers.html
             Posted at 2009-06-24 22:15. Encrypt-then-MAC.
               http://www.daemonology.net/blog/2009-06-24-encrypt-then-mac.html
+        3. encrypt-then-mac
+            http://cseweb.ucsd.edu/~mihir/papers/oem.pdf
 
     TO-DO NEAR TERM (milestone 0.2 release):
     - missing or bad metadata:
@@ -204,5 +208,5 @@
         (because want modularity)
     M2Crypto - "M2Crypto is the most complete Python wrapper for OpenSSL"
     pyOpenSSL - "thin wrapper around (a subset of) the OpenSSL library"
-    pycogworks.crypto - interesting but no crypto except an ID generator
+    pycogworks.crypto - interesting = has pycrypto as dependency
 """
