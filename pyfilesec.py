@@ -47,50 +47,59 @@ import hashlib
 from functools import partial  # for buffered hash digest
 from base64 import b64encode, b64decode
 import getpass  # for RSA key-gen
-
+import argparse
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__)
-usage = """%(name)s v%(version)s
 
-  File privacy and integrity for psychology and human neuroscience research:
-    encrypt, decrypt, sign, verify, rotate, generate passwords (RSA keys),
-    secure delete, pad (to obscure file-size), & archive.
-    Requires Python 2.6+, and OpenSSL 0.9.8 or higher.
 
-  Module example:
-    >>> import %(name)s as pfs
-    >>> pfs.encrypt('data.txt', 'pub.pem')
-    /path/to/data.enc
-    >>> pfs.decrypt('/path/to/data.enc', 'priv.pem')
-    /path/to/data.txt
+def _parse_args():
+    """Parse and return command line arguments.
 
-  Command-line example:
-    $ alias pfs='%(lib_path)s'
-    $ pfs encrypt data.txt pub.pem
-    /path/to/data.enc
-    $ pfs decrypt data.enc priv.pem
-    /path/to/data.txt
+    a file name is typically the first (required) argument
+    passphrases for command-line usage must go through files;
+        will get a logging.warning()
+    currently not possible to register a new enc/dec method via command line
+    """
+    parser = argparse.ArgumentParser(
+        description='File-oriented privacy & integrity management library.',
+        epilog="See https://pypi.python.org/pypi/pyFileSec/")
+    parser.add_argument('--version', action='version',
+        version='%s %s' % (lib_name, __version__))
 
-  Options:
-    --help | -h : display this message
-    --version   : print version and exit
-    --openssl=/path/to/openssl : binary file to use for openssl calls
-    --genrsa    : RSA key generation dialog
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--encrypt', help='encrypt with RSA + AES256 (-u [-o][-m][-n][-c][-z][-e][-k])')
+    group.add_argument('--decrypt', help='use private key to decrypt (-v [-o][-d][-r])')
+    group.add_argument('--rotate', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
+    group.add_argument('--sign', help='sign file / make signature (-v [-r])')
+    group.add_argument('--verify', help='verify a signature using public key (-u -g)')
+    group.add_argument('--pad', help='obscure file length by padding with bytes ([-z])')
+    group.add_argument('--destroy', help='secure delete', nargs=1)
+    group.add_argument('--genrsa', action='store_true', help='enter command-line dialog to generate an RSA key pair')
+    group.add_argument('--debug', help='run suite of self-tests (requires pytest), verbose output', action="store_true")
 
-  Testing:
-    $ py.test %(name)s.py
-  """ % {'name': os.path.splitext(os.path.basename(__file__))[0],
-         'lib_path': lib_path,
-         'version': __version__}
+    parser.add_argument('--openssl', help='specify path of the openssl binary to use')
+    #parser.add_argument('-i', '--in', help='path to file to work on (plain or cipher text)')
+    parser.add_argument('-o', '--out', help='path name for generated (output) file')
+    parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
+    #parser.add_argument('-U', '--pubn', help='path to new public key (.pem file)')
+    parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
+    parser.add_argument('-V', '--nprv', help='path to new private key (--rotate only)')
+    parser.add_argument('-r', '--pphr', help='path to file containing passphrase for private key')
+    parser.add_argument('-R', '--nppr', help='path to file containing passphrase for new priv key')
+    #parser.add_argument('-e', '--enc', help='register encryption m, nargs=1ethod to use')
+    #parser.add_argument('-d', '--dec', help='register decryption method to use')
+    parser.add_argument('-m', '--meta', help='False to suppress saving meta-data with encrypted file')
+    parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
+    parser.add_argument('-s', '--sig', help='path to signature file (for --verify)')
+    parser.add_argument('-z', '--size', type=int, help='num bytes for --pad, default 16384; unpad = 0 or -1')
+    parser.add_argument('-n', '--nodate', action='store_true', help='do not save encryption date in the meta-data')
+    parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after encryption')
 
-if '--version' in sys.argv:
-    print(__version__)
-    sys.exit()
-if (__name__ == "__main__" and len(sys.argv) == 1 or
-    '-h' in sys.argv or '--help' in sys.argv):
-    print(usage)
-    sys.exit()
+    return parser.parse_args()
+
+args = _parse_args()
+
 if python_version() < '2.6.6':
     raise RuntimeError('Requires python 2.6+')
 if python_version < '3.':
@@ -295,7 +304,15 @@ def _sys_call(cmdList, stderr=False, stdin=''):
 def _get_openssl_info():
     """Find, check, and report info about the OpenSSL binary on this system.
     """
-    if sys.platform in ['win32']:
+    if args.openssl:
+        OPENSSL = args.openssl
+        logging.info('Option requesting openssl executable: ' + OPENSSL)
+    elif sys.platform not in ['win32']:
+        OPENSSL = _sys_call(['which', 'openssl'])
+        if OPENSSL not in ['/usr/bin/openssl']:
+            msg = 'unexpected location for openssl binary: %s' % OPENSSL
+            logging.warning(msg)
+    else:
         # use a bat file for openssl.cfg; create .bat if not found or broken
         # might have to move to os.environ['HOME'] to ensure write permission
         libdir = os.path.split(os.path.abspath(__file__))[0]
@@ -326,23 +343,9 @@ def _get_openssl_info():
                 with open(OPENSSL, 'wb') as fd:
                     fd.write(where_bat)
         logging.info('will use .bat file for OpenSSL: %s' % OPENSSL)
-    for i, arg in enumerate(sys.argv):
-        if arg.startswith('--openssl='):
-            # spaces in path ok if parses as one argument
-            OPENSSL = arg.replace('--openssl=', '')
-            del(sys.argv[i])
-            logging.info('Option requesting OpenSSL version: ' + OPENSSL)
-            break
-    else:
-        if sys.platform not in ['win32']:
-            OPENSSL = _sys_call(['which', 'openssl'])
-            if OPENSSL not in ['/usr/bin/openssl']:
-                msg = 'unexpected location for openssl binary: %s' % OPENSSL
-                logging.warning(msg)
-        #else:
-        #    OPENSSL = bat_file  # already set
+
     if not isfile(OPENSSL):
-        msg = 'Could not find openssl, tried: %s' % OPENSSL
+        msg = 'Could not find openssl executable, tried: %s' % OPENSSL
         _fatal(msg, RuntimeError)
 
     openssl_version = _sys_call([OPENSSL, 'version'])
@@ -1627,7 +1630,7 @@ class Tests(object):
 
             # test whether encrypt can handle it:
             pub, priv, pphr = self._known_values()[:3]
-            enc = encrypt(filename, pub)  # tarfile fails here with bad filename
+            enc = encrypt(filename, pub)  # tarfile fails here, bad filename
             assert isfile(enc)
 
             dec = decrypt(enc, priv, pphr)
@@ -2240,6 +2243,7 @@ class Tests(object):
 logging, logging_t0 = _setup_logging()
 if not user_can_link:
     logging.warning('%s: No admin priv; cannot check hardlinks' % lib_name)
+
 OPENSSL, openssl_version, use_rsautl = _get_openssl_info()
 destroy_TOOL, destroy_OPTS = _get_destroy_info()
 
@@ -2249,12 +2253,16 @@ codec = PFSCodecRegistry(default_codec)
 
 if __name__ == '__main__':
     logging.info("%s with %s" % (lib_name, openssl_version))
-    if '--debug' in sys.argv:
-        """Run tests with verbose logging.
+    if args.debug:
+        """Run tests with verbose logging; check for memory leaks using gc.
             $ python pyfilesec.py --debug > results.txt
         """
         global pytest
         import pytest
+        import gc
+
+        gc.enable()
+        gc.set_debug(gc.DEBUG_LEAK)
 
         os.mkdir('debug_' + lib_name)
         os.chdir('debug_' + lib_name)  # intermediate files get left inside
@@ -2267,22 +2275,32 @@ if __name__ == '__main__':
                 result = test + ' FAILED'
                 print(result)
         logging.info("%.4fs for tests" % (get_time() - logging_t0))
-    elif '--genrsa' in sys.argv:
+    elif args.genrsa:
         """Walk through key generation.
         """
         genRsaKeys()
     else:
-        """pass sys.args to encrypt or decrypt
+        """encrypt, decrypt, pad, unpad, sign, verify, rotate
         """
         logging.info(OPENSSL)
-        if sys.argv[1] in ['enc', 'dec']:
-            sys.argv[1] += 'rypt'
-        if sys.argv[1] in ['encrypt', 'decrypt', 'pad', 'unpad']:
-            cmd = sys.argv[1]
-            if cmd == 'unpad':
-                cmd = '_unpad_strict'
-            del sys.argv[1]
-            result = eval(cmd + '(*sys.argv[1:])')
-            print(result)  # full path to file
-        else:
-            print(usage)
+        if args.encrypt:
+            filename = args.encrypt.pop(0)
+            pub = args.encrypt.pop(0)[4:]  # remove pub=
+            print a
+
+            print 'encrypt(%s, pub="%s")' % (filename, pub), args.encrypt
+
+            result = e(args.encrypt)
+        #elif cmd in ['dec', 'decrypt']:
+        #    result = decrypt(*args)
+        #elif cmd == 'pad':
+        #    result = pad(*args)
+        #elif cmd == 'unpad':
+        #    result = pad(*args, size=0)
+        #elif cmd == 'sign':
+        #    result = sign(*args)
+        #elif cmd == 'verify':
+        #    result = verify(*args)
+        #elif cmd == 'rotate':
+        #    result = rotate(*args)
+        print result
