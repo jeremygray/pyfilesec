@@ -2270,7 +2270,7 @@ codec = PFSCodecRegistry(default_codec)
 
 if __name__ == '__main__':
     logging.info("%s with %s" % (lib_name, openssl_version))
-    if args.debug:
+    if args.filename == 'debug':
         """Run tests with verbose logging; check for memory leaks using gc.
             $ python pyfilesec.py --debug > results.txt
         """
@@ -2292,32 +2292,68 @@ if __name__ == '__main__':
                 result = test + ' FAILED'
                 print(result)
         logging.info("%.4fs for tests" % (get_time() - logging_t0))
-    elif args.genrsa:
-        """Walk through key generation.
+    elif args.filename == 'genrsa':
+        """Walk through key generation on command line.
         """
         genRsaKeys()
     else:
-        """encrypt, decrypt, pad, unpad, sign, verify, rotate
+        """Call requested function with arguments, return result (to stdout)
+
+        Functions: encrypt, decrypt, rotate, pad, sign, verify, destroy
         """
-        logging.info(OPENSSL)
+        fxn = None  # becomes the actual function
+        kw = {}  # kwargs for fxn
+
+        # "kw.update()" ==> required args, use kw even though its position-able
+        # "arg and kw.update(arg)" ==> optional args; watch out for value == 0
+
+        # mutually exclusive args.fxn:
         if args.encrypt:
-            filename = args.encrypt.pop(0)
-            pub = args.encrypt.pop(0)[4:]  # remove pub=
-            print a
+            fxn = encrypt
+            # convenience arg: call pad the file prior to encryption
+            if args.size >= -1:
+                pad(filename, size=args.size)
+            kw.update({'pub': args.pub})
+            args.keep and kw.update({'keep': args.keep})
+            args.meta and kw.update({'meta': args.meta})
+            args.hmac and kw.update({'hmac_key': args.hmac})
+        elif args.decrypt:
+            fxn = decrypt
+            kw.update({'priv': args.priv})
+            args.pphr and kw.update({'pphr': args.pphr})
+            args.out and kw.update({'outFile': args.out})
+        elif args.rotate:
+            fxn = rotate
+            kw.update({'priv_old': args.priv})
+            kw.update({'pub_new': args.pubn})
+            args.pphr and kw.update({'pphr_old': args.pphr})
+            args.nppr and kw.update({'pphr_new': args.nppr})
+            args.nprv and kw.update({'priv_new': args.nprv})
+            args.nppr and kw.update({'pphr_new': args.nppr})
+            args.keep and kw.update({'keep': args.keep})
+            args.meta and kw.update({'meta': args.meta})
+            args.hmac and kw.update({'hmac_new': args.hmac})
+            if args.size >= -1:
+                kw.update({'pad_new': args.size})
+        elif args.pad:
+            fxn = pad
+            if args.size >= -1:
+                kw.update({'size': args.size})
+            elif args.size is not None:
+                raise ValueError('bad argument for -z/--size to pad')
+        elif args.sign:
+            fxn = sign
+            kw.update({'priv': args.priv})
+            args.pphr and kw.update({'pphr': args.pphr})
+            args.out and kw.update({'out': args.out})
+        elif args.verify:
+            fxn = verify
+            kw.update({'pub': args.pub})
+            kw.update({'sig': args.sig})
+        elif args.destroy:
+            fxn = destroy
+        else:
+            raise ValueError('No action requested (command line).')
 
-            print 'encrypt(%s, pub="%s")' % (filename, pub), args.encrypt
-
-            result = e(args.encrypt)
-        #elif cmd in ['dec', 'decrypt']:
-        #    result = decrypt(*args)
-        #elif cmd == 'pad':
-        #    result = pad(*args)
-        #elif cmd == 'unpad':
-        #    result = pad(*args, size=0)
-        #elif cmd == 'sign':
-        #    result = sign(*args)
-        #elif cmd == 'verify':
-        #    result = verify(*args)
-        #elif cmd == 'rotate':
-        #    result = rotate(*args)
+        result = fxn(args.filename, **kw)
         print result
