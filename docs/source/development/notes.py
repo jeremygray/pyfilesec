@@ -40,6 +40,7 @@
         "python pyfilesec.py debug"
 
     To be added to documentation:
+    - what are the security + management goals, what is primary, what secondary
     - an encrypted or decrypted file will be created in the same directory as
       the original
     - the code will always decrypt a /copy/ of data.enc, and not touch orig
@@ -107,12 +108,6 @@
             http://cseweb.ucsd.edu/~mihir/papers/oem.pdf
 
     TO-DO NEAR TERM (milestone 0.2 release):
-    - missing or bad metadata:
-        internalFormatError to have other than 3 files in the .archive:
-            encrypted data, encrypted password, meta-data
-            in future, meta-data could become a zip or tar file if need extensibility
-        raise InternalFormatError to have no metadata
-        need explicit md = {'(date unknown)', None}
     - docs
         filesec.png is taken directly from crystal project icons
         index.html
@@ -125,6 +120,13 @@
         - some gc.uncollectables (GzipFile instance) on linux with py 2.6.6
 
     Medium-term (milestone 0.3 - 0.5):
+    - "now" is localtime, but timezone is not documented in metadata
+    - missing or bad metadata:
+        internalFormatError to have other than 3 files in the .archive:
+            encrypted data, encrypted password, meta-data
+            in future, meta-data could become a zip or tar file if need extensibility
+        raise InternalFormatError to have no metadata
+        need explicit md = {'(date unknown)', None}
     - fix win32 unicode filename
     - win32 file permissions (win32security)
     - willing to support PyCrypto: if you have it through Enthought Canopy
@@ -137,11 +139,11 @@
                 Read the passphrase from file file.
 
         encrypt:
-        recipient_ID = pubkeyPem  # not a .pem, like BE98EFB5
+        recipient_ID = pub  # not a .pem, like BE98EFB5
         cmd_GPG = ['gpg', '-e', '-r', recipient_ID, datafile]
 
         decrypt:
-        recipient_ID = privkeyPem  # but its a GPG id, like BE98EFB5
+        recipient_ID = priv  # but its a GPG id, like BE98EFB5
         cmd_GPG = ['gpg', '-u', recipient_ID, '-d', '--passphrase-fd', '0', datafileEnc]
         pwd = _sysCall(cmd_GPG, stdin=passphrase)
         # cmd_GPG = ['gpg', '-u', recipient_ID, '-o', datafileDec, '-d', '--passphrase-fd', '0', datafileEnc]
@@ -178,7 +180,7 @@
         add alias to __file__ to shell path for command line usage
         basic benchmarking of performance time to enc/dec by file size so that
           can make inferences about time based on file size when running
-    - more to pkeyutl instead of rsautl when possible; currently not:
+    - move to pkeyutl instead of rsautl when possible; currently not:
         -decrypt with passphrase seems to fail, maybe -sign as well
     - use zip instead of tar for file bundle, easier to work with items in mem
     - encrypt/decrypt from/to a tempfile.SpooledTemporaryFile() instead of cleartext file

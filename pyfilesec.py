@@ -28,8 +28,12 @@ __version__ = '0.1.7'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
-import sys
+
 from platform import python_version
+if python_version() < '2.6':
+    raise RuntimeError('Requires python 2.6 or higher')
+
+import sys
 import os
 from os.path import abspath, isfile, getsize
 import stat
@@ -91,7 +95,7 @@ def _parse_args():
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
     parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
-    #parser.add_argument('-e', '--enc', help='register encryption m, nargs=1ethod to use')
+    #parser.add_argument('-e', '--enc', help='register encryption method to use')
     #parser.add_argument('-d', '--dec', help='register decryption method to use')
 
     return parser.parse_args()
@@ -101,8 +105,6 @@ if __name__ == "__main__":
 else:
     args = None
 
-if python_version() < '2.6.6':
-    raise RuntimeError('Requires python 2.6+')
 if python_version < '3.':
     input23 = raw_input
 else:
@@ -1437,6 +1439,9 @@ def genRsaKeys():
         except:
             pass
 
+    if not args:
+        return 'genRsaKeys should be run from the command line'
+
     # use args for filenames if given explicitly:
     pub = args.pub or abspath(_uniq_file('pub_RSA.pem'))  # ensure unique
     priv = args.priv or pub.replace('pub_RSA', 'priv_RSA')  # matched pair
@@ -2263,6 +2268,8 @@ if __name__ == '__main__':
         """Walk through key generation on command line.
         """
         genRsaKeys()
+    elif not isfile(args.filename):
+        raise Valueerror('file not found: %s' % args.filename)
     else:
         """Call requested function with arguments, return result (to stdout)
 
