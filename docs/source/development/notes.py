@@ -32,11 +32,10 @@
     - codec registry class. works for defaults but will need
         more work esp file extensions (eg, '.aes256') and how to pass arguments
     - command line options:
-        -h | --help, --verbose, --version, --debug
+        -h | --help, --verbose, --version, debug, genrsa
         --openssl=/path/to/openssl  (eg: /usr/local/ssl/bin/openssl )
-        --genrsa
     - PEP8 compliant code (almost)
-    - gc.set_debug(gc.DEBUG_LEAK) shows nothing uncollectable during
+    - gc.set_debug(gc.DEBUG_LEAK) finds nothing uncollectable during
         "python pyfilesec.py debug"
 
     To be added to documentation:
@@ -60,9 +59,9 @@
       it gets saved into the meta-data in clear text
     - file length is not obscured by default; typically in psych / human neuro,
       the file length would not tell you a lot about its contents, although
-      there could be exceptions, e.g., for criminal records. for this reason,
+      there could be exceptions, e.g., for pedical or criminal records. for this reason,
       `pad()` is provided, but the onus is on the user. Call before `encrypt()`
-      and after `decrypt()`.
+      and after `decrypt()`, or during `rotate()`.
     - to encrypt a directory, the user must first bundle it as a single file,
       e.g., using make_archive(dir_path), and then encrypt that. *But*
       you must also manage any desired file clean-up / secure delete of the

@@ -49,7 +49,7 @@ will vary with CPU, disk speed, etc)::
     1M takes ~10s to encrypt, ~5s decrypt
     1G takes ~90s to encrypt, ~60s decrypt
     8G takes ~13m to encrypt
-    
+
 Large files are fine (max tested is 8G). File-size inflation is consistently 3%::
 
     1G:  1073741824 plain text --> 1106221296 encrypted
@@ -65,13 +65,10 @@ An 8G plaintext file will temporarily require ~28G disk space (total)::
       -rw-------  1 jgray            512 8gig.zeros.aes256pwd.rsa
       -rw-------  1 jgray            667 8gig.zeros.meta
 
-The larger .aes256 files gets removed, leaving::
+The larger .aes256 files get removed, leaving::
 
       -rw-------  1 jgray    8849744181  8gig.enc
 
 Using `openssl rsautl` works on all platforms tested to date. Although  rsautl is
-deprecated in favor of pkeyutl, but pkeyutl does not completely work: if the
+deprecated in favor of pkeyutl, pkeyutl does not completely work: if the
 private key has a password, it can't be loaded and decryption fails.
-
-In some cases, recovering a known file signature only works if the reference
-signature was created by the same version (0.9.8r vs 1.0.*).

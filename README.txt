@@ -9,16 +9,17 @@ inspection or accidental disclosure. Integrity assurance may be useful in
 archival and provenance applications.
 
 The motivation for developing pyFileSec is to better secure research data obtained
-from human subjects, e.g., in combination with PsychoPy or the Open Science
-Framework. The hope is that pyFileSec will be more widely useful. Command-line
-usage will make it accessible from non-python programs, such as EPrime via the
-``Shell()`` command.
+from human subjects, e.g., in combination with PsychoPy (http://www.psychopy.org)
+or the Open Science Framework (http://www.openscienceframework.org). The hope is
+that pyFileSec will be more widely useful. For example, command-line options
+usage is intended make it accessible from non-python or non-open-source
+programs, such as EPrime via the ``Shell()`` command.
 
 Several excellent Python packages are available for encryption. However, file
-security requires far more than just encryption. The main and potentially
+security requires more than just encryption. The main and potentially
 unique contribution of pyFileSec is that it aspires to provide secure file-
-management with a low barrier to entry. These considerations motivate
-many of the design choices.
+management with a low barrier to entry and a stable API going forward. These
+considerations motivate many of the design choices.
 
 The main functions provided include encryption: ``encrypt()``, ``decrypt()``,
 ``rotate()``; and verification: ``sign()``, ``verify()``. It is also easy to
@@ -37,12 +38,14 @@ The integrated test-suite passes on **Mac OS X** (10.8) and **Linux** (CentOS 6.
 Debian squeeze, and Ubuntu 12.04). Most tests pass on **Windows** 7 (except filenames
 with unicode, and file permissions). Tested using 9 versions of OpenSSL,
 including a compiled development release.
-Python 3.x support looks easy (``2to3`` passes now).
 
 Milestones:
 
-- 0.2.0  Documentation, command-line support. Move to beta status.
-- 0.3.0  Windows file-permissions, Python 3, and alternative encryption backend
+- 0.2  Documentation, move to beta status
+- 0.3  Python 3 (looks easy, ``2to3`` passes now)
+- 0.4  Windows file-permissions
+- 0.5  An alternative encryption backend
+- 1.0  Move out of beta status
 
 Contributors
 -------------
