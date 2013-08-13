@@ -259,7 +259,6 @@ def _setup_logging():
         def debug(msg):
             m = msgfmt % (get_time() - logging_t0, msg)
             print(m)
-
         # flatten log levels:
         error = warning = exp = data = info = debug
 
@@ -274,13 +273,9 @@ def _setup_logging():
     if not verbose:
         logging = _no_logging()
     else:
+
         msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
-        if __name__ != '__main__':
-            try:
-                from psychopy import logging
-            except:
-                pass
     return logging, logging_t0
 
 
@@ -1507,6 +1502,8 @@ def genRsaKeys():
 
 
 def getVersion():
+    """Return __version__ as a tuple of integers.
+    """
     return tuple(map(int, __version__.split('.')))
 
 
