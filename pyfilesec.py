@@ -418,6 +418,7 @@ if True:
     assert not PAD_BYTE in PFS_PAD
     assert len(PAD_BYTE) == 1
     PAD_LEN = len(PAD_STR + PFS_PAD) + 10 + 2  # len of info about padding
+    PAD_MIN = 128  # minimum length in bytes post-padding
     # 10 = # digits in max file size, also works for 4G files
     #  2 = # extra bytes, one at end, one between PAD_STR and PFS_PAD labels
 
@@ -773,7 +774,7 @@ def pad(filename, size=16384):
     if padded:
         unpad(filename)
     filesize = getsize(filename)
-    size = max(size, 128)
+    size = max(size, PAD_MIN)
     needed = ok_to_pad(filename, size)
     if needed == 0:
         msg = name + 'file length not obscured (existing length >= reqd size)'
@@ -798,13 +799,16 @@ def pad(filename, size=16384):
 def ok_to_pad(filename, size):
     """Return 0 if `size` is not adequate to obscure the file length.
     """
-    return max(0, size - getsize(filename) - PAD_LEN)
+    # bug: what about very short < 128 minimum
+    existing = pad_len(filename)
+    size = max(size, PAD_MIN)
+    return max(0, size - (getsize(filename) - existing) - PAD_LEN)
 
 
 def pad_len(filename):
     """Returns pad_count (in bytes) if the file contains PFS-style padding.
 
-    Returns 0 if bad or missing padding
+    Returns 0 if bad or missing padding.
     """
     name = 'pad_len'
     logging.debug(name + ': start, file="%s"' % filename)
