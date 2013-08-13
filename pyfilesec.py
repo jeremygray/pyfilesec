@@ -734,70 +734,55 @@ def log_metadata(md, log=True):
     return md_fmt
 
 
-def pad(filename, size=16384, test=False, strict=True):
-    """Append or remove `byte` + tags until `filename` reaches `size`.
+def pad(filename, size=16384):
+    """Obscure a file's size by appending bytes until it has length `size`.
 
-    Aim: Provide a way to mask file size. Files shorter than `size` will be
-    padded out to `size`. The minimum resulting file size is 128 bytes.
-    Passing `size` of 0 will remove any padding, if present, and -1 is the same
-    as 0 except that it is strict: it will raise an error if there's no padding
-    already.
+    Files shorter than `size` will be padded out to `size` (see details below).
+    The minimum resulting file size is 128 bytes. Files that are already padded
+    will first have any padding removed, and then be padded out to the new
+    target size.
 
-    All files have ~36 bytes appended for two pad-descriptor tags. Thus files
+    Padded files include a few bytes for padding-descriptor tags. Thus files
     that are close to `size` already would not have their sizes obscured AND
-    also be marked as being padded (in the last ~36 bytes). If it is ok to have
-    file sizes exceeding `size` (and hence leak the size of the original file),
-    use `strict=False`.
+    also be marked as being padded (in the last ~36 bytes), raising a
+    `PaddingError`. To avoid this, you can check using the convenience function
+    `ok_to_pad()` before calling `pad()`.
 
-    Padding format: file + n bytes + pad = 10-digits + byte + PFS_PAD + byte
+    Padding format: file + n bytes + padding descriptors
+        (= 10-digits + byte + PFS_PAD + byte)
     n is selected to make the new file size == `size`.
 
-    `test` allows for testing whether the `size` is adequate to obscure
-    the file size. This is similar to testing getsize(file) > size,
-    except that `test` also takes into account the padding-size info that is
-    stored as part of the padding (36 bytes). So its
-    getsize(file) > size - 36. Testing succeeded if no PaddingError is raised.
-
-    To make unpadding easier and more robust (= facilitate human inspection),
+    To make unpadding easier and more robust (and enable human inspection),
     the end bytes provide the number of padding bytes that were added, plus an
     identifier. 10 digits is not hard-coded as 10, but as the length of
-    str(max_file_size), where max_file_size is 8G by default. Changes
-    to the max file size can thus cause pad / unpad failures.
+    `str(max_file_size)`, where `max_file_size` constant is 8G by default. This
+    means that any changes to the max file size constant can thus cause pad /
+    unpad failures across versions.
 
     Special size values:
 
-       0 :  remove any existing padding
-       -1 : remove padding if its present, raise PaddingError if not present
+        0 : unpad = remove any existing padding, no error if not present
+       -1 : strict unpad = remove padding if present, raise PaddingError if not
     """
     name = 'pad: '
     size = int(size)
     if size > MAX_FILE_SIZE:
         _fatal('pad: size must be <= %d (maximum file size)' % MAX_FILE_SIZE)
     # handle special size values (0, -1) => unpad
-    try:
-        oldsize = _unpad_strict(filename, test=test)
-        padded = True
-    except PaddingError:
-        padded = False  # wasn't padded with PAD_BYTE
-        if size < 0:
-            _fatal(name + 'file not padded, requested strict', PaddingError)
+    padded = pad_len(filename)
     if size < 1:
-        if padded:
-            return oldsize
-        else:
-            return getsize(filename)
+        if padded or size == -1:
+            return unpad(filename)  # will fail appropriate if not padded
+        return getsize(filename)  # size==0, not padded
 
+    if padded:
+        unpad(filename)
     filesize = getsize(filename)
     size = max(size, 128)
-    needed = max(0, size - filesize - PAD_LEN)
+    needed = ok_to_pad(filename, size)
     if needed == 0:
         msg = name + 'file length not obscured (existing length >= reqd size)'
-        if test or strict:
-            _fatal(msg, PaddingError)
-        logging.error(msg)
-    elif test:
-        logging.info(name + ' test complete, file size + padding < reqd size')
-        return
+        _fatal(msg, PaddingError)
     pad_bytes = PAD_STR + "%010d" % (needed + PAD_LEN)
 
     # append bytes to pad the file:
@@ -815,56 +800,64 @@ def pad(filename, size=16384, test=False, strict=True):
     return getsize(filename)
 
 
-def _unpad_strict(filename, test=False):
-    """Removes padding from the file. raise PaddingError if no or bad padding.
-
-    `test=True` tests for good padding but does not actually truncate the file.
-    This is provided because a given file may or may not be padded, and it may
-    be desired to simply test whether it is padded, without actually doing any
-    unpadding:
-
-        try:
-            _unpad_strict(filename, test=True)
-            padded = True
-        except PaddingError:
-            padded = False
-
-    Truncates the file to remove padding; does not `destroy` the padding.
+def ok_to_pad(filename, size):
+    """Return 0 if `size` is not adequate to obscure the file length.
     """
-    name = 'unpad: '
-    logging.debug(name + 'start, file="%s"' % filename)
+    return max(0, size - getsize(filename) - PAD_LEN)
+
+
+def pad_len(filename):
+    """Returns pad_count (in bytes) if the file contains PFS-style padding.
+
+    Returns 0 if bad or missing padding
+    """
+    name = 'pad_len'
+    logging.debug(name + ': start, file="%s"' % filename)
     filelen = getsize(filename)
-    with open(filename, 'r+b') as fd:
-        # read last 100 bytes and then split
-        fd.seek(max(0, filelen - PAD_LEN))
+    if filelen < PAD_LEN:
+        return 0
+    with open(filename, 'rb') as fd:
+        # read end bytes and then split
+        fd.seek(filelen - PAD_LEN)
         pad_stuff = fd.read()
         last_byte = pad_stuff[-1]  # expect all padding to be this byte
         if last_byte != PAD_BYTE:
-            msg = 'unpad: file %s not padded by chr(%d)'
-            _fatal(msg % (filename, ord(PAD_BYTE)), PaddingError)
+            return 0
         try:
             pad_tag_count, pad_marker = pad_stuff.split(PAD_BYTE)[-3:-1]
             pad_count = int(pad_tag_count.split(PAD_STR)[-1])
             assert pad_marker == PFS_PAD
         except:
-            _fatal('unpad: file not padded? bad format', PaddingError)
+            return 0
         if pad_count > filelen or pad_count > MAX_FILE_SIZE or pad_count < 0:
-            _fatal('unpad: bad pad count; file not padded?', PaddingError)
+            return 0
+    return pad_count
 
-        new_length = (filelen - pad_count)
-        logging.info(name + 'found padding in file %s' % filename)
-        if test:
-            logging.info(name + 'test only, file unchanged')
-        else:
-            # try to overwrite padding info, unknown effectiveness
-            overwrite = min(PAD_LEN, filelen - new_length)
-            if overwrite > 0:
-                for i in range(7):
-                    fd.seek(filelen - overwrite)
-                    fd.write(_printable_pwd(overwrite * 4))
-            # trim the padding length info
-            fd.truncate(new_length)
-            logging.info(name + 'truncated the file to remove padding')
+
+def unpad(filename):
+    """Removes PFS padding from the file. raise PaddingError if no PFS padding.
+
+    Truncates the file to remove padding; does not `destroy` the padding.
+    """
+    name = 'unpad'
+    logging.debug(name + ': start, file="%s"' % filename)
+    filelen = getsize(filename)
+    pad_count = pad_len(filename)
+    if not pad_count:
+        msg = name + ": file not padded, can't unpad"
+        _fatal(msg, PaddingError)
+    with open(filename, 'r+b') as fd:
+        new_length = filelen - pad_count
+        logging.info(name + ': found padding in file %s' % filename)
+        # try to overwrite padding info, unknown effectiveness
+        overwrite = min(PAD_LEN, filelen - new_length)
+        if overwrite > 0:
+            for i in range(7):
+                fd.seek(filelen - overwrite)
+                fd.write(_printable_pwd(overwrite * 4))
+        # trim the padding length info
+        fd.truncate(new_length)
+        logging.info(name + ': truncated the file to remove padding')
 
     return getsize(filename)
 
@@ -1667,11 +1660,14 @@ class Tests(object):
 
         # bad pad, file would be longer than size
         with pytest.raises(PaddingError):
-            pad(tmp1, size=known_size, test=True)
+            pad(tmp1, size=known_size)
 
         # bad unpad (non-padded file):
         with pytest.raises(PaddingError):
-            _unpad_strict(tmp1)
+            unpad(tmp1)
+        with pytest.raises(PaddingError):
+            pad(tmp1, -1)  # strict should fail
+
 
         # padding should obscure file sizes (thats the whole point):
         _test_size = known_size * 300
@@ -1681,29 +1677,24 @@ class Tests(object):
         tmp2_size = getsize(tmp2)
         assert tmp1_size == tmp2_size == _test_size
 
-        # unpad `test` mode should not change file size:
-        new = _unpad_strict(tmp1, test=True)
-        assert tmp1_size == getsize(tmp1) == new
-
-        _unpad_strict(tmp1)
+        unpad(tmp1)
         pad(tmp1)
-        pad(tmp1, -1)  # same as unpad strict
+        pad(tmp1, -1)  # same as unpad
+        pad(tmp1, 0)
         assert orig == open(tmp1, 'rb').read()
 
         # tmp1 is unpadded at this point:
-        with pytest.raises(PaddingError):
-            pad(tmp1, -1)  # strict should fail
         pad(tmp1, 0)  # not strict should do nothing quietly
 
         global PAD_BYTE
         PAD_BYTE = b'\1'
         pad(tmp1, 2 * known_size)
         file_contents = open(tmp1, 'rb').read()
-        assert file_contents[-1] == PAD_BYTE  # the actual byte is irrelevant
-        pad(tmp1, -1, test=True)
+        assert file_contents[-1] == PAD_BYTE  # actual byte should not matter
+
         PAD_BYTE = b'\0'
         with pytest.raises(PaddingError):
-            pad(tmp1, -1)  # should be a byte mismatch
+            pad(tmp1, -1)  # should be a byte mismatch at this point
 
     def test_signatures(self):
         # sign a known file with a known key. can we get known signature?
