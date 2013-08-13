@@ -251,7 +251,6 @@ class SetUmask(object):
 
 
 def _setup_logging():
-    # Logging:  stderr, or psychopy.logging if we're a PsychoPy module
     class _log2stdout(object):
         """Print all logging messages, regardless of log level.
         """
@@ -273,7 +272,6 @@ def _setup_logging():
     if not verbose:
         logging = _no_logging()
     else:
-
         msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
     return logging, logging_t0
@@ -788,9 +786,7 @@ def pad(filename, size=16384):
         for i in range(needed // chunk):
             fd.write(chunkbytes)
         extrabytes = PAD_BYTE * (needed % chunk)
-        fd.write(extrabytes)
-        fd.write(pad_bytes)
-        fd.write(PAD_BYTE + PFS_PAD + PAD_BYTE)
+        fd.write(extrabytes + pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE)
         logging.info(name + 'append bytes to get to %d bytes' % size)
 
     return getsize(filename)
@@ -948,7 +944,7 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
     ok_encrypt = (isfile(data_enc) and
                     os.stat(data_enc)[stat.ST_SIZE] and
                     isfile(pwd_rsa) and
-                    os.stat(pwd_rsa)[stat.ST_SIZE] >= 128)
+                    os.stat(pwd_rsa)[stat.ST_SIZE] >= PAD_MIN)
 
     # Get and save meta-data (including HMAC):
     if not meta:
@@ -956,8 +952,9 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
     else:
         metadata = os.path.split(datafile)[1] + META_EXT
         md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
-        if not isinstance(meta, dict):
-            logging.warning(name + 'non-dict value for meta; using default')
+        if not isinstance(meta, dict) or meta == {}:
+            if not meta in [True, {}]:
+                logging.warning(name + 'non-dict value for meta; using default')
             meta = _get_no_metadata()
         meta.update(md)
         with open(metadata, 'w+b') as fd:
@@ -1470,8 +1467,8 @@ def genRsaKeys():
     bits = 4096  # default
     b = input23('RSA key length (2048, 4096, 8192): ')
     if b in ['2048', '4096', '8192']:
-        bits = b
-    bits_msg = '  using %s' % bits
+        bits = int(b)
+    bits_msg = '  using %i' % bits
     if bits > 4096:
         bits_msg += '; this will take a minute!'
     print(bits_msg)
