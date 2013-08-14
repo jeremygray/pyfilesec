@@ -21,11 +21,11 @@ unique contribution of pyFileSec is that it aspires to provide secure file-
 management with a low barrier to entry and a stable API going forward. These
 considerations motivate many of the design choices.
 
-The main functions provided include encryption: ``encrypt()``, ``decrypt()``,
-``rotate()``; and verification: ``sign()``, ``verify()``. It is also easy to
-obscure file length: ``pad()``, securely remove files from disk: ``destroy()``,
-combine a set of files into a single archive file prior to encryption:
-``archive()``, and display the meta-data associated with an encrypted file.
+The main functions provided include encryption (``encrypt``, ``decrypt``,
+``rotate``) and verification (``sign``, ``verify``). It is also easy to
+obscure file length (``pad``, ``unpad``), securely remove files from disk (``destroy``),
+combine multiple files or directories into a single archive file prior to encryption
+(``archive``), and display the meta-data associated with an encrypted file.
 Large files (8G) and command-line / shell-script usage are also supported.
 
 Public-key (asymmetric) encryption is used for security and flexibility,

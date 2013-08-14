@@ -1,6 +1,12 @@
 Version 0.1
 ===========
 
+v0.1.8
+---------------------
+* IMPROVED pad()-related functions
+* IMPROVED logging
+* ADDED test directory
+
 v0.1.7
 ---------------------
 * ADDED command line usage
