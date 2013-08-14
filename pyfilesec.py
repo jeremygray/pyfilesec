@@ -40,9 +40,7 @@ import stat
 import shutil
 import tarfile
 import re
-from random import SystemRandom
-sysRand = SystemRandom()
-
+import random
 import json
 import time
 from tempfile import mkdtemp, NamedTemporaryFile
@@ -501,10 +499,8 @@ def get_key_length(pubkey):
 
 def _printable_pwd(nbits=256):
     """Return a string of hex digits with n random bits, zero-padded.
-
-    Uses random.SystemRandom().getrandbits().
     """
-    pwd = hex(sysRand.getrandbits(nbits))
+    pwd = hex(random.SystemRandom().getrandbits(nbits))
     return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
 
 
@@ -766,7 +762,7 @@ def pad(filename, size=16384):
     padded = pad_len(filename)
     if size < 1:
         if padded or size == -1:
-            return unpad(filename)  # will fail appropriate if not padded
+            return unpad(filename)  # or fail appropriately
         return getsize(filename)  # size==0, not padded
 
     if padded:
@@ -775,7 +771,7 @@ def pad(filename, size=16384):
     size = max(size, PAD_MIN)
     needed = ok_to_pad(filename, size)
     if needed == 0:
-        msg = name + 'file length not obscured (existing length >= reqd size)'
+        msg = name + 'file length not obscured (length >= requested size)'
         _fatal(msg, PaddingError)
     pad_bytes = PAD_STR + "%010d" % (needed + PAD_LEN)
 
@@ -947,23 +943,23 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
                     os.stat(pwd_rsa)[stat.ST_SIZE] >= PAD_MIN)
 
     # Get and save meta-data (including HMAC):
+    metadata = os.path.split(datafile)[1] + META_EXT
     if not meta:
         md = _get_no_metadata()
+        meta = {}
     else:
-        metadata = os.path.split(datafile)[1] + META_EXT
         md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
         if not isinstance(meta, dict) or meta == {}:
             if not meta in [True, {}]:
-                logging.warning(name + 'non-dict value for meta; using default')
+                logging.warning(name + 'using default value for meta-data')
             meta = _get_no_metadata()
-        meta.update(md)
-        with open(metadata, 'w+b') as fd:
-            json.dump(meta, fd)
+    meta.update(md)
+    with open(metadata, 'w+b') as fd:
+        json.dump(meta, fd)
 
     # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc:
     fullpath_files = [data_enc, pwd_rsa]
-    if meta:
-        fullpath_files.append(metadata)
+    fullpath_files.append(metadata)
 
     # get file names no path info & bundle them together as a single file
     files = [os.path.split(f)[1] for f in fullpath_files]
@@ -972,14 +968,15 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
 
     if not keep:
         # secure-delete unencrypted original, unless encrypt did not succeed:
-        ok_to_destroy = (ok_encrypt and
-                      isfile(archive) and
-                      os.stat(archive)[stat.ST_SIZE])
+        ok_to_destroy = (ok_encrypt and isfile(archive) and
+                         os.stat(archive)[stat.ST_SIZE])
         if ok_to_destroy:
             destroy(datafile)
-            logging.info(name + 'destroy()ed original file')
+            logging.info(name +
+                'destroy()ed original file (secure delete)')
         else:
-            logging.error(name + 'retaining original file, not destroy()ed')
+            logging.error(name +
+                'retaining original file, encryption did not succeed')
 
     return abspath(archive)
 
@@ -2258,7 +2255,7 @@ if __name__ == '__main__':
         """
         genRsaKeys()
     elif not isfile(args.filename):
-        raise Valueerror('file not found: %s' % args.filename)
+        raise ValueError('file not found: %s' % args.filename)
     else:
         """Call requested function with arguments, return result (to stdout)
 
