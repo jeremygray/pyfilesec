@@ -162,7 +162,6 @@ class PFSCodecRegistry(object):
         codec = PFSCodecRegistry()
         new = {'_encrypt_xyz': _encrypt_xyz,
                '_decrypt_xyz': _decrypt_xyz}
-        # checks for matching enc/dec pairs
         codec.register(new)
 
     and then `encrypt(method='_encrypt_xyz')` will work.
@@ -182,7 +181,10 @@ class PFSCodecRegistry(object):
         return list(self._functions.keys())
 
     def register(self, new_functions):
-        """Validate and add codec pairs to the registry, in pairs.
+        """Validate and add a codec to the registry.
+
+        Typically one adds an _enc + _dec pair. However, _dec only is accepted
+        (to support "read only" use of a codec), but _enc only is not.
         """
         for key in list(new_functions.keys()):
             fxn = new_functions[key]
@@ -205,7 +207,7 @@ class PFSCodecRegistry(object):
             assert key.startswith('_enc')
             dec_twin = key.replace('_enc', '_dec', 1)
             if not dec_twin in list(self._functions.keys()):
-                _fatal('method "%s" incomplete codec pair' % key)
+                _fatal('method "%s" bad codec: _enc without a _dec' % key)
             # ideally also check dec(enc(secret.txt, pub), priv, pphr)
             # but this won't easily just work for rot13, gpg, etc
 
@@ -626,7 +628,7 @@ def destroy(filename, cmdList=()):
     return pfs_UNKNOWN, orig_links, get_time() - t0
 
 
-def _get_file_permissions(filename):
+def get_file_permissions(filename):
     return int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
 
 
@@ -750,21 +752,24 @@ def pad(filename, size=DEFAULT_PAD_SIZE):
        -1 : strict unpad = remove padding if present, raise PaddingError if not
     """
     name = 'pad: '
+    logging.debug(name + 'start')
     size = int(size)
+    if 0 < size < PAD_MIN:
+        logging.info(name + 'requested size increased to %i bytes' % PAD_MIN)
+        size = PAD_MIN
     if size > MAX_FILE_SIZE:
         _fatal('pad: size must be <= %d (maximum file size)' % MAX_FILE_SIZE)
     # handle special size values (0, -1) => unpad
-    padded = pad_len(filename)
+    pad_count = pad_len(filename)
     if size < 1:
-        if padded or size == -1:
+        if pad_count or size == -1:
             return unpad(filename)  # or fail appropriately
         return getsize(filename)  # size==0, not padded
 
-    if padded:
-        unpad(filename)
+    if pad_count:
+        unpad(filename, pad_count)
     filesize = getsize(filename)
-    size = max(size, PAD_MIN)
-    needed = ok_to_pad(filename, size)
+    needed = ok_to_pad(filename, size, pad_count)
     if needed == 0:
         msg = name + 'file length not obscured (length >= requested size)'
         _fatal(msg, PaddingError)
@@ -783,13 +788,14 @@ def pad(filename, size=DEFAULT_PAD_SIZE):
     return getsize(filename)
 
 
-def ok_to_pad(filename, size):
+def ok_to_pad(filename, size, pad_count=None):
     """Return 0 if `size` is not adequate to obscure the file length.
     """
     # bug: what about very short < 128 minimum
-    existing = pad_len(filename)
+    if pad_count is None:
+        pad_count = pad_len(filename)
     size = max(size, PAD_MIN)
-    return max(0, size - (getsize(filename) - existing) - PAD_LEN)
+    return max(0, size - (getsize(filename) - pad_count) - PAD_LEN)
 
 
 def pad_len(filename):
@@ -820,7 +826,7 @@ def pad_len(filename):
     return pad_count
 
 
-def unpad(filename):
+def unpad(filename, pad_count=None):
     """Removes PFS padding from the file. raise PaddingError if no PFS padding.
 
     Truncates the file to remove padding; does not `destroy` the padding.
@@ -828,7 +834,8 @@ def unpad(filename):
     name = 'unpad'
     logging.debug(name + ': start, file="%s"' % filename)
     filelen = getsize(filename)
-    pad_count = pad_len(filename)
+    if pad_count is None:
+        pad_count = pad_len(filename)
     if not pad_count:
         msg = name + ": file not padded, can't unpad"
         _fatal(msg, PaddingError)
@@ -1158,7 +1165,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
             if not destroy(data_dec)[0] == pfs_DESTROYED:
                 msg = name + 'destroy tmp clear txt failed: %s' % data_dec
                 _fatal(msg, DestroyError)
-        perm_str = '0o' + oct(_get_file_permissions(clear_text))[1:]
+        perm_str = '0o' + oct(get_file_permissions(clear_text))[1:]
         logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
         if meta_file:
             newMeta = _uniq_file(clear_text + META_EXT)
@@ -1169,7 +1176,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
                 if not destroy(meta_file)[0] == pfs_DESTROYED:
                     msg = name + 'destroy tmp meta-data failed: %s' % meta_file
                     _fatal(msg, DestroyError)
-            perm_str = '0o' + oct(_get_file_permissions(newMeta))[1:]
+            perm_str = '0o' + oct(get_file_permissions(newMeta))[1:]
             logging.info('meta-data, permissions ' + perm_str + ': ' + newMeta)
     finally:
         try:
@@ -1525,6 +1532,8 @@ class Tests(object):
     def setup_class(self):
         global pytest
         import pytest
+        #global OPENSSL
+        #OPENSSL = '/opt/local/bin/openssl'
 
         self.start_dir = os.getcwd()
         tmp = '__pyfilesec test__'
@@ -1536,6 +1545,7 @@ class Tests(object):
     def teardown_class(self):
         global codec
         codec = PFSCodecRegistry(default_codec)
+
         shutil.rmtree(self.tmp, ignore_errors=False)
         os.chdir(self.start_dir)
 
@@ -1938,12 +1948,12 @@ class Tests(object):
         umask_restore = os.umask(0o000)  # need permissive to test
         with open(filename, 'wb') as fd:
             fd.write(b'\0')
-        assert _get_file_permissions(filename) == 0o666  # permissive to test
+        assert get_file_permissions(filename) == 0o666  # permissive to test
         enc = encrypt(filename, pub)
-        assert _get_file_permissions(enc) == PERMISSIONS
+        assert get_file_permissions(enc) == PERMISSIONS
         assert not isfile(filename)
         dec = decrypt(enc, priv, pphr)
-        assert _get_file_permissions(dec) == PERMISSIONS  # restricted
+        assert get_file_permissions(dec) == PERMISSIONS  # restricted
         os.umask(umask_restore)
 
     def test_hmac(self):
