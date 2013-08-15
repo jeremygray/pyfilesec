@@ -412,6 +412,7 @@ if True:
     assert len(PAD_BYTE) == 1
     PAD_LEN = len(PAD_STR + PFS_PAD) + 10 + 2  # len of info about padding
     PAD_MIN = 128  # minimum length in bytes post-padding
+    DEFAULT_PAD_SIZE = 16384  # default resulting file size
     # 10 = # digits in max file size, also works for 4G files
     #  2 = # extra bytes, one at end, one between PAD_STR and PFS_PAD labels
 
@@ -713,7 +714,7 @@ def log_metadata(md, log=True):
     return md_fmt
 
 
-def pad(filename, size=16384):
+def pad(filename, size=DEFAULT_PAD_SIZE):
     """Obscure a file's size by appending bytes until it has length `size`.
 
     Files shorter than `size` will be padded out to `size` (see details below).
@@ -1268,7 +1269,7 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
     (ignoring possible differences in padding).
 
     `rotate()` will generally try to be permissive about its inputs, so that
-    its easy to rotate the encryption to recover from some internal formatting
+    its possible to rotate the encryption to recover from internal formatting
     errors.
     """
     name = 'rotate'
@@ -1503,7 +1504,7 @@ class Tests(object):
 
     - unicode in paths fail on win32
     - permissions fail on win32
-    - fsutil need admin priv on win32
+    - hardlinks (fsutil) need admin priv on win32
     """
     def setup_class(self):
         global pytest
@@ -1962,17 +1963,50 @@ class Tests(object):
         cmdLineCmd = [sys.executable, pathToSelf, datafile, '--encrypt',
                       '--pub', pub1, '--openssl=' + OPENSSL]
         dataEnc = _sys_call(cmdLineCmd)
-        assert os.path.isfile(dataEnc)  # glop from debugging print stmnts?
+        assert isfile(dataEnc)  # glop from debugging print stmnts?
 
         # Decrypt:
         cmdLineCmd = [sys.executable, pathToSelf, dataEnc, '--decrypt',
                       '--priv', priv1, '--pphr', pphr1, '--openssl=' + OPENSSL]
-        dataEncDec_cmdline = _sys_call(cmdLineCmd).strip()
-        assert os.path.isfile(dataEncDec_cmdline)  # debugging print stmnts?
+        dataEncDec_cmdline = _sys_call(cmdLineCmd)
+        assert isfile(dataEncDec_cmdline)  # debugging print stmnts?
 
-        # Both enc and dec need to succeed to recover the original text:
         recoveredText = open(dataEncDec_cmdline).read()
-        assert recoveredText == secretText
+        assert recoveredText == secretText  # need both enc and dec to work
+
+        # Rotate:
+        assert isfile(dataEnc)
+        cmdLineRotate = [sys.executable, pathToSelf, dataEnc, '--rotate',
+                      '--npub', pub1, '-z', str(getsize(datafile) * 2),
+                      '--priv', priv1, '--pphr', pphr1]
+        rot_out = _sys_call(cmdLineRotate)
+        assert isfile(rot_out)
+
+        # Sign and Verify:
+        cmdLineSign = [sys.executable, pathToSelf, datafile, '--sign',
+                      '--priv', priv1, '--pphr', pphr1]
+        sig_out = _sys_call(cmdLineSign)
+        cmdLineVerify = [sys.executable, pathToSelf, datafile, '--verify',
+                      '--pub', pub1, '--sig', sig_out]
+        sig_verify_cmdLine = _sys_call(cmdLineVerify)
+        assert sig_verify_cmdLine  # need both sign and verify to work
+
+        # Pad, unpad:
+        orig_size = getsize(datafile)
+        cmdLinePad = [sys.executable, pathToSelf, datafile, '--pad']
+        pad_out = int(_sys_call(cmdLinePad))
+        assert pad_out == DEFAULT_PAD_SIZE
+
+        cmdLineUnpad = [sys.executable, pathToSelf, datafile, '--pad',
+                        '-z', '0']
+        unpad_out = int(_sys_call(cmdLineUnpad))
+        assert unpad_out == orig_size
+
+        # Destroy:
+        cmdLineDestroy = [sys.executable, pathToSelf, datafile, '--destroy']
+        destroy_out = eval(_sys_call(cmdLineDestroy))
+        assert len(destroy_out) == 3
+        assert destroy_out[0] == pfs_DESTROYED
 
     def test_destroy(self):
         # see if it takes at least 50x longer to destroy() than unlink a file
@@ -2293,12 +2327,9 @@ if __name__ == '__main__':
             kw.update({'priv_old': args.priv})
             kw.update({'pub_new': args.npub})
             args.pphr and kw.update({'pphr_old': args.pphr})
-            args.nppr and kw.update({'pphr_new': args.nppr})
             args.nprv and kw.update({'priv_new': args.nprv})
             args.nppr and kw.update({'pphr_new': args.nppr})
             args.keep and kw.update({'keep': args.keep})
-            meta = not args.nometa
-            meta and kw.update({'meta': meta})
             args.hmac and kw.update({'hmac_new': args.hmac})
             if args.size >= -1:
                 kw.update({'pad_new': args.size})
