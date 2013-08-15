@@ -972,7 +972,7 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
         if ok_to_destroy:
             destroy(datafile)
             logging.info(name +
-                'destroy()ed original file (secure delete)')
+                'secure delete original plain-text file (destroy)')
         else:
             logging.error(name +
                 'retaining original file, encryption did not succeed')
@@ -1267,7 +1267,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
 
 
 @SetUmask
-def rotate(data_enc, priv_old, pub_new, pphr_old=None,
+def rotate(data_enc, priv, pub, pphr=None,  # priv pphr = old, pub = new
            priv_new=None, pphr_new=None,
            hmac_new=None, pad_new=None):
     """Swap old encryption for new (decrypt-then-re-encrypt).
@@ -1297,7 +1297,7 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
     """
     name = 'rotate'
     logging.debug(name + ': start')
-    file_dec = decrypt(data_enc, priv_old, pphr=pphr_old)
+    file_dec = decrypt(data_enc, priv, pphr=pphr)
     try:
         old_meta = file_dec + META_EXT
 
@@ -1306,7 +1306,8 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
             try:
                 md = load_metadata(old_meta)
                 if not type(md) == dict:
-                    raise InternalFormatError
+                    msg = 'meta-data is not a dict'
+                    _fatal(msg, InternalFormatError)
             except:
                 logging.error(name + ': failed to read metadata from file')
                 md = _get_no_metadata()
@@ -1316,7 +1317,7 @@ def rotate(data_enc, priv_old, pub_new, pphr_old=None,
             pad(file_dec, pad_new)
         # for verification, only hash after changing the padding
         hash_old = _sha256(file_dec)
-        new_enc = encrypt(file_dec, pub_new, date=True, meta=md,
+        new_enc = encrypt(file_dec, pub, date=True, meta=md,
                              keep=False, hmac_key=hmac_new)
     finally:
         # Never want the intermediate clear-text; encrypt() will destroy
@@ -1841,9 +1842,9 @@ class Tests(object):
 
         # Rotate encryption including padding change:
         first_enc = encrypt(datafile, pub1, date=False)
-        second_enc = rotate(first_enc, priv1, pub2, pphr_old=pphr1,
+        second_enc = rotate(first_enc, priv1, pub2, pphr=pphr1,
                             pad_new=8192)
-        third_enc = rotate(second_enc, priv2, pub1, pphr_old=pphr2,
+        third_enc = rotate(second_enc, priv2, pub1, pphr=pphr2,
                            priv_new=priv1, pphr_new=pphr1,  # = destroy orig
                            pad_new=16384, hmac_new='key')
         # padding affects .enc file size, values vary a little from run to run
@@ -2346,9 +2347,9 @@ if __name__ == '__main__':
             args.out and kw.update({'outFile': args.out})
         elif args.rotate:
             fxn = rotate
-            kw.update({'priv_old': args.priv})
-            kw.update({'pub_new': args.npub})
-            args.pphr and kw.update({'pphr_old': args.pphr})
+            kw.update({'priv': args.priv})
+            kw.update({'pub': args.npub})
+            args.pphr and kw.update({'pphr': args.pphr})
             args.nprv and kw.update({'priv_new': args.nprv})
             args.nppr and kw.update({'pphr_new': args.nppr})
             args.keep and kw.update({'keep': args.keep})
