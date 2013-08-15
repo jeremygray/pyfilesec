@@ -1140,9 +1140,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
         DECRYPT_FXN = codec.get_function(dec_method)
         data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, outFile,
                                   OPENSSL=OPENSSL)
-        os.chmod(data_dec, PERMISSIONS)  # hopefully redundant
-        perm_str = '0o' + oct(PERMISSIONS)[1:]
-        logging.info('decrypted, permissions ' + perm_str + ': ' + data_dec)
+        # os.chmod(data_dec, PERMISSIONS)  # redundant w/ umask on mac, linux
 
         # Rename decrypted and meta files:
         _new_path = os.path.join(dest_dir, data_dec.split(os.sep)[-1])
@@ -1159,6 +1157,10 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
             except OSError:
                 shutil.copy(meta_file, newMeta)
                 destroy(meta_file)
+        # perm_str = '0o' + oct(PERMISSIONS)[1:]  # intended
+        perms = _get_file_permissions(clear_text)  # actual
+        perm_str = '0o' + oct(perms)[1:]
+        logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
     finally:
         try:
             os.chmod(clear_text, PERMISSIONS)  # should be done
@@ -1516,14 +1518,8 @@ class Tests(object):
         os.chdir(tmp)
 
     def teardown_class(self):
-        try:
-            shutil.rmtree(self.tmp, ignore_errors=False)
-            # CentOS + py2.6 says Tests has no attr self.tmp
-        except:
-            myhome = '/home/jgray/__pyfilesec test__'
-            shutil.rmtree(myhome, ignore_errors=True)
-        finally:
-            os.chdir(self.start_dir)
+        shutil.rmtree(self.tmp, ignore_errors=False)
+        os.chdir(self.start_dir)
 
     def _known_values(self):
         """Return tmp files with known keys, data, signature for testing.
