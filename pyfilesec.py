@@ -135,6 +135,8 @@ class InternalFormatError(PyFileSecError):
 class PaddingError(PyFileSecError):
     '''Error to indicate bad file padding.'''
 
+class CodecRegistryError(PyFileSecError):
+    '''Error to indicate codec registry problem, e.g., not registered.'''
 
 class PFSCodecRegistry(object):
     """Class to explicitly manage the encrypt & decrypt functions.
@@ -1062,7 +1064,6 @@ def _get_dec_method(meta_file, dec_method):
     """
     if meta_file:
         md = load_metadata(meta_file)
-
         dates = list(md.keys())  # dates of meta-data events
         most_recent = sorted(dates)[-1]
         if not 'encryption method' in list(md[most_recent].keys()):
@@ -1080,11 +1081,9 @@ def _get_dec_method(meta_file, dec_method):
         else:
             dec_method = _dec_from_enc
             logging.info('implicitly want "' + dec_method + '" (meta-data)')
-        if not dec_method in globals():
-            _fatal("decryption function '%s' not available" % dec_method)
     if not meta_file or _dec_from_enc == 'unknown':
         # can't infer, no meta-data
-        if not dec_method:
+        if not dec_method or _dec_from_enc == 'unknown':
             # ... and nothing explicit either, so go with default:
             logging.info('falling through to default decryption')
             available = [f for f in list(default_codec.keys())
@@ -1092,7 +1091,8 @@ def _get_dec_method(meta_file, dec_method):
             dec_method = available[0]
 
     if not codec.is_registered(dec_method):
-        _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method)
+        _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method,
+               CodecRegistryError)
     logging.info('_get_dec_method: dec fxn set to: ' + str(dec_method))
 
     return dec_method
@@ -1884,7 +1884,7 @@ class Tests(object):
         assert getsize(pwdFileRsa) == int(testBits) // 8
 
         # Non-existent decMethod should fail:
-        with pytest.raises(ValueError):
+        with pytest.raises(CodecRegistryError):
             dataDec = decrypt(new_enc, priv1, pphr1,
                           dec_method='_decrypt_what_the_what')
         # Good decMethod should work:
