@@ -53,6 +53,7 @@ import argparse
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__)
+libdir = os.path.split(lib_path)[0]
 
 
 def _parse_args():
@@ -304,7 +305,6 @@ def _get_openssl_info():
     else:
         # use a bat file for openssl.cfg; create .bat if not found or broken
         # might have to move to os.environ['HOME'] to ensure write permission
-        libdir = os.path.split(os.path.abspath(__file__))[0]
         bat_name = '_openssl.bat'
         OPENSSL = os.path.join(libdir, bat_name)
         if not os.path.exists(OPENSSL):
@@ -360,7 +360,6 @@ def _get_destroy_info():
         destroy_TOOL = _sys_call(['which', 'shred'])
         destroy_OPTS = ('-f', '-u', '-n', '7')
     elif sys.platform in ['win32']:
-        libdir = os.path.split(os.path.abspath(__file__))[0]
         default = os.path.join(libdir, '_sdelete.bat')
         if not isfile(default):
             guess = _sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
@@ -1051,8 +1050,7 @@ def _unpack(data_enc):
         elif fname.endswith(META_EXT):
             meta_file = os.path.join(tmp_dir, fname)
         else:
-            _fatal(name + ': unexpected file in archive',
-                   InternalFormatError)
+            _fatal(name + ': unexpected file in archive', InternalFormatError)
 
     return data_aes, pwdFileRsa, meta_file
 
@@ -1540,7 +1538,7 @@ class Tests(object):
             yN8lJmBnyTkWmZ+OIwIDAQAB
             -----END PUBLIC KEY-----
             """.replace('    ', '')
-        if not os.path.isfile(pub):
+        if not isfile(pub):
             with open(pub, 'w+b') as fd:
                 fd.write(pubkey)
 
@@ -1564,13 +1562,13 @@ class Tests(object):
             THSOgTQAWEWjOU/IwlgOwRz5pM6xV0RmAa7b5uovheI=
             -----END RSA PRIVATE KEY-----
             """.replace('    ', '')
-        if not os.path.isfile(priv):
+        if not isfile(priv):
             with open(priv, 'w+b') as fd:
                 fd.write(privkey)
 
         pphr = 'pphrKnown'
         p = "337876469593251699797157678785713755296571899138117259"
-        if not os.path.isfile(pphr):
+        if not isfile(pphr):
             with open(pphr, 'w+b') as fd:
                 fd.write(p)
 
@@ -1883,7 +1881,7 @@ class Tests(object):
         assert isfile(datafile)
 
         # Check size of RSA-pub encrypted password for AES256:
-        assert os.path.getsize(pwdFileRsa) == int(testBits) // 8
+        assert getsize(pwdFileRsa) == int(testBits) // 8
 
         # Non-existent decMethod should fail:
         with pytest.raises(ValueError):
@@ -1929,7 +1927,7 @@ class Tests(object):
         assert _get_file_permissions(filename) == 0o666  # permissive to test
         enc = encrypt(filename, pub)
         assert _get_file_permissions(enc) == PERMISSIONS
-        assert not os.path.isfile(filename)
+        assert not isfile(filename)
         dec = decrypt(enc, priv, pphr)
         assert _get_file_permissions(dec) == PERMISSIONS  # restricted
         os.umask(umask_restore)
