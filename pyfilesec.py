@@ -138,6 +138,9 @@ class PaddingError(PyFileSecError):
 class CodecRegistryError(PyFileSecError):
     '''Error to indicate codec registry problem, e.g., not registered.'''
 
+class DestroyError(PyFileSecError):
+    '''Error to indicate secure delete problem, e.g., destroy failed.'''
+
 
 class PFSCodecRegistry(object):
     """Class to explicitly manage the encrypt & decrypt functions.
@@ -1017,7 +1020,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
 
 @SetUmask
 def _unpack(data_enc):
-    """Extract files from archive, return paths to files.
+    """Extract files from archive into a tmp dir, return paths to files.
     """
     name = 'unpack'
     logging.debug(name + ': start')
@@ -1108,7 +1111,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     `pphr` should be the passphrase itself (a string), not a file name.
 
     Works on a copy of data.enc, tries to decrypt, clean-up only those files.
-    The original is never touched beyond making a copy.
+    The original data.enc is not used (except to make a copy).
     """
     name = 'decrypt: '
     logging.debug(name + 'start')
@@ -1127,45 +1130,57 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
         dest_dir = os.path.split(data_enc)[0]
         logging.info('decrypting into %s' % dest_dir)
 
-        # Unpack the .enc file bundle:
+        # Unpack the .enc file bundle into a new tmp dir:
         data_aes, pwd_file, meta_file = _unpack(data_enc)
+        if not all([data_aes, pwd_file, meta_file]):
+            logging.warn('did not find 3 files in archive %s' % data_enc)
+            # ? or _fatal(msg, InternalFormatError) + suggest rotate() to fix
+        tmp_dir = os.path.split(data_aes)[0]
 
         # Get a valid decrypt method, from meta-data or argument:
-        logging.info("meta-data file: " + str(meta_file))
-        clear_text = None  # in case _get_dec_method raise()es
+        clear_text = None  # file name; set in case _get_dec_method raise()es
         dec_method = _get_dec_method(meta_file, dec_method)
         if not dec_method:
             _fatal('Could not get a valid decryption method', DecryptError)
 
-        # Decrypt:
+        # Decrypt (into same new tmp dir):
         DECRYPT_FXN = codec.get_function(dec_method)
         data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, outFile,
                                   OPENSSL=OPENSSL)
-        # os.chmod(data_dec, PERMISSIONS)  # redundant w/ umask on mac, linux
 
-        # Rename decrypted and meta files:
-        _new_path = os.path.join(dest_dir, data_dec.split(os.sep)[-1])
+        # Rename decrypted and meta files (mv to dest_dir):
+        _new_path = os.path.join(dest_dir, os.path.basename(data_dec))
         clear_text = _uniq_file(_new_path)
         try:
             os.rename(data_dec, clear_text)
         except OSError:
             shutil.copy(data_dec, clear_text)
-            destroy(data_dec)
+            if not destroy(data_dec)[0] == pfs_DESTROYED:
+                msg = name + 'destroy tmp clear txt failed: %s' % data_dec
+                _fatal(msg, DestroyError)
+        perm_str = '0o' + oct(_get_file_permissions(clear_text))[1:]
+        logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
         if meta_file:
             newMeta = _uniq_file(clear_text + META_EXT)
             try:
                 os.rename(meta_file, newMeta)
             except OSError:
                 shutil.copy(meta_file, newMeta)
-                destroy(meta_file)
-        # perm_str = '0o' + oct(PERMISSIONS)[1:]  # intended
-        perms = _get_file_permissions(clear_text)  # actual
-        perm_str = '0o' + oct(perms)[1:]
-        logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
+                if not destroy(meta_file)[0] == pfs_DESTROYED:
+                    msg = name + 'destroy tmp meta-data failed: %s' % meta_file
+                    _fatal(msg, DestroyError)
+            perm_str = '0o' + oct(_get_file_permissions(newMeta))[1:]
+            logging.info('meta-data, permissions ' + perm_str + ': ' + newMeta)
     finally:
         try:
-            os.chmod(clear_text, PERMISSIONS)  # should be done
-            os.chmod(newMeta, PERMISSIONS)  # typically not done yet
+            # clean-up, nothing clear text inside
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except:
+            pass
+        try:
+            # redundant (umask on mac, linux) or no effect (win):
+            os.chmod(clear_text, PERMISSIONS)
+            os.chmod(newMeta, PERMISSIONS)
         except:
             pass
 
