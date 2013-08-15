@@ -93,9 +93,6 @@ def _parse_args():
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
     parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
-    #parser.add_argument('-e', '--enc', help='register encryption method to use')
-    #parser.add_argument('-d', '--dec', help='register decryption method to use')
-
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -418,11 +415,9 @@ if True:
     # 10 = # digits in max file size, also works for 4G files
     #  2 = # extra bytes, one at end, one between PAD_STR and PFS_PAD labels
 
-    # value to use for missing meta-data:
-    META_DATA_UNKNOWN = '(meta-data unknown)'
-
     # used if user suppresses the date; will sort before a numerical date:
     DATE_UNKNOWN = '(date-time unknown)'
+    NO_META_DATA = {'meta-data %s' % DATE_UNKNOWN: {'meta-data': False}}
 
     whitespace_re = re.compile('\s')
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
@@ -660,14 +655,8 @@ def _uniq_file(filename):
     base, filext = os.path.splitext(filename)
     while isfile(filename) or os.path.isdir(filename):
         count += 1
-        filename = base + '(' + str(count) + ')' + filext
+        filename = base + '_' + str(count) + filext
     return filename
-
-
-def _get_no_metadata():
-    """Return valid meta-data format, with no data
-    """
-    return {'meta-data %s' % DATE_UNKNOWN: META_DATA_UNKNOWN}
 
 
 def _get_metadata(datafile, data_enc, pub, enc_method, date=True, hmac=None):
@@ -943,25 +932,22 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
                     os.stat(pwd_rsa)[stat.ST_SIZE] >= PAD_MIN)
 
     # Get and save meta-data (including HMAC):
-    metadata = os.path.split(datafile)[1] + META_EXT
-    if not meta:
-        md = _get_no_metadata()
-        meta = {}
-    else:
+    metafile = os.path.split(datafile)[1] + META_EXT
+    # meta is True, False, or a meta-data dict to update with this session
+    if not type(meta) in [bool, dict]:
+        _fatal(name + 'meta must be True, False, or dict', AttributeError)
+    if not meta:  # False or {}
+        meta = NO_META_DATA
+    else:  # True or exising md
+        if meta is True:
+            meta = {}
         md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
-        if not isinstance(meta, dict) or meta == {}:
-            if not meta in [True, {}]:
-                logging.warning(name + 'using default value for meta-data')
-            meta = _get_no_metadata()
-    meta.update(md)
-    with open(metadata, 'w+b') as fd:
+        meta.update(md)
+    with open(metafile, 'wb') as fd:
         json.dump(meta, fd)
 
-    # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc:
-    fullpath_files = [data_enc, pwd_rsa]
-    fullpath_files.append(metadata)
-
-    # get file names no path info & bundle them together as a single file
+    # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc archive:
+    fullpath_files = [data_enc, pwd_rsa, metafile]
     files = [os.path.split(f)[1] for f in fullpath_files]
     archive = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
     make_archive(files, archive, keep=False)
@@ -1071,14 +1057,21 @@ def _unpack(data_enc):
 
 
 def _get_dec_method(meta_file, dec_method):
-    """Return a valid decryption method, based on meta-data or default
+    """Return a valid decryption method, based on meta-data or default.
+
+    Cross-validate requested dec_method against meta-data, or warn if mismatch.
     """
     if meta_file:
         md = load_metadata(meta_file)
+
         dates = list(md.keys())  # dates of meta-data events
         most_recent = sorted(dates)[-1]
-        enc_method = md[most_recent]['encryption method'].split('.')[1]
-        _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
+        if not 'encryption method' in list(md[most_recent].keys()):
+            enc_method = 'unknown'
+            _dec_from_enc = enc_method
+        else:
+            enc_method = md[most_recent]['encryption method'].split('.')[1]
+            _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
 
         if dec_method:
             if dec_method != _dec_from_enc:
@@ -1090,7 +1083,7 @@ def _get_dec_method(meta_file, dec_method):
             logging.info('implicitly want "' + dec_method + '" (meta-data)')
         if not dec_method in globals():
             _fatal("decryption function '%s' not available" % dec_method)
-    else:
+    if not meta_file or _dec_from_enc == 'unknown':
         # can't infer, no meta-data
         if not dec_method:
             # ... and nothing explicit either, so go with default:
@@ -1663,7 +1656,6 @@ class Tests(object):
         with pytest.raises(PaddingError):
             pad(tmp1, -1)  # strict should fail
 
-
         # padding should obscure file sizes (thats the whole point):
         _test_size = known_size * 300
         pad(tmp1, size=_test_size)
@@ -1858,7 +1850,24 @@ class Tests(object):
         assert len(hmacs) == 1
 
     def test_no_metadata(self):
-        pytest.skip()
+        secretText = 'secret snippet %.6f' % get_time()
+        datafile = 'cleartext unicode.txt'
+        with open(datafile, 'w+b') as fd:
+            fd.write(secretText)
+        pub1, priv1, pphr1, testBits = self._known_values()[:4]
+
+        # Should not be able to suppress meta-data file, just the info:
+        for missing in [False, {}]:
+            new_enc = encrypt(datafile, pub1, meta=missing, keep=True)
+            data_enc, pwdFileRsa, metaFile = _unpack(new_enc)
+            assert metaFile != None
+            assert data_enc and pwdFileRsa
+
+            md = load_metadata(metaFile)
+            assert md == NO_META_DATA
+        with pytest.raises(AttributeError):
+            new_enc = encrypt(datafile, pub1, meta='junk', keep=True)
+            # keep=True is faster than srm
 
     def test_misc(self):
         secretText = 'secret snippet %.6f' % get_time()
@@ -1867,13 +1876,9 @@ class Tests(object):
             fd.write(secretText)
         pub1, priv1, pphr1, testBits = self._known_values()[:4]
 
-        # Should be able to suppress meta-data file:
-        new_enc = encrypt(datafile, pub1, meta=False, keep=True)
+        # Using keep=True should not remove orig file:
+        new_enc = encrypt(datafile, pub1, keep=True)
         data_enc, pwdFileRsa, metaFile = _unpack(new_enc)
-        assert metaFile == None
-        assert data_enc and pwdFileRsa
-
-        # test keep=True:
         assert isfile(datafile)
 
         # Check size of RSA-pub encrypted password for AES256:
@@ -1949,21 +1954,21 @@ class Tests(object):
         secretText = 'secret snippet %.6f' % get_time()
         with open(datafile, 'wb') as fd:
             fd.write(secretText)
-        pub1, priv1 = _genRsa(bits=1024)  # NO PASSPHRASE
+        pub1, priv1, pphr1 = self._known_values()[:3]
         pathToSelf = abspath(__file__)
         datafile = abspath(datafile)
 
         # Encrypt:
         cmdLineCmd = [sys.executable, pathToSelf, datafile, '--encrypt',
                       '--pub', pub1, '--openssl=' + OPENSSL]
-        dataEnc = _sys_call(cmdLineCmd).strip()
-        assert os.path.isfile(dataEnc)
+        dataEnc = _sys_call(cmdLineCmd)
+        assert os.path.isfile(dataEnc)  # glop from debugging print stmnts?
 
         # Decrypt:
         cmdLineCmd = [sys.executable, pathToSelf, dataEnc, '--decrypt',
-                      '--priv', priv1, '--openssl=' + OPENSSL]
+                      '--priv', priv1, '--pphr', pphr1, '--openssl=' + OPENSSL]
         dataEncDec_cmdline = _sys_call(cmdLineCmd).strip()
-        assert os.path.isfile(dataEncDec_cmdline)
+        assert os.path.isfile(dataEncDec_cmdline)  # debugging print stmnts?
 
         # Both enc and dec need to succeed to recover the original text:
         recoveredText = open(dataEncDec_cmdline).read()
