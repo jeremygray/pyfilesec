@@ -1534,6 +1534,8 @@ class Tests(object):
         os.chdir(tmp)
 
     def teardown_class(self):
+        global codec
+        codec = PFSCodecRegistry(default_codec)
         shutil.rmtree(self.tmp, ignore_errors=False)
         os.chdir(self.start_dir)
 
