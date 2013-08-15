@@ -138,6 +138,7 @@ class PaddingError(PyFileSecError):
 class CodecRegistryError(PyFileSecError):
     '''Error to indicate codec registry problem, e.g., not registered.'''
 
+
 class PFSCodecRegistry(object):
     """Class to explicitly manage the encrypt & decrypt functions.
 

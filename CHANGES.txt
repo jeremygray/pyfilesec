@@ -1,11 +1,12 @@
-Version 0.1
-===========
+Version 0.1 (alpha status)
+==========================
 
 v0.1.8
 ---------------------
+* IMPROVED meta-data handling
 * IMPROVED pad()-related functions
 * IMPROVED logging
-* ADDED test directory
+* ADDED more tests: command line usage, missing meta-data
 
 v0.1.7
 ---------------------

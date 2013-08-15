@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
-PyFileSec
+pyFileSec
 
-Copyright (c) 2013, Jeremy R. Gray
+Copyright (c) Jeremy R. Gray, 2013
 All rights reserved.
 
-PyFileSec is licensed under the GNU General Public License (version 3), with
+pyFileSec is licensed under the GNU General Public License (version 3), with
 two additional exemptions. For the complete text of that license see
 http://www.gnu.org/copyleft/gpl.html  The first additional exemption is that
 compiling, linking, and/or using OpenSSL is allowed. The second exemption is
@@ -23,7 +23,7 @@ IF THE COPYRIGHT HOLDER HAS BEEN OR IS HEREAFTER ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGES.
 
 In basic terms, this allows you to use, redistribute, add to, modify, or even
-sell, PyFileSec or any of it's components. If you do release any such
+sell, pyFileSec or any of it's components. If you do release any such
 'derivative works' however, you must make this source code available with the
 distribution and must also license your product under the GNU GPL.
 
