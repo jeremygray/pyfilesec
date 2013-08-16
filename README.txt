@@ -29,8 +29,10 @@ combine multiple files or directories into a single archive file prior to encryp
 Large files (8G) and command-line / shell-script usage are also supported.
 
 By default, file permissions are set to conservative values (only Mac & linux
-at this point). Clear-text files are deleted securely after encryption.
-Decryption will not proceed inside a Dropbox folder (to help limit accidental
+at this point). Clear-text files are deleted securely after encryption. If the
+file (inode) had other links to it, their presence is reported as a count that
+can be checked.
+Decryption will not proceed inside a Dropbox folder (to help limit unintended
 propagation of the clear-text to other machines).
 
 Public-key (asymmetric) encryption is used for security and flexibility,

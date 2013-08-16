@@ -1535,6 +1535,29 @@ def getVersion():
 def isInDropbox(filename):
     """Return True if the file is within a Dropbox folder.
     """
+    filename = _abspath_winDriveCap(filename)
+    global dropbox_path
+    if dropbox_path is None:
+        dropbox_path = get_dropbox()
+    if dropbox_path is False:
+        logging.info("couldn't find a Dropbox folder on this system")
+        return False
+
+    inside = (filename.startswith(dropbox_path + os.sep) or
+              filename == dropbox_path)
+    logging.info('%s %s inside Dropbox' % (filename, ('is not', 'is')[inside]))
+
+    return inside
+
+
+def _abspath_winDriveCap(filename):
+    f = abspath(filename)
+    return f[0].capitalize() + f[1:]
+
+
+def get_dropbox():
+    """Search for Dropbox folder; set global var, return path or False.
+    """
     def _winGetProgramData():
         """Return paths to likely places for application data on win32
 
@@ -1560,30 +1583,25 @@ def isInDropbox(filename):
             paths.append(path_buf.value)
         return paths
 
-    filename = abspath(filename)
     global dropbox_path
-    if dropbox_path is None:
-        # nothing cached, find out what it is and cache:
-        if sys.platform != 'win32':
-            host_db = os.path.expanduser('~/.dropbox/host.db')
-        else:
-            dirs = _winGetProgramData()
-            for d in dirs:
-                host_db = os.path.join(d, 'Dropbox', 'host.db')
-                if os.path.exists(host_db):
-                    break
+    if sys.platform != 'win32':
+        host_db = os.path.expanduser('~/.dropbox/host.db')
+    else:
+        dirs = _winGetProgramData()
+        for d in dirs:
+            host_db = os.path.join(d, 'Dropbox', 'host.db')
+            if os.path.exists(host_db):
+                break
+    try:
+        db_path_b64 = open(host_db, 'rb').readlines()[1]  # second line
+        db_path = b64decode(db_path_b64.strip())
+        dropbox_path = _abspath_winDriveCap(db_path)
+        logging.info('found Dropbox folder %s' % dropbox_path)
+    except IOError:
+        logging.info('did not find a Dropbox folder')
+        dropbox_path = False
 
-        try:
-            db_path_b64 = open(host_db, 'rb').read()
-            dropbox_path = b64decode(db_path_b64.split()[1])
-        except IOError:
-            dropbox_path = False
-    if dropbox_path is False:
-        # can't find Dropbox on this system
-        return False
-
-    return (filename.startswith(dropbox_path + os.sep) or
-            filename == dropbox_path)
+    return dropbox_path
 
 
 class Tests(object):
@@ -2343,12 +2361,14 @@ class Tests(object):
         # assumes that isInDropbox works correctly (returns Dropbox folder)
         # this test assesses whether decrypt will refuse to proceed
         global dropbox_path
-
         orig = dropbox_path
-        dropbox_path = abspath('.')  # fake path
+
+        if not get_dropbox():
+            dropbox_path = abspath('.')  # fake path
         with pytest.raises(DecryptError):
             decrypt(os.path.join(dropbox_path, 'test'), 'a', 'b')
-        dropbox_path = orig  # restore real path
+        dropbox_path = orig  # restore real path, if any
+
 
 # Basic set-up (order matters) ------------------------------------------------
 logging, logging_t0 = _setup_logging()
