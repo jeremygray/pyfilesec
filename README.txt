@@ -30,10 +30,12 @@ Large files (8G) and command-line / shell-script usage are also supported.
 
 By default, file permissions are set to conservative values (only Mac & linux
 at this point). Clear-text files are deleted securely after encryption. If the
-file (inode) had other links to it, their presence is reported as a count that
-can be checked.
+file (inode) had other links to it, their presence is reported (as a count
+which can be checked).
 Decryption will not proceed inside a Dropbox folder (to help limit unintended
-propagation of the clear-text to other machines).
+propagation of clear-text to other machines). Decryption into a folder that
+appears to be under version control will proceed but be noted with a warning
+(for svn, git, and hg).
 
 Public-key (asymmetric) encryption is used for security and flexibility,
 currently relying on calls to OpenSSL for all cryptography (RSA + AES256 --

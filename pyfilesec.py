@@ -581,9 +581,10 @@ def destroy(filename, cmdList=()):
         file_in.seek(0)
 
     if is_in_dropbox(filename):
-        logging.error(name + ': in dropbox secure delete is highly unlikely')
-    #if is_version_controlled(filename):
-    #    logging.error(name + ': version control secure delete doubtful')
+        logging.error(name + ': in dropbox; no secure delete of remote files')
+    vc = is_versioned(filename)
+    if vc:
+        logging.warning(name + ': file exposed to %s version control' % vc)
     os.chmod(filename, 0o600)  # raises OSError if no file or cant change
     filename = abspath(filename)
     t0 = get_time()
@@ -1140,10 +1141,11 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     priv = abspath(priv)
     data_enc = abspath(data_enc)
     if is_in_dropbox(data_enc):
-        msg = 'file in Dropbox folder (seems unsafe to decrypt here)'
+        msg = name + 'file in Dropbox folder (unsafe to decrypt here)'
         _fatal(msg, DecryptError)
-    if is_version_controlled(data_enc):
-        logging.warning('file appears to be under version control (exposed?)')
+    vc = is_versioned(data_enc)
+    if vc:
+        logging.warning(name + 'file exposed to version control (%s)' % vc)
     if pphr and isfile(pphr):
         pphr = open(abspath(pphr), 'rb').read()
     elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
@@ -1548,14 +1550,14 @@ def is_in_dropbox(filename):
     filename = _abspath_winDriveCap(filename)
     global dropbox_path
     if dropbox_path is None:
-        dropbox_path = get_dropbox()
+        dropbox_path = get_dropbox_path()
     if dropbox_path is False:
         logging.info("couldn't find a Dropbox folder on this system")
         return False
 
     inside = (filename.startswith(dropbox_path + os.sep) or
               filename == dropbox_path)
-    logging.info('%s %s inside Dropbox' % (filename, ('is not', 'is')[inside]))
+    logging.info('%s is%s inside Dropbox' % (filename, (' not', '')[inside]))
 
     return inside
 
@@ -1565,13 +1567,13 @@ def _abspath_winDriveCap(filename):
     return f[0].capitalize() + f[1:]
 
 
-def get_dropbox():
-    """Search for Dropbox folder; set global var, return path or False.
+def get_dropbox_path():
+    """Return the path to the Dropbox folder, or False if not found.
+
+    First time called will set a global var (used on subsequent calls).
     """
     def _winGetProgramData():
         """Return paths to likely places for application data on win32
-
-        Call this once and cache result in `dropbox_path`
         """
         # http://stackoverflow.com/questions/626796/how-do-i-find-the-
         # windows-common-application-data-folder-using-python/626927#626927
@@ -1614,76 +1616,104 @@ def get_dropbox():
     return dropbox_path
 
 
-def is_version_controlled(filename):
-    """Try to detect if a file is under version control (git, svn, hg).
+def is_versioned(filename):
+    """Try to detect if a file is under version control (svn, git, hg).
 
-    Only approximate: the directory might be VC'd, but not this file, etc.
+    Returns a string: 'git', 'svn', 'hg', or ''
+    Only approximate: the directory might be versioned, but not this file, etc.
     """
-    return any([get_git_info(filename),
-                get_svn_info(filename),
-                get_hg_info(filename)])
+    logging.debug('looking for version control (approx.); svn, git, hg')
+
+    if get_svn_info(filename):
+        return 'svn'
+    if get_git_info(filename):
+        return 'git'
+    if get_hg_info(filename):
+        return 'hg'
+    return ''
 
 
-def get_git_info(filename):
-    """Tries to discover the git commit for a file's directory.
+def get_git_info(filename, detailed=False):
+    """Tries to discover if a file is inside a git repo (version control).
     """
     orig = os.getcwd()
-    if not os.path.isdir(filename):
+    filename = abspath(filename)
+    if os.path.isfile(filename):
         filename = dirname(filename)
     os.chdir(filename)
+    git_hash = ''
     try:
-        git_hash = _sys_call(['git', 'rev-parse', '--verify', 'HEAD'])
+        git_hash = _sys_call(['git', 'rev-parse', '--verify', 'HEAD'],
+            ignore_error=True)
     except OSError, WindowsError:
-        git_hash = None
+        pass
     finally:
         os.chdir(orig)
-    return git_hash
+    logging.info('found git hash: %s' % bool(git_hash))
+    if detailed:
+        return git_hash
+    else:
+        return bool(git_hash)
 
 
-def get_svn_info(filename):
-    """Tries to discover the svn version (revision #) for a file.
+def get_svn_info(filename, detailed=False):
+    """Tries to discover if a file is under svn (version control).
     """
-    if not isdir(os.path.join(dirname(filename),'.svn')):
-        return None
-    svn_rev = None
+    has_svn_dir = isdir(os.path.join(dirname(filename),'.svn'))
+    logging.info('found dir .svn/: %s' % bool(has_svn_dir))
+    if not detailed:
+        return has_svn_dir
+
+    if not has_svn_dir:
+        return ''
+    svn_rev = ''
     if not sys.platform in ['win32']:
-        try:
-            svninfo = _sys_call(['svn', 'info', filename]) # expects a filename
-        except:
-            svninfo = ''
+        svninfo = _sys_call(['svn', 'info', filename], ignore_error=True)
         for line in svninfo.splitlines():
             if line.startswith('Revision: '):
                 svn_rev = line.split()[1]
     else:
         try:
-            subwcrev = _sys_call(['subwcrev', filename])
+            subwcrev = _sys_call(['subwcrev', filename], ignore_error=True)
         except:
             subwcrev = ''
         for line in subwcrev.splitlines():
+            if line.endswith('is not a working copy'):
+                break
             if line.startswith('Last committed at revision'):
-                svn_rev = line.split()[4]
+                # only tested with tortoise svn on Win XP and Win 7
+                svn_rev = 'r' + line.split()[-1]
+                break
     return svn_rev
 
 
-def get_hg_info(filename):
-    """Tries to discover the mercurial parent and id of a file.
+def get_hg_info(filename, detailed=False):
+    """Tries to discover if a file is under mercurial (version control).
+
+    `detailed=True` not tested recently (similar code worked before).
     """
-    if not isdir(os.path.join(dirname(filename), '.hg')):
-        return None
+    filedir = dirname(filename)
+    has_hg_dir = isdir(os.path.join(filedir, '.hg'))
+    logging.info('found dir .hg/: %s' % bool(has_hg_dir))
+    if not detailed:
+        return has_hg_dir
+
+    if not has_hg_dir:
+        return ''
     try:
-        parents = _sys_call(['hg', 'parents', filename])
+        parents = _sys_call(['hg', 'parents', filename], ignore_error=True)
         changeset = parents.splitlines()[0].split()[-1].strip()
     except:
         changeset = ''
     try:
-        hgID = _sys_call(['hg', 'id', '-nibt', dirname(filename)])
+        hgID = _sys_call(['hg', 'id', '-nibt', filedir], ignore_error=True)
     except:
         hgID = ''
 
     if len(hgID) or len(changeset):
-        return 'hg ' + hgID + ' | parent: ' + changeset
+        return hgID + ' | parent: ' + changeset
     else:
-        return None
+        return ''
 
 
 class Tests(object):
@@ -2445,7 +2475,7 @@ class Tests(object):
         global dropbox_path
         orig = dropbox_path
 
-        if not get_dropbox():
+        if not get_dropbox_path():
             dropbox_path = abspath('.')  # fake path
         with pytest.raises(DecryptError):
             decrypt(os.path.join(dropbox_path, 'test'), 'a', 'b')
