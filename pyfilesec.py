@@ -281,22 +281,26 @@ def _setup_logging():
     return logging, logging_t0
 
 
-def _sys_call(cmdList, stderr=False, stdin=''):
+def _sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
     """Run a system command via subprocess, return stdout [, stderr].
 
     stdin is optional string to pipe in. Will always log a non-empty stderr.
+    (stderr is sent to logging.INFO if ignore_error=True).
     """
-    logging.debug('_sys_call: %s' % (' '.join(cmdList)))
+    msg = ('', ' (ignore_error=True)')[ignore_error]
+    log = (logging.error, logging.info)[ignore_error]
+    logging.debug('_sys_call%s: %s' % (msg, (' '.join(cmdList))))
 
     proc = subprocess.Popen(cmdList, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     so, se = proc.communicate(stdin)
+    so, se = so.strip(), se.strip()
     if se:
-        logging.error(se.strip())
+        log('stderr%s: %s' % (msg, se))
     if stderr:
-        return so.strip(), se.strip()
+        return so.strip(), se
     else:
-        return so.strip()
+        return so
 
 
 def _get_openssl_info():
