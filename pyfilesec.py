@@ -35,7 +35,7 @@ if python_version() < '2.6':
 
 import sys
 import os
-from os.path import abspath, isfile, getsize
+from os.path import abspath, isfile, getsize, isdir, dirname, exists
 import stat
 import shutil
 import tarfile
@@ -576,6 +576,10 @@ def destroy(filename, cmdList=()):
         filename, file_in = filename.name, filename
         file_in.seek(0)
 
+    if is_in_dropbox(filename):
+        logging.error(name + ': in dropbox secure delete is highly unlikely')
+    #if is_version_controlled(filename):
+    #    logging.error(name + ': version control secure delete doubtful')
     os.chmod(filename, 0o600)  # raises OSError if no file or cant change
     filename = abspath(filename)
     t0 = get_time()
@@ -1131,9 +1135,11 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
 
     priv = abspath(priv)
     data_enc = abspath(data_enc)
-    if isInDropbox(data_enc):
+    if is_in_dropbox(data_enc):
         msg = 'file in Dropbox folder (seems unsafe to decrypt here)'
         _fatal(msg, DecryptError)
+    if is_version_controlled(data_enc):
+        logging.warning('file appears to be under version control (exposed?)')
     if pphr and isfile(pphr):
         pphr = open(abspath(pphr), 'rb').read()
     elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
@@ -1532,7 +1538,7 @@ def getVersion():
     return tuple(map(int, __version__.split('.')))
 
 
-def isInDropbox(filename):
+def is_in_dropbox(filename):
     """Return True if the file is within a Dropbox folder.
     """
     filename = _abspath_winDriveCap(filename)
@@ -1602,6 +1608,78 @@ def get_dropbox():
         dropbox_path = False
 
     return dropbox_path
+
+
+def is_version_controlled(filename):
+    """Try to detect if a file is under version control (git, svn, hg).
+
+    Only approximate: the directory might be VC'd, but not this file, etc.
+    """
+    return any([get_git_info(filename),
+                get_svn_info(filename),
+                get_hg_info(filename)])
+
+
+def get_git_info(filename):
+    """Tries to discover the git commit for a file's directory.
+    """
+    orig = os.getcwd()
+    if not os.path.isdir(filename):
+        filename = dirname(filename)
+    os.chdir(filename)
+    try:
+        git_hash = _sys_call(['git', 'rev-parse', '--verify', 'HEAD'])
+    except OSError, WindowsError:
+        git_hash = None
+    finally:
+        os.chdir(orig)
+    return git_hash
+
+
+def get_svn_info(filename):
+    """Tries to discover the svn version (revision #) for a file.
+    """
+    if not isdir(os.path.join(dirname(filename),'.svn')):
+        return None
+    svn_rev = None
+    if not sys.platform in ['win32']:
+        try:
+            svninfo = _sys_call(['svn', 'info', filename]) # expects a filename
+        except:
+            svninfo = ''
+        for line in svninfo.splitlines():
+            if line.startswith('Revision: '):
+                svn_rev = line.split()[1]
+    else:
+        try:
+            subwcrev = _sys_call(['subwcrev', filename])
+        except:
+            subwcrev = ''
+        for line in subwcrev.splitlines():
+            if line.startswith('Last committed at revision'):
+                svn_rev = line.split()[4]
+    return svn_rev
+
+
+def get_hg_info(filename):
+    """Tries to discover the mercurial parent and id of a file.
+    """
+    if not isdir(os.path.join(dirname(filename), '.hg')):
+        return None
+    try:
+        parents = _sys_call(['hg', 'parents', filename])
+        changeset = parents.splitlines()[0].split()[-1].strip()
+    except:
+        changeset = ''
+    try:
+        hgID = _sys_call(['hg', 'id', '-nibt', dirname(filename)])
+    except:
+        hgID = ''
+
+    if len(hgID) or len(changeset):
+        return 'hg ' + hgID + ' | parent: ' + changeset
+    else:
+        return None
 
 
 class Tests(object):
@@ -2358,7 +2436,7 @@ class Tests(object):
         assert recoveredText == secretText
 
     def test_no_decrypt_in_dropbox(self):
-        # assumes that isInDropbox works correctly (returns Dropbox folder)
+        # assumes that is_in_dropbox works correctly (returns Dropbox folder)
         # this test assesses whether decrypt will refuse to proceed
         global dropbox_path
         orig = dropbox_path
