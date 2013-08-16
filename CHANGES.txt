@@ -4,11 +4,11 @@ Version 0.1 (alpha status)
 v0.1.8
 ---------------------
 * ADDED will refuse to decrypt inside a Dropbox folder
-* ADDED warnings about trying to secure-delete a file under version control (svn, git, hg) or Dropbox
+* ADDED warnings about trying to secure-delete a file that might be under version control (svn, git, hg) or Dropbox
 * IMPROVED meta-data handling
 * IMPROVED pad()-related functions
 * IMPROVED logging (still not using a proper logger instance)
-* ADDED more tests: command line usage, missing meta-data
+* ADDED more tests: command line usage, missing meta-data, Dropbox folder
 
 v0.1.7
 ---------------------

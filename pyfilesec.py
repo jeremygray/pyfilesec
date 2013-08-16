@@ -1548,22 +1548,19 @@ def is_in_dropbox(filename):
     """Return True if the file is within a Dropbox folder.
     """
     filename = _abspath_winDriveCap(filename)
-    global dropbox_path
-    if dropbox_path is None:
-        dropbox_path = get_dropbox_path()
-    if dropbox_path is False:
-        logging.info("couldn't find a Dropbox folder on this system")
+    db_path = get_dropbox_path()
+    if not db_path:
         return False
 
-    inside = (filename.startswith(dropbox_path + os.sep) or
-              filename == dropbox_path)
+    inside = (filename.startswith(db_path + os.sep) or
+              filename == db_path)
     logging.info('%s is%s inside Dropbox' % (filename, (' not', '')[inside]))
 
     return inside
 
 
 def _abspath_winDriveCap(filename):
-    f = abspath(filename)
+    f = abspath(filename)  # implicitly does normpath too
     return f[0].capitalize() + f[1:]
 
 
@@ -1596,22 +1593,23 @@ def get_dropbox_path():
         return paths
 
     global dropbox_path
-    if sys.platform != 'win32':
-        host_db = os.path.expanduser('~/.dropbox/host.db')
-    else:
-        dirs = _winGetProgramData()
-        for d in dirs:
-            host_db = os.path.join(d, 'Dropbox', 'host.db')
-            if os.path.exists(host_db):
-                break
-    try:
-        db_path_b64 = open(host_db, 'rb').readlines()[1]  # second line
-        db_path = b64decode(db_path_b64.strip())
-        dropbox_path = _abspath_winDriveCap(db_path)
-        logging.info('found Dropbox folder %s' % dropbox_path)
-    except IOError:
-        logging.info('did not find a Dropbox folder')
-        dropbox_path = False
+    if dropbox_path is None:
+        if sys.platform != 'win32':
+            host_db = os.path.expanduser('~/.dropbox/host.db')
+        else:
+            dirs = _winGetProgramData()
+            for d in dirs:
+                host_db = os.path.join(d, 'Dropbox', 'host.db')
+                if os.path.exists(host_db):
+                    break
+        try:
+            db_path_b64 = open(host_db, 'rb').readlines()[1]  # second line
+            db_path = b64decode(db_path_b64.strip())
+            dropbox_path = _abspath_winDriveCap(db_path)
+            logging.info('found Dropbox folder %s' % dropbox_path)
+        except IOError:
+            logging.info('did not find a Dropbox folder')
+            dropbox_path = False
 
     return dropbox_path
 
