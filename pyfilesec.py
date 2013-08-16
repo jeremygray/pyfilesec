@@ -124,7 +124,7 @@ class PublicKeyTooShortError(PyFileSecError):
     '''Error to indicate that a public key is not long enough.'''
 
 class DecryptError(PyFileSecError):
-    '''Error to indicate that decryption failed.'''
+    '''Error to indicate that decryption failed, or refused to start.'''
 
 class PrivateKeyError(PyFileSecError):
     '''Error to indicate that loading a private key failed.'''
@@ -398,7 +398,7 @@ def _fatal(msg, err=ValueError):
     raise err(msg)
 
 
-# CONSTANTS ------------ (with code folding) ------------
+# CONSTANTS and INITS ------------ (with code folding) ------------
 if True:
     RSA_PADDING = '-oaep'  # actual arg for openssl rsautl in encrypt, decrypt
 
@@ -438,6 +438,9 @@ if True:
     # decrypted file status:
     PERMISSIONS = 0o600  # for decrypted file, no execute, no group, no other
     UMASK = 0o077  # need u+x permission for diretories
+
+    # Initialize values: ------------------
+    dropbox_path = None
 
 
 def _entropy_check():
@@ -1119,12 +1122,18 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
 
     Works on a copy of data.enc, tries to decrypt, clean-up only those files.
     The original data.enc is not used (except to make a copy).
+
+    Tries to detect whether the decrypted file would end up inside a Dropbox
+    folder; if so, refuse to proceed.
     """
     name = 'decrypt: '
     logging.debug(name + 'start')
 
     priv = abspath(priv)
     data_enc = abspath(data_enc)
+    if isInDropbox(data_enc):
+        msg = 'file in Dropbox folder (seems unsafe to decrypt here)'
+        _fatal(msg, DecryptError)
     if pphr and isfile(pphr):
         pphr = open(abspath(pphr), 'rb').read()
     elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
@@ -1523,6 +1532,60 @@ def getVersion():
     return tuple(map(int, __version__.split('.')))
 
 
+def isInDropbox(filename):
+    """Return True if the file is within a Dropbox folder.
+    """
+    def _winGetProgramData():
+        """Return paths to likely places for application data on win32
+
+        Call this once and cache result in `dropbox_path`
+        """
+        # http://stackoverflow.com/questions/626796/how-do-i-find-the-
+        # windows-common-application-data-folder-using-python/626927#626927
+        import ctypes
+        from ctypes import wintypes, windll
+
+        _SHGetFolderPath = windll.shell32.SHGetFolderPathW
+        _SHGetFolderPath.argtypes = [wintypes.HWND,
+                                    ctypes.c_int,
+                                    wintypes.HANDLE,
+                                    wintypes.DWORD, wintypes.LPCWSTR]
+        path_buf = wintypes.create_unicode_buffer(wintypes.MAX_PATH)
+
+        CSIDL_COMMON_APPDATA = 35
+        CSIDL_APPDATA = 26
+        paths = []
+        for appdata in [CSIDL_COMMON_APPDATA, CSIDL_APPDATA]:
+            result = _SHGetFolderPath(0, appdata, 0, 0, path_buf)
+            paths.append(path_buf.value)
+        return paths
+
+    filename = abspath(filename)
+    global dropbox_path
+    if dropbox_path is None:
+        # nothing cached, find out what it is and cache:
+        if sys.platform != 'win32':
+            host_db = os.path.expanduser('~/.dropbox/host.db')
+        else:
+            dirs = _winGetProgramData()
+            for d in dirs:
+                host_db = os.path.join(d, 'Dropbox', 'host.db')
+                if os.path.exists(host_db):
+                    break
+
+        try:
+            db_path_b64 = open(host_db, 'rb').read()
+            dropbox_path = b64decode(db_path_b64.split()[1])
+        except IOError:
+            dropbox_path = False
+    if dropbox_path is False:
+        # can't find Dropbox on this system
+        return False
+
+    return (filename.startswith(dropbox_path + os.sep) or
+            filename == dropbox_path)
+
+
 class Tests(object):
     """Test suite for py.test
 
@@ -1634,7 +1697,7 @@ class Tests(object):
             enc = encrypt(filename, pub)  # tarfile fails here, bad filename
             assert isfile(enc)
 
-            dec = decrypt(enc, priv, pphr)
+            dec = decrypt(enc, priv, pphr)  # DecryptError if in Dropbox = good
             assert stuff == open(dec, 'rb').read()
 
     def test_codec_registry(self):
@@ -2276,6 +2339,16 @@ class Tests(object):
         recoveredText = open(dataDecNested).read()
         assert recoveredText == secretText
 
+    def test_no_decrypt_in_dropbox(self):
+        # assumes that isInDropbox works correctly (returns Dropbox folder)
+        # this test assesses whether decrypt will refuse to proceed
+        global dropbox_path
+
+        orig = dropbox_path
+        dropbox_path = abspath('.')  # fake path
+        with pytest.raises(DecryptError):
+            decrypt(os.path.join(dropbox_path, 'test'), 'a', 'b')
+        dropbox_path = orig  # restore real path
 
 # Basic set-up (order matters) ------------------------------------------------
 logging, logging_t0 = _setup_logging()

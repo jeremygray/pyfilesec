@@ -28,6 +28,11 @@ combine multiple files or directories into a single archive file prior to encryp
 (``archive``), and display the meta-data associated with an encrypted file.
 Large files (8G) and command-line / shell-script usage are also supported.
 
+By default, file permissions are set to conservative values (only Mac & linux
+at this point). Clear-text files are deleted securely after encryption.
+Decryption will not proceed inside a Dropbox folder (to help limit accidental
+propagation of the clear-text to other machines).
+
 Public-key (asymmetric) encryption is used for security and flexibility,
 currently relying on calls to OpenSSL for all cryptography (RSA + AES256 --
 an approach that is well-known and widely regarded). The aim is to provide an
