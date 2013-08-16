@@ -1622,7 +1622,7 @@ def is_versioned(filename):
     Returns a string: 'git', 'svn', 'hg', or ''
     Only approximate: the directory might be versioned, but not this file, etc.
     """
-    logging.debug('looking for version control (approx.); svn, git, hg')
+    logging.debug('trying to detect version control; svn, git, hg')
 
     if get_svn_info(filename):
         return 'svn'
@@ -1645,7 +1645,9 @@ def get_git_info(filename, detailed=False):
     try:
         git_hash = _sys_call(['git', 'rev-parse', '--verify', 'HEAD'],
             ignore_error=True)
-    except OSError, WindowsError:
+    except OSError:
+        pass
+    except WindowsError:
         pass
     finally:
         os.chdir(orig)
@@ -1659,7 +1661,7 @@ def get_git_info(filename, detailed=False):
 def get_svn_info(filename, detailed=False):
     """Tries to discover if a file is under svn (version control).
     """
-    has_svn_dir = isdir(os.path.join(dirname(filename),'.svn'))
+    has_svn_dir = isdir(os.path.join(dirname(filename), '.svn'))
     logging.info('found dir .svn/: %s' % bool(has_svn_dir))
     if not detailed:
         return has_svn_dir
