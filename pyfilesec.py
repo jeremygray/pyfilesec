@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.1.7'
+__version__ = '0.1.8'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 

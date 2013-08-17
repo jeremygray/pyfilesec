@@ -50,11 +50,13 @@ including a compiled development release.
 
 Milestones:
 
-- 0.2  Documentation, move to beta status
+- 0.2  Documentation
 - 0.3  Python 3 (looks easy, ``2to3`` passes now)
 - 0.4  Windows file-permissions
 - 0.5  An alternative encryption backend
-- 1.0  Move out of beta status
+
+Bug reports and code contributions are welcome; the project is on github.
+Help with Windows issues would be great (especially file permissions).
 
 Contributors
 -------------
