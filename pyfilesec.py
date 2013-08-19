@@ -164,7 +164,8 @@ class PFSCodecRegistry(object):
                '_decrypt_xyz': _decrypt_xyz}
         codec.register(new)
 
-    and then `encrypt(method='_encrypt_xyz')` will work.
+    and then `encrypt(method='_encrypt_xyz')` will work. Keys ('_encrypt_xyz')
+    must be ascii-compatible (not unicode).
 
     But its not this simple yet: a) will need to update file extensions AES_EXT
     and so on for files generated (currently are constants). b) `rotate()` will
@@ -187,6 +188,10 @@ class PFSCodecRegistry(object):
         (to support "read only" use of a codec), but _enc only is not.
         """
         for key in list(new_functions.keys()):
+            try:
+                key = str(key)  # not unicode
+            except:
+                _fatal('keys restricted to str (not unicode)')
             fxn = new_functions[key]
             if not key in globals() or not hasattr(fxn, '__call__'):
                 msg = ': failed to register "%s", not callable' % key
@@ -1102,7 +1107,10 @@ def _get_dec_method(meta_file, dec_method):
                       ' != encryption function (meta-data: %s)' % enc_method
                 logging.warning(msg)
         else:
-            dec_method = _dec_from_enc
+            try:
+                dec_method = str(_dec_from_enc)  # avoid unicode issue
+            except:
+                dec_method = _dec_from_enc
             logging.info('implicitly want "' + dec_method + '" (meta-data)')
     if not meta_file or _dec_from_enc == 'unknown':
         # can't infer, no meta-data
