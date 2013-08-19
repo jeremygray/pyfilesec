@@ -1569,39 +1569,15 @@ def get_dropbox_path():
 
     First time called will set a global var (used on subsequent calls).
     """
-    def _winGetProgramData():
-        """Return paths to likely places for application data on win32
-        """
-        # http://stackoverflow.com/questions/626796/how-do-i-find-the-
-        # windows-common-application-data-folder-using-python/626927#626927
-        import ctypes
-        from ctypes import wintypes, windll
-
-        _SHGetFolderPath = windll.shell32.SHGetFolderPathW
-        _SHGetFolderPath.argtypes = [wintypes.HWND,
-                                    ctypes.c_int,
-                                    wintypes.HANDLE,
-                                    wintypes.DWORD, wintypes.LPCWSTR]
-        path_buf = wintypes.create_unicode_buffer(wintypes.MAX_PATH)
-
-        CSIDL_COMMON_APPDATA = 35
-        CSIDL_APPDATA = 26
-        paths = []
-        for appdata in [CSIDL_COMMON_APPDATA, CSIDL_APPDATA]:
-            result = _SHGetFolderPath(0, appdata, 0, 0, path_buf)
-            paths.append(path_buf.value)
-        return paths
-
     global dropbox_path
     if dropbox_path is None:
         if sys.platform != 'win32':
             host_db = os.path.expanduser('~/.dropbox/host.db')
         else:
-            dirs = _winGetProgramData()
-            for d in dirs:
-                host_db = os.path.join(d, 'Dropbox', 'host.db')
-                if os.path.exists(host_db):
-                    break
+            host_db = os.path.join(os.environ['APPDATA'], 'Dropbox', 'host.db')
+            if not exists(host_db):
+                host_db = os.path.join(os.environ['LOCALAPPDATA'],
+                                       'Dropbox', 'host.db')
         try:
             db_path_b64 = open(host_db, 'rb').readlines()[1]  # second line
             db_path = b64decode(db_path_b64.strip())
