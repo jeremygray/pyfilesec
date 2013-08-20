@@ -1277,8 +1277,8 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
             del pwd  # might as well try
 
     if sys.platform == 'win32':
-        unhelpful_glop = "Loading 'screen' into random state - done"
-        se_RSA = se_RSA.replace(unhelpful_glop, '')
+        glop = "Loading 'screen' into random state - done"  # why in se??
+        se_RSA = se_RSA.replace(glop, '')
     if se_RSA.strip():
         if 'unable to load Private Key' in se_RSA:
             _fatal('%s: unable to load Private Key' % name, PrivateKeyError)
@@ -1546,7 +1546,7 @@ def genRsaKeys():
     return pub, priv
 
 
-def getVersion():
+def get_version():
     """Return __version__ as a tuple of integers.
     """
     return tuple(map(int, __version__.split('.')))
