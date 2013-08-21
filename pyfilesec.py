@@ -308,12 +308,14 @@ def _sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
         return so
 
 
-def _get_openssl_info():
-    """Find, check, and report info about the OpenSSL binary on this system.
+def set_openssl(path=None):
+    """Find, check, set, and report info about the OpenSSL binary to be used.
     """
-    if args and args.openssl:
-        OPENSSL = args.openssl
-        logging.info('Option requesting openssl executable: ' + OPENSSL)
+    global OPENSSL, openssl_version, use_rsautl
+
+    if path:  # command-line arg or parameter
+        OPENSSL = path
+        logging.info('Requested openssl executable: ' + OPENSSL)
     elif sys.platform not in ['win32']:
         OPENSSL = _sys_call(['which', 'openssl'])
         if OPENSSL not in ['/usr/bin/openssl']:
@@ -367,9 +369,11 @@ def _get_openssl_info():
     return OPENSSL, openssl_version, use_rsautl
 
 
-def _get_destroy_info():
-    """Find and return into about secure file removal tools on this system.
+def set_destroy():
+    """Find, set, and report info about secure file removal tool to be used.
     """
+    global destroy_TOOL, destroy_OPTS
+
     if sys.platform in ['darwin']:
         destroy_TOOL = _sys_call(['which', 'srm'])
         destroy_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
@@ -396,6 +400,8 @@ def _get_destroy_info():
         destroy_OPTS = ()
     if not isfile(destroy_TOOL):
         destroy_TOOL = ''
+
+    logging.info('destroy: use %s %s' % (destroy_TOOL, ' '.join(destroy_OPTS)))
 
     return destroy_TOOL, destroy_OPTS
 
@@ -1476,7 +1482,7 @@ def genRsaKeys():
             pass
 
     if not args:
-        return 'genRsaKeys should be run from the command line'
+        return 'generate keys via command line: $ python pyfilesec.py genrsa'
 
     # use args for filenames if given explicitly:
     pub = args.pub or abspath(_uniq_file('pub_RSA.pem'))  # ensure unique
@@ -1636,7 +1642,7 @@ def get_git_info(filename, detailed=False):
         pass
     finally:
         os.chdir(orig)
-    logging.info('found git hash: %s' % bool(git_hash))
+    logging.debug('found git hash: %s' % bool(git_hash))
     if detailed:
         return git_hash
     else:
@@ -1647,7 +1653,7 @@ def get_svn_info(filename, detailed=False):
     """Tries to discover if a file is under svn (version control).
     """
     has_svn_dir = isdir(os.path.join(dirname(filename), '.svn'))
-    logging.info('found dir .svn/: %s' % bool(has_svn_dir))
+    logging.debug('found dir .svn/: %s' % bool(has_svn_dir))
     if not detailed:
         return has_svn_dir
 
@@ -1681,7 +1687,7 @@ def get_hg_info(filename, detailed=False):
     """
     filedir = dirname(filename)
     has_hg_dir = isdir(os.path.join(filedir, '.hg'))
-    logging.info('found dir .hg/: %s' % bool(has_hg_dir))
+    logging.debug('found dir .hg/: %s' % bool(has_hg_dir))
     if not detailed:
         return has_hg_dir
 
@@ -2479,8 +2485,13 @@ logging, logging_t0 = _setup_logging()
 if not user_can_link:
     logging.warning('%s: No admin priv; cannot check hardlinks' % lib_name)
 
-OPENSSL, openssl_version, use_rsautl = _get_openssl_info()
-destroy_TOOL, destroy_OPTS = _get_destroy_info()
+# set OPENSSL path, openssl_version, use_rsautl:
+if args and args.openssl:
+    set_openssl(args.openssl)
+else:
+    set_openssl()
+# set destroy_TOOL path, destroy_OPTS; don't think we need an arg for this:
+set_destroy()
 
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
