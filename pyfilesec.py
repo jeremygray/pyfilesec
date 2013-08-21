@@ -1008,6 +1008,12 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     data_enc = _uniq_file(abspath(datafile + AES_EXT))
     pwd_rsa = data_enc + RSA_EXT  # path to RSA-encrypted session key
 
+    # Generate a password (digital envelope "session" key):
+    # want printable because its sent to openssl via stdin
+    pwd = _printable_pwd(nbits=256)
+    assert not whitespace_re.search(pwd)
+    assert len(pwd) == 64  # hex characters
+
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     if use_rsautl:
         cmd_RSA = [OPENSSL, 'rsautl',
@@ -1026,9 +1032,6 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
               '-out', data_enc,
               '-pass', 'stdin']
 
-    # Generate a password (digital envelope "session" key):
-    pwd = _printable_pwd(nbits=256)
-    assert not whitespace_re.search(pwd)
     try:
         # encrypt the password:
         _sys_call(cmd_RSA, stdin=pwd)
@@ -1265,7 +1268,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
         if pphr and not isfile(pphr):
             pwd, se_RSA = _sys_call(cmdRSA, stdin=pphr, stderr=True)  # want se
         else:
-            pwd, se_RSA = _sys_call(cmdRSA, stderr=True)  # want se, parse
+            pwd, se_RSA = _sys_call(cmdRSA, stderr=True)  # want se to parse it
         __, se_AES = _sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
         if isfile(data_dec):
@@ -1775,12 +1778,12 @@ class Tests(object):
                 fd.write(p)
 
         kwnSig0p9p8 = (  # openssl 0.9.8r
-            "dNF9IudjTjZ9sxO5P07Kal9FkY7hCRJCyn7IbebJtcEoVOpuU5Gs9pSngPnDvFE" +
-            "2BILvwRFCGq30Ehnhm8USZ1zc5m2nw6S97LFPNFepnB6h+575OHfHX6Eaothpcz" +
+            "dNF9IudjTjZ9sxO5P07Kal9FkY7hCRJCyn7IbebJtcEoVOpuU5Gs9pSngPnDvFE"
+            "2BILvwRFCGq30Ehnhm8USZ1zc5m2nw6S97LFPNFepnB6h+575OHfHX6Eaothpcz"
             "BK+91UMVId13iTu9d1HaGgHriK6BcasSuN0iTfvbvnGc4=")
         kwnSig1p0 = (   # openssl 1.0.1e or 1.0.0-fips
-            "eWv7oIGw9hnWgSmicFxakPOsxGMeEh8Dxf/HlqP0aSX+qJ8+whMeJ3Ol7AgjsrN" +
-            "mfk//J4mywjLeBp5ny5BBd15mDeaOLn1ETmkiXePhomQiGAaynfyQfEOw/F6/Ux" +
+            "eWv7oIGw9hnWgSmicFxakPOsxGMeEh8Dxf/HlqP0aSX+qJ8+whMeJ3Ol7AgjsrN"
+            "mfk//J4mywjLeBp5ny5BBd15mDeaOLn1ETmkiXePhomQiGAaynfyQfEOw/F6/Ux"
             "03rlYerys2Cktgpya8ezxbOwJcOCnHKydnf1xkGDdFywc=")
         return (abspath(pub), abspath(priv), abspath(pphr),
                 bits, (kwnSig0p9p8, kwnSig1p0))
@@ -1891,7 +1894,11 @@ class Tests(object):
         with open(kwnData, 'wb+') as fd:
             fd.write(datum)
         sig1 = sign(kwnData, kwnPriv, pphr=kwnPphr)
-        assert sig1 in kwnSigs
+
+        if openssl_version < 'OpenSSL 1.':
+            assert sig1 == kwnSigs[0]
+        else:
+            assert sig1 == kwnSigs[1]
 
     def test_max_size_limit(self):
         # manual test: works with an actual 1G (MAX_FILE_SIZE) file as well
@@ -2021,8 +2028,9 @@ class Tests(object):
         first_enc = encrypt(datafile, pub1, date=False)
         second_enc = rotate(first_enc, priv1, pub2, pphr=pphr1,
                             pad_new=8192)
+        # destroy orig if priv_new provided == prove it can be decrypted
         third_enc = rotate(second_enc, priv2, pub1, pphr=pphr2,
-                           priv_new=priv1, pphr_new=pphr1,  # = destroy orig
+                           priv_new=priv1, pphr_new=pphr1,
                            pad_new=16384, hmac_new='key')
         # padding affects .enc file size, values vary a little from run to run
         assert getsize(first_enc) < getsize(third_enc)
@@ -2058,6 +2066,7 @@ class Tests(object):
         pub1, priv1, pphr1, testBits = self._known_values()[:4]
 
         # Should not be able to suppress meta-data file, just the info:
+        # keep=True is faster because avoids call to destroy()
         for missing in [False, {}]:
             new_enc = encrypt(datafile, pub1, meta=missing, keep=True)
             data_enc, pwdFileRsa, metaFile = _unpack(new_enc)
@@ -2068,7 +2077,6 @@ class Tests(object):
             assert md == NO_META_DATA
         with pytest.raises(AttributeError):
             new_enc = encrypt(datafile, pub1, meta='junk', keep=True)
-            # keep=True is faster than srm
 
     def test_misc(self):
         secretText = 'secret snippet %.6f' % get_time()
