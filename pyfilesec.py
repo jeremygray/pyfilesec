@@ -248,6 +248,7 @@ class PFSCodecRegistry(object):
 
 class SetUmask(object):
     """Decorator for functions that create files.
+    ... and eats the doc-strings. functools @wraps had issues too
     """
     def __init__(self, fxn):
         self.fxn = fxn
@@ -257,6 +258,23 @@ class SetUmask(object):
         val = self.fxn(*args, **kwargs)
         os.umask(restore)
         return val
+
+
+def _set_umask():
+    global old_umask
+    old_umask = os.umask(UMASK)
+    return old_umask
+
+
+def _unset_umask():
+    global old_umask
+    if old_umask is None:
+        old_umask = os.umask(UMASK)  # get current, and change
+        os.umask(old_umask)  # set it back
+        return
+    new_umask = os.umask(old_umask)
+    old_umask = None
+    return new_umask
 
 
 def _setup_logging():
@@ -323,10 +341,12 @@ def set_openssl(path=None):
             logging.warning(msg)
     else:
         # use a bat file for openssl.cfg; create .bat if not found or broken
-        # might have to move to os.environ['HOME'] to ensure write permission
         bat_name = '_openssl.bat'
-        OPENSSL = os.path.join(libdir, bat_name)
-        if not os.path.exists(OPENSSL):
+        app_dir = os.environ['APPDATA']
+        if not isdir(app_dir):
+            os.mkdir(app_dir)
+        OPENSSL = os.path.join(app_dir, split(libdir)[-1], bat_name)
+        if not exists(OPENSSL):
             logging.info('no working %s file; trying to recreate' % bat_name)
             default = 'C:\\OpenSSL-Win32\\bin'
             openssl_expr = 'XX-OPENSSL_PATH-XX'
@@ -453,6 +473,7 @@ if True:
     # decrypted file status:
     PERMISSIONS = 0o600  # for decrypted file, no execute, no group, no other
     UMASK = 0o077  # need u+x permission for diretories
+    old_umask = None  # set as global in _set_umask, _unset_umask
 
     # Initialize values: ------------------
     dropbox_path = None
@@ -525,7 +546,6 @@ def _printable_pwd(nbits=256):
     return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
 
 
-@SetUmask
 def make_archive(paths, name='', keep=True):
     """Make a tgz file from a list of paths, set permissions. Directories ok.
 
@@ -534,6 +554,8 @@ def make_archive(paths, name='', keep=True):
     unlink is whether to unlink the original files after making an archive, not
     a secure-delete option.
     """
+
+    _set_umask()
     if isinstance(paths, str):
         paths = [paths]
     if not name:
@@ -549,6 +571,7 @@ def make_archive(paths, name='', keep=True):
                 os.unlink(p)
     tar_fd.close()
 
+    _unset_umask()
     return name
 
 
@@ -878,7 +901,6 @@ def unpad(filename, pad_count=None):
     return getsize(filename)
 
 
-@SetUmask
 def encrypt(datafile, pub, meta=True, date=True, keep=False,
             enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
     """Encrypt a file using AES-256, encrypt the password with RSA public-key.
@@ -935,6 +957,7 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
             (encrypt-then-MAC).
 
     """
+    _set_umask()
     name = 'encrypt: '
     logging.debug(name + 'start')
     if not codec.is_registered(enc_method):
@@ -1000,13 +1023,14 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
             logging.error(name +
                 'retaining original file, encryption did not succeed')
 
+    _unset_umask()
     return abspath(archive)
 
 
-@SetUmask
 def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
     """
+    _set_umask()
     name = '_encrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
 
@@ -1048,13 +1072,14 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
         if 'pwd' in locals():
             del pwd  # might as well try
 
+    _unset_umask()
     return abspath(data_enc), abspath(pwd_rsa)
 
 
-@SetUmask
 def _unpack(data_enc):
     """Extract files from archive into a tmp dir, return paths to files.
     """
+    _set_umask()
     name = 'unpack'
     logging.debug(name + ': start')
 
@@ -1091,6 +1116,7 @@ def _unpack(data_enc):
         else:
             _fatal(name + ': unexpected file in archive', InternalFormatError)
 
+    _unset_umask()
     return data_aes, pwdFileRsa, meta_file
 
 
@@ -1138,7 +1164,6 @@ def _get_dec_method(meta_file, dec_method):
     return dec_method
 
 
-@SetUmask
 def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     """Decrypt a file that was encoded using `encrypt()`.
 
@@ -1152,6 +1177,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
     Tries to detect whether the decrypted file would end up inside a Dropbox
     folder; if so, refuse to proceed.
     """
+    _set_umask()
     name = 'decrypt: '
     logging.debug(name + 'start')
 
@@ -1229,14 +1255,15 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
         except:
             pass
 
+    _unset_umask()
     return abspath(clear_text)
 
 
-@SetUmask
 def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
                            outFile='', OPENSSL=''):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
     """
+    _set_umask()
     name = '_decrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
 
@@ -1301,10 +1328,10 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
         else:
             _fatal('%s: Bad decrypt (AES) %s' % (name, se_AES), DecryptError)
 
+    _unset_umask()
     return abspath(data_dec)
 
 
-@SetUmask
 def rotate(data_enc, priv, pub, pphr=None,  # priv pphr = old, pub = new
            priv_new=None, pphr_new=None,
            hmac_new=None, pad_new=None):
@@ -1333,6 +1360,7 @@ def rotate(data_enc, priv, pub, pphr=None,  # priv pphr = old, pub = new
     its possible to rotate the encryption to recover from internal formatting
     errors.
     """
+    _set_umask()
     name = 'rotate'
     logging.debug(name + ': start')
     file_dec = decrypt(data_enc, priv, pphr=pphr)
@@ -1380,6 +1408,7 @@ def rotate(data_enc, priv, pub, pphr=None,  # priv pphr = old, pub = new
             logging.info(name + ': verified, deleting original')
             destroy(data_enc)
 
+    _unset_umask()
     return new_enc
 
 
@@ -1436,12 +1465,12 @@ def verify(filename, pub, sig):
     return result in ['Verification OK', 'Verified OK']
 
 
-@SetUmask
 def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     """Generate new RSA pub and priv keys, return paths to files.
 
     pphr should be a string containing the actual passphrase (if desired).
     """
+    _set_umask()
     if use_rsautl:
         # Generate priv key:
         cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
@@ -1458,6 +1487,7 @@ def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
     else:
         raise NotImplementedError
 
+    _unset_umask()
     return abspath(pub), abspath(priv)
 
 
