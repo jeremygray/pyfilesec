@@ -58,6 +58,28 @@ Milestones:
 Bug reports and code contributions are welcome; the project is on github.
 Help with Windows issues would be great (especially file permissions).
 
+
+Installation:
+-------------
+
+Install things in the usual way:
+
+    % pip install pyFileSec
+
+Command line usage is likely to be easier with an alias. To find out what path
+and syntax to use in your alias, start python interactively and then:
+
+    >>> import pyfilesec as pfs
+    >>> pfs.command_alias()
+
+This will print aliases for bash, *csh, and DOS command line. Copy and
+paste into your shell as appropriate (or elsewhere, like a .bash_profile).
+
+A demos/ directory is in the same directory as pyfilesec.py, and has usage
+examples for python scripting (example_1.py) and command-line / shell script
+(example_2.sh). A guide (``readme.txt``) has basic instructions on how to
+generate an RSA key-pair.
+
 Contributors
 -------------
 Jeremy R. Gray - package author (GPG key D934B0D7)

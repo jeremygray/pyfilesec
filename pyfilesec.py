@@ -67,7 +67,7 @@ def _parse_args():
     parser = argparse.ArgumentParser(
         description='File-oriented privacy & integrity management library.',
         epilog="See https://pypi.python.org/pypi/pyFileSec/")
-    parser.add_argument('filename', help='path to file to process, "genrsa", or "debug"')
+    parser.add_argument('filename', help='one of: path to file to process, "genrsa", or "debug"')
     parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('--verbose', action='store_true', help='print logging info to stdout')
 
@@ -1493,17 +1493,20 @@ def genRsaKeys():
         priv += '_priv.pem'
 
     if os.path.exists(priv):
-        msg = ('RSA key generation.\n  %s already exists\n' % priv +
+        msg = ( '%s ' % lib_name +
+                'RSA key generation.\n  %s already exists\n' % priv +
                '  > Clean up files and try again. Exiting. <')
         print(msg)
         return None, None
 
-    print('\nRSA key generation. Will try to create two files:')
-    pub_msg = '  pub  = %s' % pub  # os.path.split(pub)#[1]
+    print('\n%s: ' % lib_name +
+          'RSA key-pair generation\n\nWill try to create two files:')
+    pub_msg = '  pub  = %s' % pub
     print(pub_msg)
-    priv_msg = '  priv = %s' % priv  # os.path.split(priv)#[1]
+    priv_msg = '  priv = %s' % priv
     print(priv_msg)
-    print('To proceed, enter a passphrase (16+ chars, return to generate).')
+    print('\nEnter a passphrase for the private key (16 or more chars)\n'
+          '  or press <return> to auto-generate a passphrase')
     pphr = getpass.getpass('Passphrase: ')
     if pphr:
         pphr2 = getpass.getpass('same again: ')
@@ -1512,13 +1515,14 @@ def genRsaKeys():
             return None, None
         pphr_auto = False
     else:
+        print '(auto-generating a passphrase)\n'
         pphr = _printable_pwd(128)  # or a word-based generator?
         pphr_auto = True
     if pphr and len(pphr) < 16:
         print('  > passphrase too short; exiting <')
         return None, None
     bits = 4096  # default
-    b = input23('RSA key length (2048, 4096, 8192): ')
+    b = input23('Enter the desired RSA key length (2048, 4096, 8192): ')
     if b in ['2048', '4096', '8192']:
         bits = int(b)
     bits_msg = '  using %i' % bits
@@ -1527,9 +1531,9 @@ def genRsaKeys():
     print(bits_msg)
     ent_msg = '  entropy: ' + _entropy_check()
     print(ent_msg)
-    print('  > move the mouse around for 5s (to help generate entropy)')
+    print('\nMove the mouse around for 5s (to help generate entropy)')
     time.sleep(5)
-    msg = 'Generating RSA keys (using %s)\n' % openssl_version
+    msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
     print(msg)
 
     try:
@@ -1707,6 +1711,14 @@ def get_hg_info(filename, detailed=False):
         return hgID + ' | parent: ' + changeset
     else:
         return ''
+
+
+def command_alias():
+    """Print aliases that can be used for command-line usage.
+    """
+    print ( 'bash:  alias pfs="python %s"\n' % lib_path +
+            '*csh:  alias pfs "python %s"\n' % lib_path +
+            'DOS :  doskey pfs=python %s $*' % lib_path )
 
 
 class Tests(object):
