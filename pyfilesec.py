@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.1.8'
+__version__ = '0.2.0beta'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
@@ -246,7 +246,7 @@ class PFSCodecRegistry(object):
         return fxn_name in self._functions
 
 
-class SetUmask(object):
+class _SetUmask(object):
     """Decorator for functions that create files.
     ... and eats the doc-strings. functools @wraps had issues too
     """
@@ -261,6 +261,7 @@ class SetUmask(object):
 
 
 def _set_umask():
+    # avoid decorator
     global old_umask
     old_umask = os.umask(UMASK)
     return old_umask
@@ -770,8 +771,8 @@ def log_metadata(md, log=True):
 def pad(filename, size=DEFAULT_PAD_SIZE):
     """Append null bytes to ``filename`` until it has length ``size``.
 
-    The size is changed but `the fact that it was changed` is not obscured until
-    the newly padded file is encrypted. ``pad`` only changes the effective length.
+    The size is changed but `the fact that it was changed` is only obscured if
+    the padded file is encrypted. ``pad`` only changes the effective length.
 
     Files shorter than `size` will be padded out to `size` (see details below).
     The minimum resulting file size is 128 bytes. Files that are already padded
@@ -779,31 +780,34 @@ def pad(filename, size=DEFAULT_PAD_SIZE):
     target size.
 
     Padded files include a few bytes for padding-descriptor tags, not just null
-    bytes. Thus files that are close to ``size`` already would not have their sizes
-    obscured AND also be marked as being padded (in the last ~36 bytes), raising a
-    ``PaddingError``. To avoid this, you can check using the convenience function
-    ``ok_to_pad()`` before calling ``pad()``.
+    bytes. Thus files that are close to ``size`` already would not have their
+    sizes obscured AND also be marked as being padded (in the last ~36 bytes),
+    raising a ``PaddingError``. To avoid this, you can check using the
+    convenience function ``ok_to_pad()`` before calling ``pad()``.
 
     Internal padding format:
 
-        ``file + n bytes + padding descriptors``
+        ``file + n bytes + padding descriptors + final byte``
 
-    The padding descriptors consists of ``10-digits + byte + PFS_PAD + byte``. The
-    10 digits gives the length of the padding as an integer, in bytes.
-    n is selected to make the new file size equal the requested ``size``.
+    The padding descriptors consist of ``10-digits + one byte + PFS_PAD``,
+    where ``byte`` is b'\0' (the null byte). The process does not depend on the
+    value of the byte. The 10 digits gives the length of the padding as an
+    integer, in bytes. ``n`` is selected to make the new file size equal the
+    requested ``size``.
 
     To make unpadding easier and more robust (and enable human inspection),
     the end bytes provide the number of padding bytes that were added, plus an
     identifier. 10 digits is not hard-coded as 10, but as the length of
-    `str(max_file_size)`, where `max_file_size` constant is 8G by default. This
-    means that any changes to the max file size constant can thus cause pad /
-    unpad failures across versions.
+    ``str(max_file_size)``, where the ``max_file_size`` constant is 8G by
+    default. This means that any changes to the max file size constant can thus
+    cause pad / unpad failures across versions.
 
-    Special size values:
+    Special ``size`` values:
 
        0 : unpad = remove any existing padding, no error if not present
 
-       -1 : strict unpad = remove padding if present, raise ``PaddingError`` if not
+       -1 : strict unpad = remove padding if present, raise ``PaddingError``
+       if not present
     """
     name = 'pad: '
     logging.debug(name + 'start')
@@ -1504,11 +1508,18 @@ def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
 def genRsaKeys():
     """Command line dialog to generate an RSA key pair, PEM format.
 
-    Limited to 2048, 4096, 8192 bits; 1024 is not secure for medium-term
-    storage, and 16384 bits is impractical. Require or generate a passphrase.
+    Launch from the command line::
 
-    Needs lots of documentation. Ideally, generate a strong passphrase using a
-    password manager (e.g., KeePassX), save there, paste it in here.
+        % python pyfilesec.py genrsa
+
+    Choose from 2048, 4096, or 8192 bits; 1024 is not secure for medium-term
+    storage, and 16384 bits is not needed (nor is 8192). A passphrase is required,
+    or one will be auto generated and printed to the console (this is the only
+    copy, don't lose it). Ideally, generate a strong passphrase using a password
+    manager (e.g., KeePassX), save there, paste it into the dialog.
+
+    You may only ever need to do this once. You may also want to generate keys
+    for testing purposes, and then generate keys for actual use.
     """
     def _cleanup(msg):
         print(msg)

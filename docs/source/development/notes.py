@@ -106,19 +106,7 @@
         3. encrypt-then-mac
             http://cseweb.ucsd.edu/~mihir/papers/oem.pdf
 
-    TO-DO NEAR TERM (milestone 0.2 release):
-    - docs
-        filesec.png is taken directly from crystal project icons
-        index.html
-        Installation
-        Usage
-        - as library
-        - command line
-        Key generation & handling
-        Performance
-        - some gc.uncollectables (GzipFile instance) on linux with py 2.6.6
-
-    Medium-term (milestone 0.3 - 0.5):
+    TO-DO Medium-term (milestone 0.3 - 0.5):
     - "now" is localtime, but timezone is not documented in metadata
     - missing or bad metadata:
         internalFormatError to have other than 3 files in the .archive:

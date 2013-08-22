@@ -52,48 +52,10 @@ filenames with unicode, and file permissions). Tested using 9 versions of OpenSS
 including a compiled development release.
 
 Bug reports and code contributions are welcome; the project is on github and you
-can contact me there. For contacting me privately, e.g., about security issues,
-please look for my gmail address in the main pyfilesec.py code.
-Help with Windows issues would be great (especially file permissions).
+can contact me there (https://github.com/jeremygray/pyFileSec). For contacting me
+privately, e.g., about security issues, please look for my gmail address at the
+top of the main code. Help with Windows issues would be great (especially file permissions).
 
-
-Installation
--------------
-
-You'll need to install the pyFileSec library. On Windows, you'll need to
-install OpenSSL and sdelete (unless you have them already).
-
-1. Install pyFileSec in the usual way for python packages:
-
-    % pip install pyFileSec
-
-2. Install OpenSSL:
-
-On Mac and Linux, its very likely that you have OpenSSL already. To check, type
-``which openssl`` in a terminal window, and it will probably say ``/usr/bin/openssl``.
-It is also possible to install a different version of OpenSSL (e.g., compile a
-development release, or use a homebrew version). You then need to specify the
-non-default version to use; see command-line option ``--openssl`` and the function
-``set_openssl(path)``.
-
-On Windows, generally you'll need to download and install OpenSSL (free).
-Get the latest version from http://slproweb.com/products/Win32OpenSSL.html; a
-"Light" version should be fine. There's a good chance that you will first need
-to install the "Visual C++ 2008 Redistributables" (free download from the same
-page), and then install OpenSSL. OpenSSL will install to ``C:\OpenSSL-Win32`` by default.
-pyFileSec should now be able to detect and use OpenSSL.
-
-3. Install a secure file removal utility:
-
-On Mac and Linux, a secure file-removal utility should already be present. To confirm
-this on a Mac, type ``which srm`` in a terminal. On Linux, type ``which shred``.
-
-On Windows, download sdelete (free, from Microsoft) http://technet.microsoft.com/en-us/sysinternals/bb897443.aspx
-and install. pyFileSec should now be able to detect and use sdelete.
-
-On windows, the command ``cipher`` has an option to securely erase files that
-have already been deleted. However, this can take a long time (20-30 minutes)
-and is not suited for file-oriented secure deletion.
 
 Getting started
 ----------------

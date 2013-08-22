@@ -1,4 +1,14 @@
-Version 0.1 (alpha status)
+Version 0.2 (beta status)
+==========================
+
+v0.2.0
+---------------------
+* ADDED sphinx compatible documentation
+* ADDED two example demos
+* CHANGED umask no longer done via decorator
+
+
+Version 0.1 (alpha)
 ==========================
 
 v0.1.8
