@@ -768,22 +768,29 @@ def log_metadata(md, log=True):
 
 
 def pad(filename, size=DEFAULT_PAD_SIZE):
-    """Obscure a file's size by appending bytes until it has length `size`.
+    """Append null bytes to ``filename`` until it has length ``size``.
+
+    The size is changed but `the fact that it was changed` is not obscured until
+    the newly padded file is encrypted. ``pad`` only changes the effective length.
 
     Files shorter than `size` will be padded out to `size` (see details below).
     The minimum resulting file size is 128 bytes. Files that are already padded
     will first have any padding removed, and then be padded out to the new
     target size.
 
-    Padded files include a few bytes for padding-descriptor tags. Thus files
-    that are close to `size` already would not have their sizes obscured AND
-    also be marked as being padded (in the last ~36 bytes), raising a
-    `PaddingError`. To avoid this, you can check using the convenience function
-    `ok_to_pad()` before calling `pad()`.
+    Padded files include a few bytes for padding-descriptor tags, not just null
+    bytes. Thus files that are close to ``size`` already would not have their sizes
+    obscured AND also be marked as being padded (in the last ~36 bytes), raising a
+    ``PaddingError``. To avoid this, you can check using the convenience function
+    ``ok_to_pad()`` before calling ``pad()``.
 
-    Padding format: file + n bytes + padding descriptors
-        (= 10-digits + byte + PFS_PAD + byte)
-    n is selected to make the new file size == `size`.
+    Internal padding format:
+
+        ``file + n bytes + padding descriptors``
+
+    The padding descriptors consists of ``10-digits + byte + PFS_PAD + byte``. The
+    10 digits gives the length of the padding as an integer, in bytes.
+    n is selected to make the new file size equal the requested ``size``.
 
     To make unpadding easier and more robust (and enable human inspection),
     the end bytes provide the number of padding bytes that were added, plus an
@@ -794,8 +801,9 @@ def pad(filename, size=DEFAULT_PAD_SIZE):
 
     Special size values:
 
-        0 : unpad = remove any existing padding, no error if not present
-       -1 : strict unpad = remove padding if present, raise PaddingError if not
+       0 : unpad = remove any existing padding, no error if not present
+
+       -1 : strict unpad = remove padding if present, raise ``PaddingError`` if not
     """
     name = 'pad: '
     logging.debug(name + 'start')
@@ -835,7 +843,8 @@ def pad(filename, size=DEFAULT_PAD_SIZE):
 
 
 def ok_to_pad(filename, size, pad_count=None):
-    """Return 0 if `size` is not adequate to obscure the file length.
+    """Return 0 if ``size`` is not adequate to obscure the file length.
+    Else return the (non-zero) size.
     """
     # bug: what about very short < 128 minimum
     if pad_count is None:
@@ -845,7 +854,7 @@ def ok_to_pad(filename, size, pad_count=None):
 
 
 def pad_len(filename):
-    """Returns pad_count (in bytes) if the file contains PFS-style padding.
+    """Returns ``pad_count`` (in bytes) if the file contains PFS-style padding.
 
     Returns 0 if bad or missing padding.
     """
@@ -873,7 +882,7 @@ def pad_len(filename):
 
 
 def unpad(filename, pad_count=None):
-    """Removes PFS padding from the file. raise PaddingError if no PFS padding.
+    """Removes PFS padding from the file. raise ``PaddingError`` if no PFS padding.
 
     Truncates the file to remove padding; does not `destroy` the padding.
     """
@@ -914,10 +923,11 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
     By default, the original plaintext is secure-deleted after encryption (see
     parameter `keep=False`).
 
-    Files larger than 8G before encryption will raise a
-    ValueError. To mask small file sizes, `pad()` them to a desired minimum
-    size before calling `encrypt()`. To encrypt a directory, first tar or zip
-    it to create a single file, which you can then `encrypt()`.
+    Files larger than 8G before encryption will raise an error.
+
+    To mask small file sizes, `pad()` them to a desired minimum
+    size before calling `encrypt()`. To encrypt a directory, first call
+    ``make_archive()`` to create a single file, which you can then `encrypt()`.
 
     :Parameters:
 
