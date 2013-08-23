@@ -26,8 +26,8 @@ setup(
                  ],
     keywords=['encryption', 'security', 'privacy', 'integrity',
               'human subjects', 'research'],
-    url='http://pythonhosted.org/pyFileSec',
-    #url='https://github.com/jeremygray/pyFileSec',
+    #url='http://pythonhosted.org/pyFileSec', # documentation
+    url='https://github.com/jeremygray/pyFileSec', # home-page
     description='File-oriented privacy & integrity management tools',
     long_description=open('README.txt').read(),
 )
