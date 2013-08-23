@@ -35,7 +35,7 @@ if python_version() < '2.6':
 
 import sys
 import os
-from os.path import abspath, isfile, getsize, isdir, dirname, exists
+from os.path import abspath, isfile, getsize, isdir, dirname, exists, split
 import stat
 import shutil
 import tarfile
@@ -346,7 +346,10 @@ def set_openssl(path=None):
         app_dir = os.environ['APPDATA']
         if not isdir(app_dir):
             os.mkdir(app_dir)
-        OPENSSL = os.path.join(app_dir, split(libdir)[-1], bat_name)
+        app_lib_dir = os.path.join(app_dir, split(libdir)[-1])
+        if not isdir(app_lib_dir):
+            os.mkdir(app_lib_dir)
+        OPENSSL = os.path.join(app_lib_dir, bat_name)
         if not exists(OPENSSL):
             logging.info('no working %s file; trying to recreate' % bat_name)
             default = 'C:\\OpenSSL-Win32\\bin'
