@@ -54,7 +54,7 @@ including a compiled development release.
 Bug reports and code contributions are welcome; the project is on github and you
 can contact me there (https://github.com/jeremygray/pyFileSec). For contacting me
 privately, e.g., about security issues, please look for my gmail address at the
-top of the main code. Help with Windows issues would be great (especially file permissions).
+top of the main code. Help with Windows would be great (see the issues list).
 
 
 Contributors
@@ -71,7 +71,6 @@ Sol Simpson - Windows compatibility
 Milestones
 -----------
 
-- 0.2  Documentation
 - 0.3  Python 3 (looks easy, ``2to3`` passes now)
-- 0.4  An alternative encryption backend, possibly pycrypto and some gpg support
+- 0.4  An alternative encryption backend (possibly pycrypto, some gpg support)
 - 0.5  Windows file-permissions

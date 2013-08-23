@@ -24,16 +24,15 @@
  # DAMAGES.
 
 
-__version__ = '0.2.0beta'
+__version__ = '0.2.01beta'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
 
-from platform import python_version
-if python_version() < '2.6':
+import sys
+if sys.version < '2.6':
     raise RuntimeError('Requires python 2.6 or higher')
 
-import sys
 import os
 from os.path import abspath, isfile, getsize, isdir, dirname, exists, split
 import stat
@@ -101,7 +100,7 @@ if __name__ == "__main__":
 else:
     args = None
 
-if python_version < '3.':
+if sys.version < '3.':
     input23 = raw_input
 else:
     input23 = input
@@ -1812,7 +1811,7 @@ class Tests(object):
         global codec
         codec = PFSCodecRegistry(default_codec)
 
-        shutil.rmtree(self.tmp, ignore_errors=False)
+        shutil.rmtree(self.tmp, ignore_errors=True)
         os.chdir(self.start_dir)
 
     def _known_values(self):

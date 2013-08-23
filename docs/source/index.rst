@@ -9,65 +9,66 @@
 File security in python
 ------------------------
 
-**Security goal:** Protect computer files from casual inspection or accidental
-disclosure. Robustness, ease of use, and API stability are more important than
-the speed of code execution. Privacy assurance is more important than
-integrity assurance.
+**Security goals:** Protect computer files from casual inspection or accidental
+disclosure. Robustness, privacy assurance, ease of use, and API stability are
+much more important than the speed of code execution. Integrity assurance is
+useful but not a top priority.
 
 pyFileSec is less about encryption (which it does handily, as do many other
-excellent packages), and more about managing all the other issues that surface
-when working with files. The target audience is people
-who need to do system administration in a research lab (without being IT
+excellent packages), and more about managing other issues that arise
+when working with files. Anyone needing file management with compatible
+security goals could potentially benefit. The target audience is people
+who need to do system administration tasks in a research lab (without being IT
 professionals), and users and developers of software presentation programs for
-human subjects research. Anyone needing file management with compatible
-security goals could potentially benefit as well.
+human subjects research.
 
-**Example use-case:** A researcher might wish to collect data about study
-participants' drug-use history (and keep it confidential, even from trusted
-people who are working in the lab). Ideally, confidentiality should be
-protected through multiple means, including physical and legal.
-Cryptographically, sentitive research data is ideally protected from within the
-data collection program itself, to keep the potential disclosure window as
-small as possible. It is also desirable to be able to encrypt it without ever
-needing to be able to decrypt on the same computer, or store a decryption
-password where it might be copied or disclosed (obviating the encryption).
-Its typically useful to secure-delete the original file to avoid leaving sensitive information
-on the disk (otherwise its not actually "gone", and can be readily recovered). And its
-desirable to obscure the file size, e.g., so that a longer file cannot signal
-greater drug use. And do so without having to worry about whether anyone left
-Dropbox running on that testing room computer... Security is hard to achieve,
-despite excellent tools for encryption being widely available. Even good and
-trustworthy people can make mistakes. And doing so is undesirable and
-stressful for eveyrone. pyFileSec can help.
+**Example use-case:** A research team might wish to collect data on illegal drug-use,
+or other HIPAA-covered information. A research team will typically consist of
+multiple individuals, some more technically savvy than others. Participant
+confidentiality should be protected through multiple means, including procedural,
+physical, and legal methods; cryptography has a role as well, but is inadequate
+in isolation. Sensitive information is best protected as early as possible in the
+data stream -- ideally from within the data collection program itself -- to keep
+the window of accidental disclosure as small as possible. It is also desirable to
+be able to encrypt it without needing to be able to decrypt on the same computer,
+or store a decryption password where it might be copied, disclosed, or exposed to
+key-loggers (any of which would make the encryption irrelevant). Its typically
+useful to secure-delete the original file(s) to avoid leaving sensitive information
+on the disk. And it can be desirable to obscure file sizes, e.g., so that a longer
+file cannot indirectly indicate greater drug use.
+
+Despite excellent tools for encryption being widely available, security is hard
+to achieve. Even good and trustworthy people can make mistakes that compromise
+security. Tools to help manage file security can reduce the chances of mistakes
+and help people be more confident and more productive.
+
+When used correctly, pyFileSec is intended to be adequate for the purpose of
+securing data files within a typical research lab. Even so, the
+effective security will be higher if the data have low economic value (which is
+typically the case in psychology and neuroscience labs), and will be much higher
+if the lab has reasonable physical and network security, with only trained,
+trusted people working there (also typically the case).
 
 **Cautions:** Using encryption in a research context requires some consideration.
 Perhaps the most important thing to keep in mind is that, depending on your
-circumstances, the use of encryption (or particular forms of encryption) can conflict with
-policies of your boss, institution, or even government. You are responsible for
+circumstances, the use of encryption (or particular forms of encryption) can conflict
+with policies of your boss, institution, or even government. You are responsible for
 knowing your situation, and for the consequences of your decisions about whether
-and how to use encryption.
-
-pyFileSec's encryption is easily adequate for the purpose of secure data transfer,
-and is thought to be appropriate even for medium-term archiving (see
-http://www.keylength.com/ and http://www.win.tue.nl/~klenstra/key.pdf).
-Even so, the overall degree of achieved security will be higher if the data have
-low economic value, and will be much higher if the lab has reasonable physical
-and network security, with only trusted people working there. The encryption is
-definitely strong enough to cause trouble. Consider an example:
-Although you can lock yourself out of your own car or house, you can hire someone
-with training and tools to break in on your behalf. With encryption, however, it
-would likely be prohibitively expensive to hire someone to "break in on your behalf";
-hopefully that is not possible, even for a well-funded adversary. So you could
-actually lose data by trying to secure it.
+and how to use encryption. In addition,  the encryption is definitely strong enough
+to cause trouble. Consider an example: Although you can lock yourself out of your
+own car or house, you could also hire someone with training and tools to break in
+on your behalf. With encryption, however, it would likely be prohibitively expensive
+to hire someone to "break in on your behalf"; hopefully that is not possible,
+even for a well-funded adversary. So it is possible to lose data by trying to secure it.
 
 **Development status:** As of version 0.2.0, the development status is **beta**,
-meaning that things seem to be working well despite some rough edges and known
-limitations. Limitations are hopefully described well enough to know what they
-are. Being beta, API changes are still possible, and will be documented in the
+meaning that things seem to be working well, despite some rough edges and known
+limitations. The limitations are hopefully described clearly, but this is not
+certain. Being beta, API changes are still possible if needed, and will be documented in the
 changelog. The development emphasis now is mostly on making sure that the current
-features are as secure as possible, as easy as feasible, and work as intended cross-platform (on Mac, Linux, and
-Windows). Documentation is a work in progress. A few extensions are planned,
-notably an alternative encryption backend and zip for archive. Setting file
+features are as secure as possible, as easy as feasible, and work as intended
+cross-platform (on Mac, Linux, and Windows). Documentation is a work in progress.
+A few extensions are planned, notably an alternative encryption backend and zip for archive. Setting file
 permissions on Windows needs work. Python 3 support looks easy; ``2to3`` passes
 now, but python 3 is completely untested.
 
@@ -81,16 +82,16 @@ Principles and Approach
 
 Using public-key encryption allows a non-secret "password" (the public key) to
 be distributed and used for encryption. This separates encryption from decryption,
-allowing their physical separation, which gives considerable flexibility. The idea
-is that anyone anywhere can encrypt information that only a trusted process (i.e.,
-with access to the private key) can decrypt. For example. multiple testing-room
-computers could have the lab's public key, and use it to encrypt the data from
-each subject so that it can be sent to a central computer for analysis and
-archiving. The decryption (private) key does not need to be exposed, ever.
-Keep it private.
+allowing their physical separation, which gives considerable flexibility (and security).
+The idea is that anyone anywhere can encrypt information that only a trusted process
+(i.e., with access to the private key) can decrypt. For example, multiple testing-room
+computers could have the public key, and use it to encrypt the data from each subject
+so that it can be transferred to a main computer for de-identification, analysis, and
+archiving. The private key (for decryption) does not need to be shared beyond the
+main trusted computer. Keep it as private as possible.
 
 pyFileSec does not, of itself, implement cryptographic code; by design it relies
-on a 3rd party implementation. In particular, cryptographic operations use
+on external implementations. In particular, cryptographic operations use
 OpenSSL (see openssl.org), using its implementation of RSA and AES. These ciphers
 are industry standards and can be very secure when used correctly. The effective
 weak link is almost certainly not cryptographic but rather in how the encryption
@@ -105,7 +106,7 @@ Some considerations:
   coverage (we're not there yet). See Performance and tests, below.
 - OpenSSL is not distributed as part of the library (see Installation).
 - By design, the computer used for encryption can be different from the computer used
-  for decryption; it can be a different device, operating system, and openssl version.
+  for decryption; it can be a different device, operating system, and version of OpenSSL.
 - You should encrypt and decrypt only on machines that are physically secure,
   with access limited to trusted people. Although encryption can be done anywhere,
   using a public key, if someone used a different public key to encrypt data
@@ -135,10 +136,10 @@ Design goals:
   2048 or higher.
 - For the AES encryption, a random 256-bit session key (AES password) is
   generated for each encryption event.
-- For ease of archiving and handling, everything is bundled as one ``gzip``ed ``tar`` file,
-  with ``.enc`` as the extension. It can be unbundled using ``tar`` (the archive
-  contents remsin encrypted).
-- pyFileSec does not try to manage the RSA keys. Its up to you (the user) to do so.
+- For ease of archiving and handling, everything is bundled as a single ``tar``
+  file (with ``gzip`` compression), with ``.enc`` as the extension. It can be
+  unbundled using ``tar`` (the archive contents remain encrypted).
+- pyFileSec does not try to manage RSA keys. Its up to you (the user) to do so.
 
 
 Installation
@@ -147,11 +148,12 @@ Installation
 pyFileSec
 =====================
 
-Do things in the usual way for python packages::
+Install things in the usual way for a python package::
 
     % pip install pyFileSec
 
-pyFileSec does not come with a copy of OpenSSL, which you'll need.
+pyFileSec does not come with a copy of OpenSSL or a secure file-removal tool,
+which you'll need. These are typically already present on Mac and linux.
 
 OpenSSL
 =================
@@ -160,7 +162,7 @@ On Mac and Linux, its very likely that you have OpenSSL already. To check, type
 ``which openssl`` in a terminal window, and it will probably say ``/usr/bin/openssl``.
 It is also possible to install a different version of OpenSSL (e.g., compile a
 development release, or use a homebrew version). You then need to specify the
-non-default version to use; see command-line option ``--openssl`` and the API function
+non-default version to use; see command-line option ``--openssl`` or the API function
 ``set_openssl``.
 
 On Windows, generally you'll need to download and install OpenSSL (free).
@@ -170,17 +172,17 @@ to install the "Visual C++ 2008 Redistributables" (free download from the same
 page), and then install OpenSSL. OpenSSL will install to ``C:\OpenSSL-Win32`` by default.
 pyFileSec should now be able to detect and use OpenSSL.
 
-secure-delete
+Secure file-removal
 ========================
 
 On Mac and Linux, a secure file-removal utility should already be present. To confirm
-this on a Mac, type ``which srm`` in a terminal. On Linux, type ``which shred``.
+this, on a Mac type ``which srm`` in a terminal. On Linux, type ``which shred``.
 
 On Windows, download a program called ``sdelete`` (free, from Microsoft)
 http://technet.microsoft.com/en-us/sysinternals/bb897443.aspx
 and install. pyFileSec should now be able to detect and use ``sdelete.exe``.
 
-On windows, the command ``cipher`` has an option to securely erase files that
+On Windows, the command ``cipher`` has an option to securely erase files that
 have already been deleted. However, this can take a long time (20-30 minutes)
 and is not suited for file-oriented secure deletion.
 
@@ -203,15 +205,11 @@ This will print aliases for bash, csh/tcsh, and DOS. Copy and paste into your
 shell as appropriate (or paste elsewhere, like a ~/.bash_profile).
 
 A demos/ directory is in the same directory as pyfilesec.py, and has usage
-examples for python scripting (example_1.py) and command-line / shell scripting
-(example_2.sh). A guide (``readme.txt``) has basic instructions on how to
+examples for python scripting ``example_1.py``, and for command-line / shell scripting
+``example_2.sh``.
+
+A guide ``readme.txt`` has basic instructions on how to
 generate an RSA key-pair using pyFileSec; any valid .pem format key-pair will work.
-
-
-Usage Examples
----------------
-See the ``demos/`` directory (and its ``readme.txt``) for python and shell
-script examples.
 
 
 API
@@ -229,7 +227,7 @@ Encryption, Decryption
 .. autofunction:: pyfilesec.decrypt
 .. autofunction:: pyfilesec.rotate
 
-Sign & verify
+Sign, Verify
 ============================
 .. autofunction:: pyfilesec.sign
 .. autofunction:: pyfilesec.verify
