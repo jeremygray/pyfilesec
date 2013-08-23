@@ -364,7 +364,7 @@ being a complete solution. There are many issues involved in securing your
 data, and encryption alone does not magically solve all of them. Security needs
 to be considered at all stages in the process. The encryption provided
 is genuinely strong encryption (and as such could cause problems). Key management
-is the hard part.
+is the hard part. And don't skip physical, legal, and procedural aspects of security.
 
 Q: What if my private RSA private key is no longer private?
 
@@ -380,11 +380,19 @@ required for key rotation. By design, pyFileSec is not needed for rotation (or d
 It is basically just a wrapper to make it easier to work with
 standard, strong encryption tools, and document what was done and how.
 
-Q: What if the internal (AES) password was disclosed (i.e., not the private
+Q: What should I do if my private RSA private key is reaching its expected end-of-life (see
+http://www.keylength.com)?
+
+A: You should expect to do this. The ``rotate()`` function helps make this transition
+as easy as possible. Just generate a new RSA key-pair, and ``rotate()`` the encryption.
+It would be trivial to write a ``rotate_all()`` function to find all encrypted files
+in a directory, and rotate the encryption on those files.
+
+Q: What if the internal (AES) password was disclosed (i.e., not the RSA private
 key but the one-time password that is used for the AES encryption)?
 
 A: This is extremely unlikely during normal operation. If it should occur (e.g.,
-due to a power-failure or other crash at just the wrong time) it would affect at
+maybe a power-failure or other crash at `precisely` the wrong time?) it would affect at
 most one file. **Fix:** Just ``rotate()`` the encryption for that file, using
 the same public key to re-encrypt. A new internal one-time password will be
 generated during the re-encryption step. (The internal AES password is never re-used,
