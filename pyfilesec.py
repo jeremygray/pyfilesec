@@ -886,7 +886,7 @@ def pad_len(filename):
 
 
 def unpad(filename, pad_count=None):
-    """Removes PFS padding from the file. raise ``PaddingError`` if no PFS padding.
+    """Removes PFS padding from the file. raise ``PaddingError`` if no padding.
 
     Truncates the file to remove padding; does not `destroy` the padding.
     """
@@ -940,36 +940,31 @@ def encrypt(datafile, pub, meta=True, date=True, keep=False,
             NB: To encrypt a whole directory, first convert it to a single
             file (using `archive`), then encrypt the archive file.
         `pub`:
-            The public key to use, specified as the path to a .pem file. The
-            minimum recommended key length is 2048 bits; 1024 is allowed but
-            strongly discouraged as it is not secure.
+            The public key to use, specified as the path to a ``.pem`` file.
+            The minimum recommended key length is 2048 bits; 1024 is allowed
+            but strongly discouraged as it is not medium-term secure.
         `meta`:
-            If `True` or a dict, include meta-data plaintext in the archive::
+            If ``True`` or a dict, include the meta-data (plaintext) in the
+            archive. If given a dict, the dict will be updated with new
+            meta-data. This allows all meta-data to be retained from the
+            initial encryption through multiple rotations of the encryption.
+            If ``False``, will indicate that the meta-data were suppressed.
 
-                original file name & sha256 of encrypted
-                platform & date
-                openssl version, padding
-                pubkey info (to aid in key rotation)
-
-                If given a dict, the dict will be updated with new meta-data.
-                This allows all meta-data to be retained from the initial
-                encryption and multiple rotations of the encryption.
-
-            If `False`, explicitly indicate that the meta-data were suppressed.
+            See ``load_metadata()`` and ``log_metadata()``.
         `date`:
-            True mean save the date in the clear-text meta-data.
-            Use False if the date is sensitive.
-            File time-stamps are NOT obscured in any way.
+            ``True`` : save the date in the clear-text meta-data.
+            ``False`` : suppress the date (if the date itself is sensitive)
+            File time-stamps are NOT obscured, even if ``date=False``.
         `keep`:
-            False = remove original (unencrypted) file
-            True  = leave original file
+            ``False`` = remove original (unencrypted) file
+            ``True``  = leave original file
         `enc_method`:
             name of the function / method to use (currently only one option)
         `hmac_key`:
-            optional key to use for HMAC-SHA256, post-encryption; if a key is
-            provided, the HMAC will be generated and stored with the meta-data
-            (encrypt-then-MAC).
-
+            optional key to use for a message authentication (HMAC-SHA256,
+            post-encryption); if a key is provided, the HMAC will be generated
+            and stored with the meta-data. (This is encrypt-then-MAC.)
+            For stronger integrity assurance, use ``sign()``.
     """
     _set_umask()
     name = 'encrypt: '
@@ -1178,10 +1173,10 @@ def _get_dec_method(meta_file, dec_method):
     return dec_method
 
 
-def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
-    """Decrypt a file that was encoded using `encrypt()`.
+def decrypt(data_enc, priv, pphr='', out='', dec_method=None):
+    """Decrypt a file that was encoded using ``encrypt()``.
 
-    To get the data back, need two files: `data.enc` and `privkey.pem`.
+    To get the data back, need two files: ``data.enc`` and ``privkey.pem``.
     If the private key has a passphrase, you'll need to provide that too.
     `pphr` should be the passphrase itself (a string), not a file name.
 
@@ -1190,6 +1185,22 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
 
     Tries to detect whether the decrypted file would end up inside a Dropbox
     folder; if so, refuse to proceed.
+
+    :Parameters:
+
+        `data_enc` :
+            path to the encrypted file, as returned by ``encrypt()``; typically
+            ends with ``.enc``
+        `priv` :
+            path to the private key that is paired with the ``pub`` key used at
+            encryption; ``.pem`` format
+        `pphr` :
+            passphrase for the private key (as a string, or filename)
+        `out` :
+            path to use for the output (decrypted plain-text) file
+        `dec_method` :
+            name of a decruption method that has been registered in
+            the ``codec`` (see ``PFSCodecRegistry``)
     """
     _set_umask()
     name = 'decrypt: '
@@ -1230,7 +1241,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
 
         # Decrypt (into same new tmp dir):
         DECRYPT_FXN = codec.get_function(dec_method)
-        data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, outFile,
+        data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, out,
                                   OPENSSL=OPENSSL)
 
         # Rename decrypted and meta files (mv to dest_dir):
@@ -1274,7 +1285,7 @@ def decrypt(data_enc, priv, pphr='', outFile='', dec_method=None):
 
 
 def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
-                           outFile='', OPENSSL=''):
+                           out='', OPENSSL=''):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
     """
     _set_umask()
@@ -1282,8 +1293,8 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
     logging.debug('%s: start' % name)
 
     # set the name for decrypted file:
-    if outFile:
-        data_dec = outFile
+    if out:
+        data_dec = out
     else:
         data_dec = os.path.splitext(abspath(data_enc))[0]
     #else:
@@ -1513,10 +1524,10 @@ def genRsaKeys():
         % python pyfilesec.py genrsa
 
     Choose from 2048, 4096, or 8192 bits; 1024 is not secure for medium-term
-    storage, and 16384 bits is not needed (nor is 8192). A passphrase is required,
-    or one will be auto generated and printed to the console (this is the only
-    copy, don't lose it). Ideally, generate a strong passphrase using a password
-    manager (e.g., KeePassX), save there, paste it into the dialog.
+    storage, and 16384 bits is not needed (nor is 8192). A passphrase is
+    required, or one will be auto generated and printed to the console (this is
+    the only copy, don't lose it). Ideally, generate a strong passphrase using
+    a password manager (e.g., KeePassX), save there, paste it into the dialog.
 
     You may only ever need to do this once. You may also want to generate keys
     for testing purposes, and then generate keys for actual use.
@@ -1544,14 +1555,15 @@ def genRsaKeys():
         priv += '_priv.pem'
 
     if os.path.exists(priv):
-        msg = ( '%s ' % lib_name +
-                'RSA key generation.\n  %s already exists\n' % priv +
+        msg = ('%s ' % lib_name +
+               'RSA key generation.\n  %s already exists\n' % priv +
                '  > Clean up files and try again. Exiting. <')
         print(msg)
         return None, None
 
-    print('\n%s: ' % lib_name +
-          'RSA key-pair generation\n\nWill try to create two files:')
+    msg = ('\n%s: ' % lib_name +
+           'RSA key-pair generation\n\nWill try to create two files:')
+    print(msg)
     pub_msg = '  pub  = %s' % pub
     print(pub_msg)
     priv_msg = '  priv = %s' % priv
@@ -1566,7 +1578,7 @@ def genRsaKeys():
             return None, None
         pphr_auto = False
     else:
-        print '(auto-generating a passphrase)\n'
+        print('(auto-generating a passphrase)\n')
         pphr = _printable_pwd(128)  # or a word-based generator?
         pphr_auto = True
     if pphr and len(pphr) < 16:
@@ -1767,9 +1779,10 @@ def get_hg_info(filename, detailed=False):
 def command_alias():
     """Print aliases that can be used for command-line usage.
     """
-    print ( 'bash:  alias pfs="python %s"\n' % lib_path +
-            '*csh:  alias pfs "python %s"\n' % lib_path +
-            'DOS :  doskey pfs=python %s $*' % lib_path )
+    aliases = ('bash:  alias pfs="python %s"\n' % lib_path +
+               '*csh:  alias pfs "python %s"\n' % lib_path +
+               'DOS :  doskey pfs=python %s $*' % lib_path)
+    print(aliases)
 
 
 class Tests(object):
@@ -2615,7 +2628,7 @@ if __name__ == '__main__':
             fxn = decrypt
             kw.update({'priv': args.priv})
             args.pphr and kw.update({'pphr': args.pphr})
-            args.out and kw.update({'outFile': args.out})
+            args.out and kw.update({'out': args.out})
         elif args.rotate:
             fxn = rotate
             kw.update({'priv': args.priv})

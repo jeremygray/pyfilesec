@@ -57,28 +57,6 @@ privately, e.g., about security issues, please look for my gmail address at the
 top of the main code. Help with Windows issues would be great (especially file permissions).
 
 
-Getting started
-----------------
-
-Generally, you do not need administrative privildges to work with pyFileSec once
-it is installed. The only exception is that, on Windows, you need to be an admin
-to check whether files have other hard links to them.
-
-Command line usage is likely to be easier with an alias. To find out what path
-and syntax to use in an alias, start python interactively (type ``python`` at a
-terminal or command prompt) and then:
-
-    >>> import pyfilesec as pfs
-    >>> pfs.command_alias()
-
-This will print aliases for bash, csh/tcsh, and DOS. Copy and paste into your
-shell as appropriate (or elsewhere, like a ~/.bash_profile).
-
-A demos/ directory is in the same directory as pyfilesec.py, and has usage
-examples for python scripting (example_1.py) and command-line / shell scripting
-(example_2.sh). A guide (``readme.txt``) has basic instructions on how to
-generate an RSA key-pair using pyFileSec; any valid .pem format key-pair will work.
-
 Contributors
 -------------
 Jeremy R. Gray - package author (GPG key D934B0D7)

@@ -57,17 +57,17 @@ definitely strong enough to cause trouble. Consider an example:
 Although you can lock yourself out of your own car or house, you can hire someone
 with training and tools to break in on your behalf. With encryption, however, it
 would likely be prohibitively expensive to hire someone to "break in on your behalf";
-hpefully that is not possible, even for a well-funded adversary. So you could
+hopefully that is not possible, even for a well-funded adversary. So you could
 actually lose data by trying to secure it.
 
 **Development status:** As of version 0.2.0, the development status is **beta**,
 meaning that things seem to be working well despite some rough edges and known
-limitations, which are hopefully mostly described well enough to know what they
+limitations. Limitations are hopefully described well enough to know what they
 are. Being beta, API changes are still possible, and will be documented in the
-changelog. The development emphasis is mostly on making sure that the current
-features are as secure as possible and work as intended on Mac, Linux, and
-Windows. Documentation is a work in progress. A few extensions are planned
-(notably an alternative encryption backend, and zip for archive). Setting file
+changelog. The development emphasis now is mostly on making sure that the current
+features are as secure as possible, as easy as feasible, and work as intended cross-platform (on Mac, Linux, and
+Windows). Documentation is a work in progress. A few extensions are planned,
+notably an alternative encryption backend and zip for archive. Setting file
 permissions on Windows needs work. Python 3 support looks easy; ``2to3`` passes
 now, but python 3 is completely untested.
 
@@ -76,66 +76,69 @@ Comments and code contributions are welcome. Feedback can be posted on github
 private email is preferred for anything sensitive, such as security concerns.
 
 
-Usage Examples
----------------
-See the demos/ directory (and its readme.txt) for python and shell script examples.
-
-
 Principles and Approach
 ------------------------
 
 Using public-key encryption allows a non-secret "password" (the public key) to
 be distributed and used for encryption. This separates encryption from decryption,
 allowing their physical separation, which gives considerable flexibility. The idea
-is that anyone anywhere can encrypt information that only a trusted process (with
-access to the private key) can decrypt. For example. multiple testing-room computers
-could have the public key,
-encrypt the data from each subject so that it can be sent to a central computer
-for analysis and archiving, without the private key ever needing to be exposed.
-Its the private key that is essential to keep private.
+is that anyone anywhere can encrypt information that only a trusted process (i.e.,
+with access to the private key) can decrypt. For example. multiple testing-room
+computers could have the lab's public key, and use it to encrypt the data from
+each subject so that it can be sent to a central computer for analysis and
+archiving. The decryption (private) key does not need to be exposed, ever.
+Keep it private.
 
-pyFileSec does not, of itself, contain cryptographic code, but instead relies on
-a 3rd party implementation. In particular, cryptographic operations use the
-widely used software package, OpenSSL (see openssl.org), using its implementation
-of RSA and AES. These are industry standards and can be very secure when used correctly.
-The effective weak link is almost certainly not cryptographic but rather in how the
-encryption key(s) are handled, which partly depends on you, including what happens
-during key generation, storage, and backup. If the keys are bad or compromised,
-the encryption strength is basically irrelevant. The strength of the lock on
-your front door is basically irrelevant if you leave the key under the doormat.
+pyFileSec does not, of itself, implement cryptographic code; by design it relies
+on a 3rd party implementation. In particular, cryptographic operations use
+OpenSSL (see openssl.org), using its implementation of RSA and AES. These ciphers
+are industry standards and can be very secure when used correctly. The effective
+weak link is almost certainly not cryptographic but rather in how the encryption
+key(s) are handled, which depends mostly on  you (the user), including what happens
+during key generation, storage, and backup. If your keys are bad or compromised,
+the encryption strength is basically irrelevant. The strength of the lock on your
+front door is irrelevant if you make a habit of leaving the key under the doormat.
 
 Some considerations:
 
 - A test-suite is included as part of the library. The aim is to provide complete
-  coverage; we're not there yet.
-- OpenSSL is not distributed as part of the library (see installation).
+  coverage (we're not there yet). See Performance and tests, below.
+- OpenSSL is not distributed as part of the library (see Installation).
+- By design, the computer used for encryption can be different from the computer used
+  for decryption; it can be a different device, operating system, and openssl version.
 - You should encrypt and decrypt only on machines that are physically secure,
   with access limited to trusted people. Although encryption can be done anywhere,
   using a public key, if someone used a different public key to encrypt data
-  intended for you, you would not be able to access those data.
-- By design, the computer used for encryption can be different from the computer used
-  for decryption; it can be a different device, operating system, and openssl version.
+  intended for you, you would not be able to access "your" data.
 - Ideally, do not move your private key from the machine on which it was
   generated; certainly never ever email it. Its typically fine to share the public
   key, certainly within a small group of trusted people, such as a research lab.
 - Some good advice from GnuPG: "If your system allows for encrypted swap partitions,
   please make use of that feature."
 
-- The goal is to rely exclusively on standard, widely available & supported tools and algorithms.
-  OpenSSL and the basic approach (RSA + AES 256) are well-understood and recommended,
-  e.g., by Ferguson, Schneier, & Kohno (2010) Cryptography engineering. Indianapolis, Indiana: Wiley.
-- Always use and return full paths to files, not relative paths.
+Design goals:
+
+- Rely exclusively on standard, widely available and supported tools and algorithms.
+  OpenSSL and the basic approach (RSA + AES 256) are well-understood and recommended
+  (e.g., by Ferguson, Schneier, & Kohno (2010) `Cryptography engineering.` Indianapolis,
+  Indiana: Wiley).
+- The implementation should allow for the relatively easy adoption of another
+  encryption cipher suite, in the event that a change is necessary for cryptographic
+  reasons.
+- For clarity, use and return full paths to files, not relative paths.
 - Avoid obfuscation and so-called "security through obscurity". Obfuscation does
   not enchance security, yet can make data recovery more difficult or expensive.
-  So transparency is more important. For this reason, meta-data are generated by
-  default to make things less obscure (although this can be suppressed).
-- Encryption will refuse to proceed if the OpenSSL version is lower than 0.9.8.
-- Encryption will not proceed if the public key < 1024 bits; you should only use 2048 or higher.
-- For the AES encryption, a 256-bit password is generated for each encryption event.
-- For ease of archiving and handling, everything is bundled as one ``.tgz`` file,
-  with ``.enc`` as the extension. It can be unbundled using ``tar`` but is still
-  encrypted.
-- pyFileSec does not try to manage the RSA keys. Its up to the user to do so.
+  So transparency is preferred. For this reason, meta-data are generated by
+  default to make things less obscure; meta-data can be suppressed if desired.
+- Encryption should refuse to proceed if the OpenSSL version is lower than 0.9.8.
+- Encryption must not proceed if the public key < 1024 bits; you should only use
+  2048 or higher.
+- For the AES encryption, a random 256-bit session key (AES password) is
+  generated for each encryption event.
+- For ease of archiving and handling, everything is bundled as one ``gzip``ed ``tar`` file,
+  with ``.enc`` as the extension. It can be unbundled using ``tar`` (the archive
+  contents remsin encrypted).
+- pyFileSec does not try to manage the RSA keys. Its up to you (the user) to do so.
 
 
 Installation
@@ -148,7 +151,7 @@ Do things in the usual way for python packages::
 
     % pip install pyFileSec
 
-pyFileSec does not package a copy of OpenSSL, which you'll need.
+pyFileSec does not come with a copy of OpenSSL, which you'll need.
 
 OpenSSL
 =================
@@ -182,13 +185,41 @@ have already been deleted. However, this can take a long time (20-30 minutes)
 and is not suited for file-oriented secure deletion.
 
 
+Getting started
+----------------
+
+Generally, you do not need administrative privildges to work with pyFileSec once
+it is installed. The only exception is that, on Windows, you need to be an admin
+to check whether files have other hard links to them.
+
+Command line usage is likely to be easier with an alias. To find out what path
+and syntax to use in an alias, start python interactively (type ``python`` at a
+terminal or command prompt) and then:
+
+  >>> import pyfilesec as pfs
+  >>> pfs.command_alias()
+
+This will print aliases for bash, csh/tcsh, and DOS. Copy and paste into your
+shell as appropriate (or paste elsewhere, like a ~/.bash_profile).
+
+A demos/ directory is in the same directory as pyfilesec.py, and has usage
+examples for python scripting (example_1.py) and command-line / shell scripting
+(example_2.sh). A guide (``readme.txt``) has basic instructions on how to
+generate an RSA key-pair using pyFileSec; any valid .pem format key-pair will work.
+
+
+Usage Examples
+---------------
+See the ``demos/`` directory (and its ``readme.txt``) for python and shell
+script examples.
+
+
 API
 ------------------------
 
 The API describes how to call functions from within python. An understanding of
 the parameters will be useful for command-line / shell-script usage.
-
-Command-line syntax is described using the usual ``--help`` option::
+Details about command-line syntax can be obtained using the usual ``--help`` option::
 
     % python pyfilesec.py --help
 
@@ -203,7 +234,7 @@ Sign & verify
 .. autofunction:: pyfilesec.sign
 .. autofunction:: pyfilesec.verify
 
-Pad (obscure a file's size)
+Pad (obscure file size)
 ============================
 .. autofunction:: pyfilesec.pad
 .. autofunction:: pyfilesec.ok_to_pad
@@ -230,9 +261,15 @@ Other functions:
 .. autofunction:: pyfilesec.hmac_sha256
 .. autofunction:: pyfilesec.load_metadata
 .. autofunction:: pyfilesec.log_metadata
+.. autofunction:: pyfilesec.get_dropbox_path
+.. autofunction:: pyfilesec.is_in_dropbox
 
+Codec Registry
+===============
 
-Performance and tests
+.. autoclass:: pyfilesec.PFSCodecRegistry
+
+Tests and performance
 ----------------------
 
 The built-in tests can be run from the command line::
