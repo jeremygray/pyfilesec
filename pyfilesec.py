@@ -96,15 +96,14 @@ def _parse_args():
 
     return parser.parse_args()
 
+# set args depending on how __file__ is called:
 if __name__ == "__main__":
     args = _parse_args()
 else:
     args = None
 
-if sys.version < '3.':
-    input23 = raw_input
-else:
-    input23 = input
+# python 3 compatibility:
+input23 = (input, raw_input)[sys.version < '3.']
 
 if sys.platform == 'win32':
     get_time = time.clock
@@ -184,8 +183,8 @@ class PFSCodecRegistry(object):
     def register(self, new_functions):
         """Validate and add a codec to the registry.
 
-        Typically one adds an _enc + _dec pair. However, _dec only is accepted
-        (to support "read only" use of a codec), but _enc only is not.
+        Typically one adds {_enc:e, _dec:d}. However, _dec:d only is accepted
+        to support "read only" use of a codec, but _enc only is not.
         """
         for key in list(new_functions.keys()):
             try:
@@ -193,14 +192,14 @@ class PFSCodecRegistry(object):
             except:
                 _fatal('keys restricted to str (not unicode)')
             fxn = new_functions[key]
+            if not len(key) > 3 or key[:4] not in ['_enc', '_dec']:
+                msg = ': failed to register "%s": need _enc/_dec...' % key
+                _fatal(self.name + msg)
             if not key in globals() or not hasattr(fxn, '__call__'):
                 msg = ': failed to register "%s", not callable' % key
                 _fatal(self.name + msg)
             if key in list(self.keys()):
                 _fatal(self.name + ': function "%s" already registered' % key)
-            if not len(key) > 3 or key[:4] not in ['_enc', '_dec']:
-                msg = ': failed to register "%s": need _enc/_dec...' % key
-                _fatal(self.name + msg)
             self._functions.update({key: fxn})
             fxn_info = '%s(): fxn id=%d' % (key, id(fxn))
             logging.info(self.name + ': registered %s' % fxn_info)
@@ -329,10 +328,10 @@ def set_openssl(path=None):
     else:
         # use a bat file for openssl.cfg; create .bat if not found or broken
         bat_name = '_openssl.bat'
-        app_dir = os.environ['APPDATA']
-        if not isdir(app_dir):
-            os.mkdir(app_dir)
-        app_lib_dir = os.path.join(app_dir, split(lib_dir)[-1])
+        sys_app_data = os.environ['APPDATA']
+        if not isdir(sys_app_data):
+            os.mkdir(sys_app_data)
+        app_lib_dir = os.path.join(sys_app_data, split(lib_dir)[-1])
         if not isdir(app_lib_dir):
             os.mkdir(app_lib_dir)
         OPENSSL = os.path.join(app_lib_dir, bat_name)
@@ -1649,17 +1648,14 @@ def get_dropbox_path():
             host_db = os.path.expanduser('~/.dropbox/host.db')
         else:
             host_db = os.path.join(os.environ['APPDATA'], 'Dropbox', 'host.db')
-            if not exists(host_db):
-                host_db = os.path.join(os.environ['LOCALAPPDATA'],
-                                       'Dropbox', 'host.db')
-        try:
+        if not exists(host_db):
+            logging.info('did not find a Dropbox folder')
+            dropbox_path = False
+        else:
             db_path_b64 = open(host_db, 'rb').readlines()[1]  # second line
             db_path = b64decode(db_path_b64.strip())
             dropbox_path = _abspath_winDriveCap(db_path)
             logging.info('found Dropbox folder %s' % dropbox_path)
-        except IOError:
-            logging.info('did not find a Dropbox folder')
-            dropbox_path = False
 
     return dropbox_path
 
@@ -1670,100 +1666,49 @@ def is_versioned(filename):
     Returns a string: 'git', 'svn', 'hg', or ''
     Only approximate: the directory might be versioned, but not this file, etc.
     """
-    logging.debug('trying to detect version control; svn, git, hg')
+    logging.debug('trying to detect version control (svn, git, hg)')
 
-    if get_svn_info(filename):
-        return 'svn'
-    if get_git_info(filename):
-        return 'git'
-    if get_hg_info(filename):
-        return 'hg'
-    return ''
+    return any([get_svn_info(filename),
+                get_git_info(filename),
+                get_hg_info(filename)])
 
 
-def get_git_info(filename, detailed=False):
-    """Tries to discover if a file is inside a git repo (version control).
+def get_git_info(path):
+    """Report whether a directory or file is in a git repo (version control).
+
+    Files can be in the repo directory but not actually tracked by git.
     """
-    orig = os.getcwd()
-    filename = abspath(filename)
-    if os.path.isfile(filename):
-        filename = dirname(filename)
-    os.chdir(filename)
-    git_hash = ''
-    try:
-        git_hash = _sys_call(['git', 'rev-parse', '--verify', 'HEAD'],
-            ignore_error=True)
-    except OSError:
-        pass
-    except WindowsError:
-        pass
-    finally:
-        os.chdir(orig)
-    logging.debug('found git hash: %s' % bool(git_hash))
-    if detailed:
-        return git_hash
-    else:
-        return bool(git_hash)
+    if not path or not exists(path):
+        return False
+
+    cmd = ['git', 'ls-files', abspath(path), '--error-unmatch']
+    reported = _sys_call(cmd, ignore_error=True)
+    is_tracked = bool(reported)
+
+    logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
+    return is_tracked
 
 
-def get_svn_info(filename, detailed=False):
+def get_svn_info(path):
     """Tries to discover if a file is under svn (version control).
     """
-    has_svn_dir = isdir(os.path.join(dirname(filename), '.svn'))
-    logging.debug('found dir .svn/: %s' % bool(has_svn_dir))
-    if not detailed:
-        return has_svn_dir
-
-    #if not has_svn_dir:  # allows testing of the code
-    #    return ''
-    svn_rev = ''
-    if not sys.platform in ['win32']:
-        svninfo = _sys_call(['svn', 'info', filename], ignore_error=True)
-        for line in svninfo.splitlines():
-            if line.startswith('Revision: '):
-                svn_rev = line.split()[1]
-    else:
-        try:
-            subwcrev = _sys_call(['subwcrev', filename], ignore_error=True)
-        except:
-            subwcrev = ''
-        for line in subwcrev.splitlines():
-            if line.endswith('is not a working copy'):
-                break
-            if line.startswith('Last committed at revision'):
-                # only tested with tortoise svn on Win XP and Win 7
-                svn_rev = 'r' + line.split()[-1]
-                break
-    return svn_rev
+    if not isdir(path):
+        path = dirname(path)
+    has_svn_dir = isdir(os.path.join(path, '.svn'))
+    logging.debug('path %s tracked in svn repo: %s' % (path, has_svn_dir))
+    return has_svn_dir
 
 
-def get_hg_info(filename, detailed=False):
+def get_hg_info(path):
     """Tries to discover if a file is under mercurial (version control).
 
     `detailed=True` not tested recently (similar code worked before).
     """
-    filedir = dirname(filename)
-    has_hg_dir = isdir(os.path.join(filedir, '.hg'))
-    logging.debug('found dir .hg/: %s' % bool(has_hg_dir))
-    if not detailed:
-        return has_hg_dir
-
-    #if not has_hg_dir:  # comment out to allow testing
-    #    return ''
-    try:
-        parents = _sys_call(['hg', 'parents', filename], ignore_error=True)
-        changeset = parents.splitlines()[0].split()[-1].strip()
-    except:
-        changeset = ''
-    try:
-        hgID = _sys_call(['hg', 'id', '-nibt', filedir], ignore_error=True)
-    except:
-        hgID = ''
-
-    if len(hgID) or len(changeset):
-        return hgID + ' | parent: ' + changeset
-    else:
-        return ''
+    if not isdir(path):
+        path = dirname(path)
+    has_hg_dir = isdir(os.path.join(path, '.hg'))
+    logging.debug('path %s tracked in hg repo: %s' % (path, has_hg_dir))
+    return has_hg_dir
 
 
 def command_alias():
@@ -1778,6 +1723,7 @@ def command_alias():
 class Tests(object):
     """Test suite for py.test
 
+    pytest.skip:
     - unicode in paths fail on win32
     - permissions fail on win32
     - hardlinks (fsutil) need admin priv on win32
@@ -1788,6 +1734,9 @@ class Tests(object):
         #global OPENSSL
         #OPENSSL = '/opt/local/bin/openssl'
 
+        global codec
+        codec = PFSCodecRegistry(default_codec)
+
         self.start_dir = os.getcwd()
         tmp = '__pyfilesec test__'
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1796,11 +1745,8 @@ class Tests(object):
         os.chdir(tmp)
 
     def teardown_class(self):
-        global codec
-        codec = PFSCodecRegistry(default_codec)
-
-        shutil.rmtree(self.tmp, ignore_errors=True)
         os.chdir(self.start_dir)
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _known_values(self):
         """Return tmp files with known keys, data, signature for testing.
@@ -1865,9 +1811,9 @@ class Tests(object):
         get_version()
         command_alias()
         is_versioned(__file__)
-        get_git_info(__file__, detailed=True)
-        get_svn_info(__file__, detailed=True)
-        get_hg_info(__file__, detailed=True)
+        get_git_info(__file__)
+        get_svn_info(__file__)
+        get_hg_info(__file__)
         get_dropbox_path()
 
         good_path = OPENSSL
@@ -2029,6 +1975,72 @@ class Tests(object):
 
         test_codec.register(default_codec)
         assert len(list(test_codec.keys())) == 2
+        with pytest.raises(ValueError):
+            test_codec.register(default_codec)  # already regd
+
+        bad = default_codec.copy()
+        bad['_encrypt_rsa_aes256cbc'] = 'something not callable'
+        with pytest.raises(ValueError):
+            test_codec.register(bad)
+
+        # too short / bad keys:
+        bad1 = {'_en': _encrypt_rsa_aes256cbc}
+        bad2 = {'_foo': _decrypt_rsa_aes256cbc}
+        with pytest.raises(ValueError):  # too short
+            test_codec.register(bad1)
+        with pytest.raises(ValueError):  # not _enc or _dec
+            test_codec.register(bad2)
+
+        # unicode not convertable to ascii:
+        bad_key = u'_encrypt_☢☢☢_aes256cbc'
+        with pytest.raises(UnicodeEncodeError):
+            str(bad_key)
+        bad = {bad_key: _encrypt_rsa_aes256cbc}
+        with pytest.raises(ValueError):
+            test_codec.register(bad)
+
+        # unicode convertable to ascii:
+        test_codec2 = PFSCodecRegistry()
+        ok = {u'_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
+        str(list(ok.keys())[0])
+        test_codec2.register(ok)
+
+    def test_add_new_codec(self):
+        import codecs
+        global _encrypt_rot13
+        global _decrypt_rot13
+
+        def _encrypt_rot13(dataFile, *args, **kwargs):
+            stuff = open(dataFile, 'rb').read()
+            with open(dataFile, 'wb') as fd:
+                fd.write(codecs.encode(stuff, 'rot_13'))
+            return dataFile
+        _decrypt_rot13 = _encrypt_rot13  # == fun fact
+
+        rot13 = {'_encrypt_rot13': _encrypt_rot13,
+                 '_decrypt_rot13': _decrypt_rot13}
+        codec.register(rot13)
+        assert '_encrypt_rot13' in list(codec.keys())
+        assert '_decrypt_rot13' in list(codec.keys())
+        clearText = 'clearText.txt'
+        secret = 'la la la, sssssh!'
+        with open(clearText, 'wb') as fd:
+            fd.write(secret)
+        _decrypt_rot13(_encrypt_rot13(clearText))
+        extracted = open(clearText, 'rb').read()
+        assert extracted == secret
+        # not working yet, due to encrypt() expect a pubkey, etc:
+        # decrypt(encrypt(clearText, encMethod='_encrypt_rot13'))
+
+        # test whether can register just a _dec but not _enc function:
+        codec.unregister(rot13)
+        dec_rot13 = {'_decrypt_rot13': _decrypt_rot13}
+        codec.register(dec_rot13)
+        enc_rot13 = {'_encrypt_rot13': _encrypt_rot13}
+        codec.register(enc_rot13)  # OK because dec is already there
+        codec.unregister(rot13)
+        with pytest.raises(ValueError):
+            codec.register(enc_rot13)  # fails because dec is no longer there
 
     def test_bit_count(self):
         # bit count using a known pub key
@@ -2090,7 +2102,7 @@ class Tests(object):
         with pytest.raises(PaddingError):
             pad(tmp1, -1)  # should be a byte mismatch at this point
 
-    def test_rsautl(self):
+    def test_use_rsautl(self):
         # check use_rsautl
         global use_rsautl
         use_rsautl = False
@@ -2148,41 +2160,42 @@ class Tests(object):
             pad(tmpmax)
         with pytest.raises(ValueError):  # fake pubkey, just use tmpmax again
             encrypt(tmpmax, tmpmax)
+        with pytest.raises(ValueError):
+            hmac_sha256('a key', tmpmax)
         MAX_FILE_SIZE = MAX_restore
 
     def test_big_file(self):
         # by default, tests a file just over the LRG_FILE_WARN limit (17M)
-        # tweak to create encrypt & decrypt a 4G file, ~15G disk space, ~13min
+        # uncomment to create encrypt & decrypt a 8G file, takes a while
 
-        bs = 1024  # block size
-        #count = MAX_FILE_SIZE // 2 // bs  # 4G total size
-        count = 1 + LRG_FILE_WARN // bs  # to test that warnings are triggered
-        #count = 1  # uncomment to test the test
-        size = bs * count  # bytes
-
-        # make a big ol' file:
-        try:
-            orig = 'bigfile.zeros'
-            enc = 'bigfile' + ARCHIVE_EXT
-            if sys.platform == 'win32':
+        bs = 4096  # block size
+        zeros = b'\0' * bs
+        test_counts = [1 + LRG_FILE_WARN // bs]  # size warning
+        #test_counts.append(MAX_FILE_SIZE // bs)  # 8G file test
+        #test_counts.append(1)  # test the test
+        for count in test_counts:
+            size = bs * count  # bytes
+            # make a big ol' file:
+            try:
+                orig = 'bigfile.zeros'
+                enc = 'bigfile' + ARCHIVE_EXT
                 with open(orig, 'wb') as fd:
-                    zeros = b'\0' * bs
                     for i in range(count):
                         fd.write(zeros)
-            else:
-                _sys_call(['dd', 'if=/dev/zero', 'of=%s' % orig,
-                      'bs=%d' % bs, 'count=%d' % count])
-            pub, priv, pphr = self._known_values()[:3]
-            encrypt(orig, pub)
-            bigfile_size = getsize(enc)
-            decrypt(enc, priv, pphr)
-            bigfile_zeros_size = getsize(orig)
-        finally:
-            os.remove(orig)
-            os.remove(enc)
-            os.remove('%s%s' % (orig, META_EXT))
-        assert bigfile_size > size
-        assert bigfile_zeros_size == size
+                # not much faster at least for LRG_FILE_WARN:
+                #    _sys_call(['dd', 'if=/dev/zero', 'of=%s' % orig,
+                #          'bs=%d' % bs, 'count=%d' % count])
+                pub, priv, pphr = self._known_values()[:3]
+                encrypt(orig, pub)
+                bigfile_size = getsize(enc)
+                decrypt(enc, priv, pphr)
+                bigfile_zeros_size = getsize(orig)
+            finally:
+                os.remove(orig)
+                os.remove(enc)
+                os.remove('%s%s' % (orig, META_EXT))
+            assert bigfile_size > size
+            assert bigfile_zeros_size == size
 
     def test_encrypt_decrypt(self):
         # Lots of tests here (just to avoid re-generating keys a lot)
@@ -2420,18 +2433,22 @@ class Tests(object):
         _set_file_permissions('no file test only', PERMISSIONS)
 
     def test_hmac(self):
-        # verify openssl hmac usage against a widely used example:
+        # verify pfs hmac implementation against a widely used example:
         key = 'key'
         value = "The quick brown fox jumps over the lazy dog"
         hm = 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
-        hb = '69d6cdc2fef262d48a4b012df5327e9b1679b6e3c95b05c940a18374b059a5e7'
         tmp = 'hmac_test no unicode'
         with open(tmp, 'wb+') as fd:
             fd.write(value)
         hmac_openssl = hmac_sha256(key, tmp)
-        # avoid '==' to test because openssl 1.0.x returns this:
+        # openssl 1.0.x returns this:
         # 'HMAC-SHA256(filename)= f7bc83f430538424b13298e6aa6fb143e97479db...'
         assert hmac_openssl.endswith(hm)
+        assert hmac_openssl.split(')= ')[-1] == hm
+
+        # bad key, file:
+        # test of hmac file MAX_SIZE is in test_max_size_limit
+        assert hmac_sha256(None, tmp) is None
 
     def test_command_line(self):
         # send encrypt and decrypt commands via command line
@@ -2565,43 +2582,6 @@ class Tests(object):
         code, links, __ = destroy(tw_path)
         assert links == numlinks + 1  # +1 for itself
         assert links == hardlinks
-
-    def test_add_new_codec(self):
-        import codecs
-        global _encrypt_rot13
-        global _decrypt_rot13
-
-        def _encrypt_rot13(dataFile, *args, **kwargs):
-            stuff = open(dataFile, 'rb').read()
-            with open(dataFile, 'wb') as fd:
-                fd.write(codecs.encode(stuff, 'rot_13'))
-            return dataFile
-        _decrypt_rot13 = _encrypt_rot13  # == fun fact
-
-        rot13 = {'_encrypt_rot13': _encrypt_rot13,
-                 '_decrypt_rot13': _decrypt_rot13}
-        codec.register(rot13)
-        assert '_encrypt_rot13' in list(codec.keys())
-        assert '_decrypt_rot13' in list(codec.keys())
-        clearText = 'clearText.txt'
-        secret = 'la la la, sssssh!'
-        with open(clearText, 'wb') as fd:
-            fd.write(secret)
-        _decrypt_rot13(_encrypt_rot13(clearText))
-        extracted = open(clearText, 'rb').read()
-        assert extracted == secret
-        # not working yet, due to encrypt() expect a pubkey, etc:
-        # decrypt(encrypt(clearText, encMethod='_encrypt_rot13'))
-
-        # test whether can register just a _dec but not _enc function:
-        codec.unregister(rot13)
-        dec_rot13 = {'_decrypt_rot13': _decrypt_rot13}
-        codec.register(dec_rot13)
-        enc_rot13 = {'_encrypt_rot13': _encrypt_rot13}
-        codec.register(enc_rot13)  # OK because dec is already there
-        codec.unregister(rot13)
-        with pytest.raises(ValueError):
-            codec.register(enc_rot13)  # fails because dec is no longer there
 
     def test_8192_bit_keys(self):
         pub = 'pub_8192.pem'
@@ -2757,30 +2737,43 @@ class Tests(object):
         recoveredText = open(dataDecNested).read()
         assert recoveredText == secretText
 
-    def test_no_decrypt_in_dropbox(self):
+    def test_dropbox_stuff(self):
         # assumes that is_in_dropbox works correctly (returns Dropbox folder)
         # this test assesses whether decrypt will refuse to proceed
         global dropbox_path
         orig = dropbox_path
 
-        if not get_dropbox_path():
-            dropbox_path = abspath('.')  # fake path
+        dropbox_path = abspath('.')  # fake path
         with pytest.raises(DecryptError):
             decrypt(os.path.join(dropbox_path, 'test'), 'a', 'b')
         dropbox_path = orig  # restore real path, if any
+
+        dropbox_path = None
+        if sys.platform != 'win32':
+            host_db = os.path.expanduser('~/.dropbox/host.db')
+            # moves your actual dropbox locator; auto-rebuilt by DB if lost
+            try:
+                os.rename(host_db, host_db + '.orig')
+                get_dropbox_path()
+                assert is_in_dropbox('.') == False  # bc no dropbox now
+            finally:
+                os.rename(host_db + '.orig', host_db)
+            assert dropbox_path == False
+
+        dropbox_path = orig
 
 
 # Basic set-up (order matters) ------------------------------------------------
 logging, logging_t0 = _setup_logging()
 if not user_can_link:
-    logging.warning('%s: No admin priv; cannot check hardlinks' % lib_name)
+    logging.warning('%s: User cannot check hardlinks' % lib_name)
 
 # set OPENSSL path, openssl_version, use_rsautl:
 if args and args.openssl:
     set_openssl(args.openssl)
 else:
     set_openssl()
-# set destroy_TOOL path, destroy_OPTS; don't think we need an arg, easy to add:
+# set destroy_TOOL path, destroy_OPTS; don't think we need an arg:
 set_destroy()
 
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
