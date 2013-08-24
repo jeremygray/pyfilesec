@@ -92,7 +92,7 @@ def _parse_args():
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
     parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
-    parser.add_argument('-g', '--gc', action='store_true', help='debug with gc (garbage collection) debug', default=False)
+    parser.add_argument('-g', '--gc', action='store_true', help='debug will set gc.DEBUG_LEAK (garbage collection)', default=False)
 
     return parser.parse_args()
 
@@ -237,7 +237,6 @@ class PFSCodecRegistry(object):
         """
         if self.is_registered(fxn_name):
             return self._functions[fxn_name]
-        return None
 
     def is_registered(self, fxn_name):
         """Returns True if `fxn_name` is registered; validated at registration.
@@ -390,7 +389,8 @@ def set_destroy():
         destroy_TOOL = _sys_call(['which', 'shred'])
         destroy_OPTS = ('-f', '-u', '-n', '7')
     elif sys.platform in ['win32']:
-        default = os.path.join(lib_dir, '_sdelete.bat')
+        app_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
+        default = os.path.join(app_lib_dir, '_sdelete.bat')
         if not isfile(default):
             guess = _sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
             if not guess.strip().endswith('sdelete.exe'):
@@ -1819,40 +1819,14 @@ class Tests(object):
         with pytest.raises(RuntimeError):
             set_openssl('junk.glop')
         set_openssl(good_path)
-        if sys.platform in ['win32'] and OPENSSL.endswith('.bat'):
-            # exercise more code by forcing a reconstructon of the .bat file
-            os.unlink(OPENSSL)
-            set_openssl()
+        # exercise more code by forcing a reconstructon of the .bat files:
+        if sys.platform in ['win32']:
+            if OPENSSL.endswith('.bat'):
+                os.unlink(OPENSSL)
+            if destroy_TOOL.endswith('.bat'):
+                os.unlink(destroy_TOOL)
+        set_openssl()
         set_destroy()
-
-        global args
-        real_args = sys.argv
-
-        # test genRsaKeys
-        sys.argv = [__file__, 'genrsa']
-        args = _parse_args()
-        pub, priv = genRsaKeys(interactive=False)
-
-        # induce some badness to increase test cov: pub==priv, existing priv:
-        sys.argv = [__file__, 'genrsa', '--pub', priv, '--priv', priv]
-        args = _parse_args()
-        pu, pr = genRsaKeys(interactive=False)
-
-        # the test is that we won't overwrite existing priv
-        with open(priv, 'wb') as fd:
-            fd.write('a')
-        assert isfile(priv)  # or can't test
-        sys.argv = [__file__, 'genrsa', '--priv', priv]
-        args = _parse_args()
-        pu, pr = genRsaKeys(interactive=False)
-        assert (pu, pr) == (None, None)
-
-        sys.argv = [__file__, '--pad', 'no file', '--verbose']
-        args = _parse_args()
-        log_test, log_test_t0 = _setup_logging()
-        log_test.debug('trigger coverage of debug log')
-
-        sys.argv = real_args
 
     def test_main(self):
         # similar to test_command_line; this counts towards coverage
@@ -2003,6 +1977,8 @@ class Tests(object):
         ok = {u'_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
         str(list(ok.keys())[0])
         test_codec2.register(ok)
+
+        assert test_codec2.get_function('key not in codec') == None
 
     def test_add_new_codec(self):
         import codecs
@@ -2387,6 +2363,37 @@ class Tests(object):
         # Good decMethod should work:
         dataDec = decrypt(new_enc, priv1, pphr1,
                           dec_method='_decrypt_rsa_aes256cbc')
+
+    def test_genRsaKeys(self):
+        # set sys.argv to test arg usage; similar in test_main()
+        global args
+        real_args = sys.argv
+
+        # test genRsaKeys
+        sys.argv = [__file__, 'genrsa']
+        args = _parse_args()
+        pub, priv = genRsaKeys(interactive=False)
+
+        # induce some badness to increase test cov: pub==priv, existing priv:
+        sys.argv = [__file__, 'genrsa', '--pub', priv, '--priv', priv]
+        args = _parse_args()
+        pu, pr = genRsaKeys(interactive=False)
+
+        # the test is that we won't overwrite existing priv
+        with open(priv, 'wb') as fd:
+            fd.write('a')
+        assert isfile(priv)  # or can't test
+        sys.argv = [__file__, 'genrsa', '--priv', priv]
+        args = _parse_args()
+        pu, pr = genRsaKeys(interactive=False)
+        assert (pu, pr) == (None, None)
+
+        sys.argv = [__file__, '--pad', 'no file', '--verbose']
+        args = _parse_args()
+        log_test, log_test_t0 = _setup_logging()
+        log_test.debug('trigger coverage of debug log')
+
+        sys.argv = real_args
 
     def test_compressability(self):
         # idea: check that encrypted is not compressable, cleartext is
