@@ -1435,7 +1435,7 @@ def sign(filename, priv, pphr=None, out=None):
     sig = open(sig_out, 'rb').read()
 
     if out:
-        with open(out, 'wb)') as fd:
+        with open(out, 'wb') as fd:
             fd.write(b64encode(sig))
         return out
     return b64encode(sig)
@@ -1874,6 +1874,10 @@ class Tests(object):
         with pytest.raises(RuntimeError):
             set_openssl('junk.glop')
         set_openssl(good_path)
+        if sys.platform in ['win32'] and OPENSSL.endswith('.bat'):
+            # exercise more code by forcing a reconstructon of the .bat file
+            os.unlink(OPENSSL)
+            set_openssl()
         set_destroy()
 
         global args
@@ -1994,6 +1998,10 @@ class Tests(object):
             # test whether archive works:
             t = make_archive(filename)
 
+            if sys.platform in ['win32']:
+                continue
+                # otherwise get annoying tmp files
+
             # test whether encrypt can handle it:
             pub, priv, pphr = self._known_values()[:3]
             enc = encrypt(filename, pub)  # tarfile fails here, bad filename
@@ -2001,6 +2009,8 @@ class Tests(object):
 
             dec = decrypt(enc, priv, pphr)  # DecryptError if in Dropbox = good
             assert stuff == open(dec, 'rb').read()
+        if sys.platform in ['win32']:
+            pytest.skip()
 
     def test_codec_registry(self):
         # Test basic set-up:
