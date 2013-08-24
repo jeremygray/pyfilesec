@@ -336,15 +336,17 @@ def set_openssl(path=None):
         OPENSSL = os.path.join(app_lib_dir, bat_name)
         if not exists(OPENSSL):
             logging.info('no working %s file; trying to recreate' % bat_name)
-            default = 'C:\\OpenSSL-Win32\\bin'
             openssl_expr = 'XX-OPENSSL_PATH-XX'
-            bat = """@echo off
+            bat_template = """@echo off
+                REM  -- pyFileSec batch file for using openssl.exe --
+
                 set PATH=""" + openssl_expr + """;%PATH%
                 set OPENSSL_CONF=""" + openssl_expr + """\\openssl.cfg
-                START "" /b /wait openssl.exe %*"""
-            default = bat.replace(openssl_expr, default).replace('    ', '')
+                START "" /b /wait openssl.exe %*""".replace('    ', '')
+            default = 'C:\\OpenSSL-Win32\\bin'
+            bat = bat_template.replace(openssl_expr, default)
             with open(OPENSSL, 'wb') as fd:
-                fd.write(default)
+                fd.write(bat)
             test = _sys_call([OPENSSL, 'version'])
             if not test.startswith('OpenSSL'):
                 # locate and cache result, takes 5-6 seconds:
@@ -355,7 +357,7 @@ def set_openssl(path=None):
                            'Please install under C:\ and try again.')
                 guess = where_out.splitlines()[0]  # take first match
                 guess_path = guess.replace(os.sep + 'openssl.exe', '')
-                where_bat = bat.replace(openssl_expr, guess_path)
+                where_bat = bat_template.replace(openssl_expr, guess_path)
                 with open(OPENSSL, 'wb') as fd:
                     fd.write(where_bat)
         logging.info('will use .bat file for OpenSSL: %s' % OPENSSL)
@@ -396,18 +398,19 @@ def set_destroy():
             if not guess.strip().endswith('sdelete.exe'):
                 _fatal('Failed to find sdelete.exe. Please install ' +
                        'under C:\\, run it manually to accept the terms.')
-            bat = """@echo off
-                START "" /b /wait SDELETE %*""".replace('SDELETE', guess)
+            bat_template = """@echo off
+                REM  -- pyFileSec batch file for using sdelete.exe --
+
+                START "" /b /wait XSDELETEX %*""".replace('    ', '')
+            bat = bat_template.replace('XSDELETEX', guess)
             with open(default, 'wb') as fd:
                 fd.write(bat)
         destroy_TOOL = default
         sd_version = _sys_call([destroy_TOOL]).splitlines()[0]
         logging.info('Found ' + sd_version)
         destroy_OPTS = ('-q', '-p', '7')
-    else:
-        raise NotImplementedError()
     if not isfile(destroy_TOOL):
-        destroy_TOOL = ''
+        raise NotImplementedError("Can't find a secure file-removal tool")
 
     logging.info('destroy: use %s %s' % (destroy_TOOL, ' '.join(destroy_OPTS)))
 
@@ -1680,6 +1683,11 @@ def get_git_info(path):
     if not path or not exists(path):
         return False
 
+    try:
+        _sys_call(['git'])
+    except OSError:
+        # no git
+        return False
     cmd = ['git', 'ls-files', abspath(path), '--error-unmatch']
     reported = _sys_call(cmd, ignore_error=True)
     is_tracked = bool(reported)
@@ -1822,9 +1830,11 @@ class Tests(object):
         # exercise more code by forcing a reconstructon of the .bat files:
         if sys.platform in ['win32']:
             if OPENSSL.endswith('.bat'):
-                os.unlink(OPENSSL)
+                if 'REM  -- pyFileSec' in open(OPENSSL, 'rb').read():
+                    os.unlink(OPENSSL)
             if destroy_TOOL.endswith('.bat'):
-                os.unlink(destroy_TOOL)
+                if 'REM  -- pyFileSec' in open(destroy_TOOL, 'rb').read():
+                    os.unlink(destroy_TOOL)
         set_openssl()
         set_destroy()
 
@@ -2758,13 +2768,14 @@ class Tests(object):
         if sys.platform != 'win32':
             host_db = os.path.expanduser('~/.dropbox/host.db')
             # moves your actual dropbox locator; auto-rebuilt by DB if lost
-            try:
-                os.rename(host_db, host_db + '.orig')
-                get_dropbox_path()
-                assert is_in_dropbox('.') == False  # bc no dropbox now
-            finally:
-                os.rename(host_db + '.orig', host_db)
-            assert dropbox_path == False
+            if exists(host_db):
+                try:
+                    os.rename(host_db, host_db + '.orig')
+                    get_dropbox_path()
+                    assert is_in_dropbox('.') == False  # bc no dropbox now
+                finally:
+                    os.rename(host_db + '.orig', host_db)
+                assert dropbox_path == False
 
         dropbox_path = orig_path
 
