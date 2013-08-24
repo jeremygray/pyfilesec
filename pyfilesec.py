@@ -1199,9 +1199,8 @@ def decrypt(data_enc, priv, pphr='', dec_method=None):
     if is_in_dropbox(data_enc):
         msg = name + 'file in Dropbox folder (unsafe to decrypt here)'
         _fatal(msg, DecryptError)
-    vc = is_versioned(data_enc)
-    if vc:
-        logging.warning(name + 'file exposed to version control (%s)' % vc)
+    if is_versioned(data_enc):
+        logging.warning(name + 'file exposed to version control')
     if pphr and isfile(pphr):
         pphr = open(abspath(pphr), 'rb').read()
     elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
@@ -2741,12 +2740,12 @@ class Tests(object):
         # assumes that is_in_dropbox works correctly (returns Dropbox folder)
         # this test assesses whether decrypt will refuse to proceed
         global dropbox_path
-        orig = dropbox_path
+        orig_path = dropbox_path
+        dropbox_path = _abspath_winDriveCap('fake_dropbox_path')
 
-        dropbox_path = abspath('.')  # fake path
+        # raise if try to decrypt in Dropbox folder
         with pytest.raises(DecryptError):
             decrypt(os.path.join(dropbox_path, 'test'), 'a', 'b')
-        dropbox_path = orig  # restore real path, if any
 
         dropbox_path = None
         if sys.platform != 'win32':
@@ -2760,7 +2759,7 @@ class Tests(object):
                 os.rename(host_db + '.orig', host_db)
             assert dropbox_path == False
 
-        dropbox_path = orig
+        dropbox_path = orig_path
 
 
 # Basic set-up (order matters) ------------------------------------------------
