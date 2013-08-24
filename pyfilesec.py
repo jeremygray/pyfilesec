@@ -92,6 +92,8 @@ def _parse_args():
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
     parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
+    parser.add_argument('-g', '--gc', action='store_true', help='debug with gc (garbage collection) debug', default=False)
+
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -365,7 +367,7 @@ def set_openssl(path=None):
         _fatal(msg, RuntimeError)
 
     openssl_version = _sys_call([OPENSSL, 'version'])
-    if openssl_version.lower() < 'openssl 0.9.8':
+    if openssl_version.split()[1] < '0.9.8':
         _fatal('OpenSSL too old (%s)' % openssl_version, RuntimeError)
     logging.info('OpenSSL binary  = %s' % OPENSSL)
     logging.info('OpenSSL version = %s' % openssl_version)
@@ -404,8 +406,7 @@ def set_destroy():
         logging.info('Found ' + sd_version)
         destroy_OPTS = ('-q', '-p', '7')
     else:
-        destroy_TOOL = ''
-        destroy_OPTS = ()
+        raise NotImplementedError()
     if not isfile(destroy_TOOL):
         destroy_TOOL = ''
 
@@ -548,7 +549,7 @@ def make_archive(paths, name='', keep=True):
         paths = [paths]
     if not name:
         name = os.path.splitext(paths[0])[0].strip(os.sep) + '.tgz'
-    assert not isfile(name)
+    name = _uniq_file(name)
     tar_fd = tarfile.open(name, "w:gz")
     for p in paths:
         tar_fd.add(p, recursive=True)  # True by default, get whole directory
@@ -1123,6 +1124,7 @@ def _get_dec_method(meta_file, dec_method):
 
     Cross-validate requested dec_method against meta-data, or warn if mismatch.
     """
+    enc_method = 'unknown'
     if meta_file:
         md = load_metadata(meta_file)
         dates = list(md.keys())  # dates of meta-data events
@@ -1145,9 +1147,9 @@ def _get_dec_method(meta_file, dec_method):
             except:
                 dec_method = _dec_from_enc
             logging.info('implicitly want "' + dec_method + '" (meta-data)')
-    if not meta_file or _dec_from_enc == 'unknown':
+    if not meta_file or enc_method == 'unknown':
         # can't infer, no meta-data
-        if not dec_method or _dec_from_enc == 'unknown':
+        if not dec_method or enc_method == 'unknown':
             # ... and nothing explicit either, so go with default:
             logging.info('falling through to default decryption')
             available = [f for f in list(default_codec.keys())
@@ -1248,6 +1250,7 @@ def decrypt(data_enc, priv, pphr='', dec_method=None):
             try:
                 os.rename(meta_file, newMeta)
             except OSError:
+                # if /tmp is on another partition
                 shutil.copy(meta_file, newMeta)
                 if not destroy(meta_file)[0] == pfs_DESTROYED:
                     msg = name + 'destroy tmp meta-data failed: %s' % meta_file
@@ -1424,7 +1427,7 @@ def sign(filename, priv, pphr=None, out=None):
             cmd_SIGN += ['-passin', 'stdin']
         cmd_SIGN += ['-keyform', 'PEM', filename]
     else:
-        raise NotImplementedError
+        _fatal('only rsautl is supported', NotImplementedError)
     if pphr:
         _sys_call(cmd_SIGN, stdin=pphr)
     else:
@@ -1448,7 +1451,7 @@ def verify(filename, pub, sig):
     if use_rsautl:
         cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform', 'PEM']
     else:
-        raise NotImplementedError
+        _fatal('only rsautl is supported', NotImplementedError)
 
     if isfile(sig):
         sig = open(sig, 'rb').read()
@@ -2034,6 +2037,12 @@ class Tests(object):
         with open(tmp2, 'wb') as fd:
             fd.write(orig * 125)
 
+        ok_to_pad(tmp1, 12, pad_count=None)
+
+        # less that PAD_MIN:
+        with pytest.raises(PaddingError):
+            pad(tmp1, size=2)
+
         # bad pad, file would be longer than size
         with pytest.raises(PaddingError):
             pad(tmp1, size=known_size)
@@ -2071,6 +2080,32 @@ class Tests(object):
         with pytest.raises(PaddingError):
             pad(tmp1, -1)  # should be a byte mismatch at this point
 
+    def test_rsautl(self):
+        # check use_rsautl
+        global use_rsautl
+        use_rsautl = False
+
+        # sign verify:
+        kwnPub, kwnPriv, kwnPphr, kwnData = self._known_values()[:4]
+        with pytest.raises(NotImplementedError):
+            sign(kwnData, kwnPriv)
+        with pytest.raises(NotImplementedError):
+            verify(kwnData, kwnPriv, kwnPphr)
+
+        # enc dec
+        with pytest.raises(NotImplementedError):
+            encrypt(kwnPub, kwnPub)
+        use_rsautl = True
+        dataEnc = encrypt(kwnPub, kwnPub, keep=True)
+        use_rsautl = False
+        with pytest.raises(NotImplementedError):
+            decrypt(dataEnc, kwnPriv, kwnPphr)
+
+        with pytest.raises(NotImplementedError):
+            _genRsa()
+
+        use_rsautl = True
+
     def test_signatures(self):
         # sign a known file with a known key. can we get known signature?
         __, kwnPriv, kwnPphr, datum, kwnSigs = self._known_values()
@@ -2083,6 +2118,12 @@ class Tests(object):
             assert sig1 == kwnSigs[0]
         else:
             assert sig1 == kwnSigs[1]
+
+        # test `out` returns filename, with sig in the file
+        out = 'sig.out'
+        sig1 = sign(kwnData, kwnPriv, pphr=kwnPphr, out=out)
+        assert sig1 == out
+        assert open(out, 'rb').read() in kwnSigs
 
     def test_max_size_limit(self):
         # manual test: works with an actual 1G (MAX_FILE_SIZE) file as well
@@ -2160,6 +2201,18 @@ class Tests(object):
         # file name match: can FAIL due to utf-8 encoding issues
         assert os.path.split(dataEncDec)[-1] == datafile
 
+        # send some bad parameters:
+        with pytest.raises(ValueError):
+            dataEnc = encrypt(datafile, pub2, enc_method='abc')
+        with pytest.raises(ValueError):
+            dataEnc = encrypt(datafile, pub=None)
+        with pytest.raises(ValueError):
+            dataEnc = encrypt(datafile + ' oops', pub2)
+        with pytest.raises(ValueError):
+            dataEnc = encrypt('', pub2)
+        with pytest.raises(ValueError):
+            dataEnc = encrypt(datafile, pub2, keep=17)
+
         # test decrypt with GOOD passphrase:
         dataEnc = encrypt(datafile, pub1)
         dataEncDec = decrypt(dataEnc, priv1, pphr=pphr1)
@@ -2168,6 +2221,22 @@ class Tests(object):
         assert recoveredText == secretText
         # file name match: can FAIL due to utf-8 encoding issues
         assert os.path.split(dataEncDec)[-1] == datafile
+
+        # test fall-through decryption method:
+        dec_method = _get_dec_method(None, 'unknown')
+        assert dec_method == '_decrypt_rsa_aes256cbc'
+        # test missing enc-method in meta-data
+        md = 'md'
+        with open(md, 'wb') as fd:
+            fd.write(log_metadata(NO_META_DATA))
+        dec_method = _get_dec_method(md, 'unknown')
+        assert dec_method == '_decrypt_rsa_aes256cbc'
+
+        # test malformed archive:
+        archname = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
+        bad_arch = make_archive(datafile, archname)  # datafile extension bad
+        with pytest.raises(InternalFormatError):
+            decrypt(bad_arch, priv1, pphr1)
 
         # test decrypt with good passphrase in a FILE:
         dataEnc = encrypt(datafile, pub1)
@@ -2179,9 +2248,11 @@ class Tests(object):
         # file contents match:
         assert recoveredText == secretText
 
-        # a BAD passphrase should fail:
+        # a BAD or MISSING passphrase should fail:
         with pytest.raises(PrivateKeyError):
             decrypt(dataEnc, priv1, pphr=pphr2)
+        with pytest.raises(DecryptError):
+            decrypt(dataEnc, priv1)
 
         # nesting of decrypt(encrypt()) should work:
         dataDecNested = decrypt(encrypt(datafile, pub1), priv1, pphr=pphr1)
@@ -2711,16 +2782,20 @@ def _main():
     logging.info("%s with %s" % (lib_name, openssl_version))
     if args.filename == 'debug':
         """Run tests with verbose logging; check for memory leaks using gc.
-            $ python pyfilesec.py debug > results.txt
+            $ python pyfilesec.py debug --gc >& saved
         """
         global pytest
         import pytest
-        import gc
-        gc.enable()
-        gc.set_debug(gc.DEBUG_LEAK)
 
-        os.mkdir('debug_' + lib_name)
-        os.chdir('debug_' + lib_name)  # intermediate files get left inside
+        dbg_dir = 'debug_' + lib_name
+        shutil.rmtree(dbg_dir)
+        os.mkdir(dbg_dir)
+        os.chdir(dbg_dir)  # intermediate files get left inside
+        if args.gc:
+            import gc
+            gc.enable()
+            gc.set_debug(gc.DEBUG_LEAK)
+
         ts = Tests()
         tests = [t for t in dir(ts) if t.startswith('test_')]
         for test in tests:
