@@ -6,6 +6,7 @@ v0.2.02
 ---------------------
 * BF win 7 interactive python was not happy with platform.python_version; use sys.version instead
 * IMPROVED documentation
+* CHANGED API: `old` removed from decrypt, `pub`/`priv` order switched for rotate, `npub` -> `pub` for rotate
 
 Available as a package (pypi.python.org/pypi/pyFileSec/):
 v0.2.01

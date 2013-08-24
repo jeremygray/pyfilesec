@@ -82,7 +82,6 @@ def _parse_args():
     parser.add_argument('--openssl', help='specify path of the openssl binary to use')
     parser.add_argument('-o', '--out', help='path name for generated (output) file')
     parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
-    parser.add_argument('-U', '--npub', help='path to new public key (.pem file)')
     parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
     parser.add_argument('-V', '--nprv', help='path to new private key (--rotate only)')
     parser.add_argument('-r', '--pphr', help='path to file containing passphrase for private key')
@@ -1163,7 +1162,7 @@ def _get_dec_method(meta_file, dec_method):
     return dec_method
 
 
-def decrypt(data_enc, priv, pphr='', out='', dec_method=None):
+def decrypt(data_enc, priv, pphr='', dec_method=None):
     """Decrypt a file that was encoded using ``encrypt()``.
 
     To get the data back, need two files: ``data.enc`` and ``privkey.pem``.
@@ -1186,8 +1185,6 @@ def decrypt(data_enc, priv, pphr='', out='', dec_method=None):
             encryption; ``.pem`` format
         `pphr` :
             passphrase for the private key (as a string, or filename)
-        `out` :
-            path to use for the output (decrypted plain-text) file
         `dec_method` :
             name of a decruption method that has been registered in
             the ``codec`` (see ``PFSCodecRegistry``)
@@ -1231,8 +1228,7 @@ def decrypt(data_enc, priv, pphr='', out='', dec_method=None):
 
         # Decrypt (into same new tmp dir):
         DECRYPT_FXN = codec.get_function(dec_method)
-        data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, out,
-                                  OPENSSL=OPENSSL)
+        data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, OPENSSL=OPENSSL)
 
         # Rename decrypted and meta files (mv to dest_dir):
         _new_path = os.path.join(dest_dir, os.path.basename(data_dec))
@@ -1240,6 +1236,7 @@ def decrypt(data_enc, priv, pphr='', out='', dec_method=None):
         try:
             os.rename(data_dec, clear_text)
         except OSError:
+            # if /tmp is on another partition
             shutil.copy(data_dec, clear_text)
             if not destroy(data_dec)[0] == pfs_DESTROYED:
                 msg = name + 'destroy tmp clear txt failed: %s' % data_dec
@@ -1274,31 +1271,23 @@ def decrypt(data_enc, priv, pphr='', out='', dec_method=None):
     return abspath(clear_text)
 
 
-def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
-                           out='', OPENSSL=''):
+def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
+
+    if present, pphr must be the actual password, not a filename
     """
     _set_umask()
     name = '_decrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
 
     # set the name for decrypted file:
-    if out:
-        data_dec = out
-    else:
-        data_dec = os.path.splitext(abspath(data_enc))[0]
-    #else:
-    #    data_dec = abspath(data_enc)
+    data_dec = os.path.splitext(abspath(data_enc))[0]
 
     # set up the command to retrieve password from pwdFileRsa
     if use_rsautl:
-        cmdRSA = [OPENSSL, 'rsautl',
-                  '-in', pwd_rsa,
-                  '-inkey', priv]
+        cmdRSA = [OPENSSL, 'rsautl', '-in', pwd_rsa, '-inkey', priv]
         if pphr:
-            if isfile(pphr):
-                logging.warning(name + ': reading passphrase from file')
-                pphr = open(pphr, 'rb').read()
+            # if isfile(pphr):  # always handled by decrypt
             cmdRSA += ['-passin', 'stdin']
         cmdRSA += [RSA_PADDING, '-decrypt']
     else:
@@ -1306,18 +1295,13 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
 
     # set up the command to decrypt the data using pwd:
     cmdAES = [OPENSSL, 'enc', '-d', '-aes-256-cbc', '-a',
-              '-in', data_enc,
-              '-out', data_dec,
-              '-pass', 'stdin']
+              '-in', data_enc, '-out', data_dec, '-pass', 'stdin']
 
     # decrypt pwd (digital envelope "session" key) to RAM using private key
     # then use pwd to decrypt the ciphertext file (data_enc):
     try:
-        if pphr and not isfile(pphr):
-            pwd, se_RSA = _sys_call(cmdRSA, stdin=pphr, stderr=True)  # want se
-        else:
-            pwd, se_RSA = _sys_call(cmdRSA, stderr=True)  # want se to parse it
-        __, se_AES = _sys_call(cmdAES, stdin=pwd, stderr=True)
+        pwd, se_RSA = _sys_call(cmdRSA, stdin=pphr, stderr=True)
+        ___, se_AES = _sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
         if isfile(data_dec):
             destroy(data_dec)
@@ -1347,10 +1331,10 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None,
     return abspath(data_dec)
 
 
-def rotate(data_enc, priv, pub, pphr=None,  # priv pphr = old, pub = new
+def rotate(data_enc, pub, priv, pphr=None,  # priv pphr = old, pub = new
            priv_new=None, pphr_new=None,
            hmac_new=None, pad_new=None):
-    """Swap old encryption for new (decrypt-then-re-encrypt).
+    """Swap old encryption (priv) for new (pub), i.e., decrypt-then-re-encrypt.
 
     Returns the path to the "same" underlying file (i.e., same contents, new
     encryption). New meta-data are added alongside the original meta-data. If
@@ -1955,7 +1939,7 @@ class Tests(object):
         args = _parse_args()
         _main()
 
-        sys.argv = [__file__, '--rotate', '--npub', pub, '-z', '0',
+        sys.argv = [__file__, '--rotate', '--pub', pub, '-z', '0',
                     '--priv', priv, '--pphr', pphr, tmp + ARCHIVE_EXT]
         args = _parse_args()
         _main()
@@ -2236,10 +2220,10 @@ class Tests(object):
 
         # Rotate encryption including padding change:
         first_enc = encrypt(datafile, pub1, date=False)
-        second_enc = rotate(first_enc, priv1, pub2, pphr=pphr1,
+        second_enc = rotate(first_enc, pub2, priv1, pphr=pphr1,
                             pad_new=8192)
         # destroy orig if priv_new provided == prove it can be decrypted
-        third_enc = rotate(second_enc, priv2, pub1, pphr=pphr2,
+        third_enc = rotate(second_enc, pub1, priv2, pphr=pphr2,
                            priv_new=priv1, pphr_new=pphr1,
                            pad_new=16384, hmac_new='key')
         # padding affects .enc file size, values vary a little from run to run
@@ -2397,7 +2381,7 @@ class Tests(object):
         # Rotate:
         assert isfile(dataEnc)
         cmdLineRotate = [sys.executable, pathToSelf, dataEnc, '--rotate',
-                      '--npub', pub1, '-z', str(getsize(datafile) * 2),
+                      '--pub', pub1, '-z', str(getsize(datafile) * 2),
                       '--priv', priv1, '--pphr', pphr1]
         rot_out = _sys_call(cmdLineRotate)
         assert isfile(rot_out)
@@ -2782,7 +2766,7 @@ def _main():
         elif args.rotate:
             fxn = rotate
             kw.update({'priv': args.priv})
-            kw.update({'pub': args.npub})
+            kw.update({'pub': args.pub})
             args.pphr and kw.update({'pphr': args.pphr})
             args.nprv and kw.update({'priv_new': args.nprv})
             args.nppr and kw.update({'pphr_new': args.nppr})
