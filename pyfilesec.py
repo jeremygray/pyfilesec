@@ -80,7 +80,7 @@ class DecryptError(PyFileSecError):
 class PrivateKeyError(PyFileSecError):
     '''Error to indicate that loading a private key failed.'''
 
-class InternalFormatError(PyFileSecError):
+class SecFileArchiveFormatError(PyFileSecError):
     '''Error to indicate bad format or file name inside archive file.'''
 
 class PaddingError(PyFileSecError):
@@ -532,12 +532,12 @@ class SecFile(object):
     @property
     def is_encrypted(self):
         # placeholder; will detect format regardless of name
-        return isinstance(self.filename, basestring) and self.filename.endswith('.enc')
+        return isinstance(self.file, basestring) and self.file.endswith('.enc')
 
     @property
     def is_plaintext(self):
         # placeholder; will detect format regardless of name
-        return isinstance(self.filename, basestring) and not self.filename.endswith('.enc')
+        return isinstance(self.file, basestring) and not self.file.endswith('.enc')
 
     @property
     def openssl(self):
@@ -553,17 +553,17 @@ class SecFile(object):
 
     @property
     def size(self):
-        if not hasattr(self, 'filename') or not self.filename:
+        if not hasattr(self, 'file') or not self.file:
             return None
-        return getsize(self.filename)
+        return getsize(self.file)
 
     def reset(self):
         """Reinitialize, preserving keys and openssl settings, eg. post destroy()
         """
         self.__init__(infile=None, pub=self.pub,
                       priv=self.priv, pphr=self.pphr, openssl=self.openssl)
-        if hasattr(self, 'filename'):
-            self.filename = None
+        if hasattr(self, 'file'):
+            self.file = None
         if hasattr(self, 'status'):
             self.status = None
 
@@ -577,19 +577,33 @@ class SecFile(object):
         if not isinstance(infile, basestring):
             _fatal('infile expected as a string', AttributeError)
         logging.info(name + ': received infile=%s' % infile)
-        self.filename = _abspath(infile)
-        self._set_file_permissions(0o600)
+        self.file = _abspath(infile)
+        self.permissions = 0o600
         self.status = None
         logging.debug(name + ': set status None')
 
         return self
 
-    def get_filename(self, infile=None):
+    def get_file(self, infile=None):
+        """Return and optionally set the filename.
+        """
+        # NB self.file is always a path, not a file object
         if infile:
             self.update(infile)
-        if not hasattr(self, 'filename'):
-            self.filename = None
-        return self.filename
+        if not hasattr(self, 'file'):
+            self.file = None
+        return self.file
+
+    def require_file(self, infile=None):
+        """Return the filename, raise error if missing or no such file.
+        """
+        # NB self.file is always a path, not a file object
+        self.get_file(infile)
+        if self.file is None:
+            _fatal('file name required, missing', ValueError)
+        if not isfile(self.file):
+            _fatal('file required, %s not found' % self.file, OSError)
+        return self.file
 
     def pad(self, size=DEFAULT_PAD_SIZE):
         """Append null bytes to ``filename`` until it has length ``size``.
@@ -633,7 +647,7 @@ class SecFile(object):
            if not present
         """
         name = 'pad: '
-        filename = self.get_filename()
+        filename = self.require_file()
         logging.debug(name + 'start')
         size = int(size)
         if 0 < size < PAD_MIN:
@@ -673,7 +687,7 @@ class SecFile(object):
         """Return 0 if ``size`` is not adequate to obscure the file length.
         Else return the (non-zero) size.
         """
-        filename = self.get_filename()
+        filename = self.require_file()
         pad_count = self.pad_len()
         size = max(size, PAD_MIN)
         return max(0, size - (getsize(filename) - pad_count) - PAD_LEN)
@@ -684,7 +698,7 @@ class SecFile(object):
         Returns 0 if bad or missing padding.
         """
         name = 'pad_len'
-        filename = self.get_filename()
+        filename = self.require_file()
         logging.debug(name + ': start, file="%s"' % filename)
         filelen = getsize(filename)
         if filelen < PAD_LEN:
@@ -712,7 +726,7 @@ class SecFile(object):
         Truncates the file to remove padding; does not `destroy` the padding.
         """
         name = 'unpad'
-        filename = self.get_filename()
+        filename = self.require_file()
         logging.debug(name + ': start, file="%s"' % filename)
         filelen = getsize(filename)
         pad_count = self.pad_len()
@@ -833,15 +847,15 @@ class SecFile(object):
         """
         _set_umask()
         name = 'encrypt: '
-        datafile = self.get_filename()
+        datafile = self.require_file()
         pub = self.get_pub(pub)
         logging.debug(name + 'start')
+        if self.is_encrypted:
+            logging.warning(name + "file is already encrypted; encrypting again")
         if not codec.is_registered(enc_method):
             _fatal(name + "requested encMethod '%s' not registered" % enc_method)
         if not pub or not isfile(pub):
             _fatal(name + "no public-key.pem; file '%s' not found" % pub)
-        if not datafile or not isfile(datafile):
-            _fatal(name + "no data; file '%s' not found" % datafile)
 
         # Handle file size constraints:
         size = getsize(datafile)
@@ -884,9 +898,8 @@ class SecFile(object):
         # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc archive:
         fullpath_files = [data_enc, pwd_rsa, metafile]
         files = [os.path.split(f)[1] for f in fullpath_files]
-        archive_name = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
-        arch = _SecFileArchive(archive_name)
-        arch.pack(files, keep=False)
+
+        arch = _SecFileArchive(datafile, files, keep=False)
 
         if not keep:
             # secure-delete unencrypted original, unless encrypt did not succeed:
@@ -971,7 +984,7 @@ class SecFile(object):
         """
         _set_umask()
         name = 'decrypt: '
-        data_enc = self.get_filename()
+        data_enc = self.require_file()
         priv = self.get_priv(priv)
         pphr = self.get_pphr(pphr)
         logging.debug(name + 'start')
@@ -998,10 +1011,10 @@ class SecFile(object):
 
             # Unpack the .enc file bundle into a new tmp dir:
             arch = _SecFileArchive(data_enc)
-            data_aes, pwd_file, meta_file = arch._unpack(data_enc)
+            data_aes, pwd_file, meta_file = arch.unpack(data_enc)
             if not all([data_aes, pwd_file, meta_file]):
                 logging.warn('did not find 3 files in archive %s' % data_enc)
-                # ? or _fatal(msg, InternalFormatError) + suggest rotate() to fix
+                # ? or _fatal(msg, SecFileArchiveFormatError) + suggest rotate() to fix
             tmp_dir = os.path.split(data_aes)[0]
 
             # Get a valid decrypt method, from meta-data or argument:
@@ -1025,7 +1038,7 @@ class SecFile(object):
                 if not destroy(data_dec)[0] == pfs_DESTROYED:
                     msg = name + 'destroy tmp clear txt failed: %s' % data_dec
                     _fatal(msg, DestroyError)
-            perm_str = '0o' + oct(self.get_file_permissions(clear_text))[1:]
+            perm_str = permissions_str(clear_text)
             logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
             if meta_file:
                 newMeta = _uniq_file(clear_text + META_EXT)
@@ -1037,7 +1050,7 @@ class SecFile(object):
                     if not destroy(meta_file)[0] == pfs_DESTROYED:
                         msg = name + 'destroy tmp meta-data failed: %s' % meta_file
                         _fatal(msg, DestroyError)
-                perm_str = '0o' + oct(self.get_file_permissions(newMeta))[1:]
+                perm_str = permissions_str(newMeta)
                 logging.info('meta-data, permissions ' + perm_str + ': ' + newMeta)
         finally:
             try:
@@ -1283,7 +1296,7 @@ class SecFile(object):
         logging.debug(name + ': start, new_file=%s' % new_file)
         if new_file:
             self.update(new_file)
-        filename = self.get_filename()
+        filename = self.get_file()
         #got_file_object = hasattr(filename, 'close')
         #if got_file_object:
         #    filename, file_object = filename.name, filename
@@ -1298,7 +1311,7 @@ class SecFile(object):
         # Try to detect & inform about hardlinks:
         # srm will detect but not affect those links or the inode data
         # shred and fsutil will blast the inode's data, but not unlink other links
-        orig_links = self._get_hardlink_count()
+        orig_links = self.hardlink_count
         if sys.platform != 'win32' and orig_links > 1:
             mount_path = abspath(filename)
             while not os.path.ismount(mount_path):
@@ -1352,27 +1365,37 @@ class SecFile(object):
         self.reset()  # clear everything, including self.status
         return disposition, orig_links, duration
 
-    def get_file_permissions(self, filename):
-        return int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+    def _get_permissions(self):
+        name = '_get_permissions'
+        filename = self.require_file()
+        if sys.platform in ['win32']:
+            perm = -1  #  'win32-not-implemented'
+        else:
+            perm = int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+        logging.debug(name + ': %s %d base10' % (filename, perm))
+        return perm
 
-    def _set_file_permissions(self, mode):
-        name = '_set_file_permissions'
-        filename = self.get_filename()
+    def _set_permissions(self, mode):
+        name = '_set_permissions'
+        filename = self.require_file()
         if sys.platform not in ['win32']:
-            new_value_str = oct(mode)
             os.chmod(filename, mode)
         else:
+            pass
             # import win32security  # looks interesting
             # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
             #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
             # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
             # win32security.GetFileSecurity(filename, info)
             # win32security.SetFileSecurity
-            new_value_str = 'NOT CHANGED'
-        logging.info(name + ': %s %s' % (filename, new_value_str))
+        logging.info(name + ': %s %s' % (filename, permissions_str(filename)))
 
-    def _get_hardlink_count(self):
-        filename = self.get_filename()
+    permissions = property(_get_permissions, _set_permissions, None,
+        "Returns POSIX ugo permissions; win32 not implemented, returns -1")
+
+    @property
+    def hardlink_count(self):
+        filename = self.require_file()
         if sys.platform == 'win32':
             if user_can_link:
                 cmd = ('fsutil', 'hardlink', 'list', filename)
@@ -1389,7 +1412,7 @@ class SecFile(object):
     def is_in_dropbox(self):
         """Return True if the file is within a Dropbox folder.
         """
-        filename = self.get_filename()
+        filename = self.get_file()
         db_path = get_dropbox_path()
         if not db_path:
             inside = False
@@ -1408,7 +1431,7 @@ class SecFile(object):
         Returns a string: 'git', 'svn', 'hg', or ''
         Only approximate: the directory might be versioned, but not this file
         """
-        filename = self.get_filename()
+        filename = self.get_file()
         logging.debug('trying to detect version control (svn, git, hg)')
 
         return any([self.get_svn_info(filename),
@@ -1419,16 +1442,17 @@ class SecFile(object):
         """Report whether a directory or file is in a git repo (version control).
 
         Files can be in the repo directory but not actually tracked by git.
+        Assumes path is not versioned by git if git is not call-able.
         """
         if not path or not exists(path):
             return False
         try:
             _sys_call(['git'])
         except OSError:
-            # no git
+            # no git, not call-able
             return False
         cmd = ['git', 'ls-files', abspath(path)]
-        reported = _sys_call(cmd, ignore_error=True)
+        reported = _sys_call(cmd)
         is_tracked = bool(reported)
 
         logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
@@ -1455,24 +1479,18 @@ class SecFile(object):
         return has_hg_dir
 
 
-def _uniq_file(filename):
-    """Avoid file name collisions by appending a count before extension.
-    """
-    count = 0
-    base, filext = os.path.splitext(filename)
-    while isfile(filename) or os.path.isdir(filename):
-        count += 1
-        filename = base + '_' + str(count) + filext
-    return filename
-
-
 class _SecFileArchive(object):
     """Class for working with an archive .enc file, holding exactly 3 files.
 
     Currently an archive is a normal .tar.gz file.
     """
-    def __init__(self, name=''):
-        self.name = name
+    def __init__(self, name='', paths=None, keep=True):
+        if name:
+            self.name = _uniq_file(os.path.splitext(name)[0] + ARCHIVE_EXT)
+        else:
+            self.name = 'archive' + ARCHIVE_EXT
+        if paths:
+            self.pack(paths, keep=keep)
 
     def pack(self, paths, keep=True):
         """Make a tgz file from a list of paths, set permissions. Directories ok.
@@ -1502,7 +1520,7 @@ class _SecFileArchive(object):
         _unset_umask()
         return self.name
 
-    def _unpack(self, data_enc):
+    def unpack(self, data_enc):
         """Extract files from archive into a tmp dir, return paths to files.
         """
         _set_umask()
@@ -1514,7 +1532,7 @@ class _SecFileArchive(object):
             _fatal("could not find <file>%s '%s'" % (ARCHIVE_EXT, str(data_enc)))
         if not tarfile.is_tarfile(data_enc):
             _fatal(name + ': %s not expected format (.tgz)' % data_enc,
-                   InternalFormatError)
+                   SecFileArchiveFormatError)
 
         # Check for bad internal paths:
         #    can't "with open(tarfile...) as tar" in python 2.6.6
@@ -1523,7 +1541,7 @@ class _SecFileArchive(object):
                     if f.name[0] in ['.', os.sep] or f.name[1:3] == ':\\']
         if badNames:
             _fatal(name + ': bad/dubious internal file names' % os.sep,
-                   InternalFormatError)
+                   SecFileArchiveFormatError)
 
         # Extract:
         tmp_dir = mkdtemp()
@@ -1540,10 +1558,182 @@ class _SecFileArchive(object):
             elif fname.endswith(META_EXT):
                 meta_file = os.path.join(tmp_dir, fname)
             else:
-                _fatal(name + ': unexpected file in archive', InternalFormatError)
+                _fatal(name + ': unexpected file in archive', SecFileArchiveFormatError)
 
         _unset_umask()
         return data_aes, pwdFileRsa, meta_file
+
+
+class GenRSA(object):
+    def __init__(self):
+        pass
+
+    def check_entropy(self):
+        """Basic query for some indication that entropy is available.
+        """
+        if sys.platform == 'darwin':
+            # SecurityServer daemon is supposed to ensure entropy is available:
+            ps = _sys_call(['ps', '-e'])
+            securityd = _sys_call(['which', 'securityd'])  # full path
+            if securityd in ps:
+                e = securityd + ' running'
+            else:
+                e = ''
+            rdrand = _sys_call(['sysctl', 'hw.optional.rdrand'])
+            e += '; rdrand: ' + rdrand
+        elif sys.platform.startswith('linux'):
+            avail = _sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
+            e = 'entropy_avail: ' + avail
+        else:
+            e = '(unknown)'
+        return e
+
+    def generate(self, pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
+        """Generate new RSA pub and priv keys, return paths to files.
+
+        pphr should be a string containing the actual passphrase (if desired).
+        """
+        _set_umask()
+        if use_rsautl:
+            # Generate priv key:
+            cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
+            if pphr:
+                cmdGEN += ['-aes256', '-passout', 'stdin']
+            _sys_call(cmdGEN + [str(bits)], stdin=pphr)
+
+            # Extract pub from priv:
+            cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
+                         '-pubout', '-out', pub]
+            if pphr:
+                cmdEXTpub += ['-passin', 'stdin']
+            _sys_call(cmdEXTpub, stdin=pphr)
+        else:
+            raise NotImplementedError
+
+        _unset_umask()
+        return abspath(pub), abspath(priv)
+
+    def dialog(self, interactive=True):
+        """Command line dialog to generate an RSA key pair, PEM format.
+
+        Launch from the command line::
+
+            % python pyfilesec.py genrsa
+
+        Choose from 2048, 4096, or 8192 bits; 1024 is not secure for medium-term
+        storage, and 16384 bits is not needed (nor is 8192). A passphrase is
+        required, or one will be auto generated and printed to the console (this is
+        the only copy, don't lose it). Ideally, generate a strong passphrase using
+        a password manager (e.g., KeePassX), save there, paste it into the dialog.
+
+        You may only ever need to do this once. You may also want to generate keys
+        for testing purposes, and then generate keys for actual use.
+        """
+        # `interactive=False` is for automated test coverage
+        def _cleanup(msg):
+            print(msg)
+            try:
+                destroy(priv)
+            except:
+                pass
+            try:
+                os.unlink(pub)
+            except:
+                pass
+
+        if not args:
+            return 'generate keys via command line: $ python pyfilesec.py genrsa'
+
+        # use args for filenames if given explicitly:
+        pub = args.pub or abspath(_uniq_file('pub_RSA.pem'))  # ensure unique
+        priv = args.priv or pub.replace('pub_RSA', 'priv_RSA')  # matched pair
+        pub = abspath(pub)
+        priv = abspath(priv)
+        if pub == priv:
+            priv += '_priv.pem'
+
+        if os.path.exists(priv):
+            msg = ('%s ' % lib_name +
+                   'RSA key generation.\n  %s already exists\n' % priv +
+                   '  > Clean up files and try again. Exiting. <')
+            print(msg)
+            return None, None
+
+        msg = ('\n%s: ' % lib_name +
+               'RSA key-pair generation\n\nWill try to create two files:')
+        print(msg)
+        pub_msg = '  pub  = %s' % pub
+        print(pub_msg)
+        priv_msg = '  priv = %s' % priv
+        print(priv_msg)
+        print('\nEnter a passphrase for the private key (16 or more chars)\n'
+              '  or press <return> to auto-generate a passphrase')
+        if interactive:
+            pphr = getpass.getpass('Passphrase: ')
+        else:
+            pphr = ''
+        if pphr:
+            pphr2 = getpass.getpass('same again: ')
+            if pphr != pphr2:
+                print('  > Passphrase mismatch. Exiting. <')
+                return None, None
+            pphr_auto = False
+        else:
+            print('(auto-generating a passphrase)\n')
+            pphr = _printable_pwd(128)  # or a word-based generator?
+            pphr_auto = True
+        if pphr and len(pphr) < 16:
+            print('  > passphrase too short; exiting <')
+            return None, None
+        if interactive:
+            bits = 4096  # default
+            b = input23('Enter the desired RSA key length (2048, 4096, 8192): ')
+            if b in ['2048', '4096', '8192']:
+                bits = int(b)
+        else:
+            bits = 2048
+        bits_msg = '  using %i' % bits
+        if bits > 4096:
+            bits_msg += '; this will take a minute!'
+        print(bits_msg)
+        ent_msg = '  entropy: ' + self.check_entropy()
+        print(ent_msg)
+        print('\nMove the mouse around for 5s (to help generate entropy)')
+        if interactive:
+            try:
+                time.sleep(5)
+            except KeyboardInterrupt:
+                return None, None
+        msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
+        print(msg)
+
+        try:
+            self.generate(pub, priv, pphr, bits)
+        except KeyboardInterrupt:
+            _cleanup('\n  > Removing temp files. Exiting. <')
+            return None, None
+
+        pub_msg = 'public key:  ' + pub
+        print(pub_msg)
+        priv_msg = 'private key: ' + priv
+        print(priv_msg)
+        if pphr_auto:
+            pphr_msg = 'passphrase:  ' + pphr
+        else:
+            pphr_msg = 'passphrase:  (entered by hand)'
+        print(pphr_msg)
+        warn_msg = (' >> Keep the private key private! <<\n' +
+               '  >> Do not lose the passphrase! <<')
+        print(warn_msg)
+        if not interactive:
+            # pick up test coverage
+            _cleanup('')
+            save_pub, save_priv = pub, priv
+            pub = priv = ''
+            _cleanup('')
+            pub, priv = save_pub, save_priv
+
+        return pub, priv
 
 
 def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
@@ -1659,174 +1849,32 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
     return abspath(data_dec)
 
 
-def _entropy_check():
-    """Basic query for some indication that entropy is available.
+
+def permissions_str(filename):
+    if sys.platform in ['win32']:
+        return 'win32-not-implemented'
+    else:
+        perm = int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+        return '0o' + oct(perm)[1:]
+
+
+def _uniq_file(filename):
+    """Avoid file name collisions by appending a count before extension.
+
+    Special case: file.enc.enc --> file.enc_2 rather than file_2.enc
     """
-    if sys.platform == 'darwin':
-        # SecurityServer daemon is supposed to ensure entropy is available:
-        ps = _sys_call(['ps', '-e'])
-        securityd = _sys_call(['which', 'securityd'])  # full path
-        if securityd in ps:
-            e = securityd + ' running'
+    count = 0
+    base, filext = os.path.splitext(filename)
+    if filext == ARCHIVE_EXT:
+        base = filename
+        count = 1
+    while isfile(filename) or os.path.isdir(filename):
+        count += 1
+        if filext == ARCHIVE_EXT:
+            filename = base + '_' + str(count)
         else:
-            e = ''
-        rdrand = _sys_call(['sysctl', 'hw.optional.rdrand'])
-        e += '; rdrand: ' + rdrand
-    elif sys.platform.startswith('linux'):
-        avail = _sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
-        e = 'entropy_avail: ' + avail
-    else:
-        e = '(unknown)'
-    return e
-
-
-def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
-    """Generate new RSA pub and priv keys, return paths to files.
-
-    pphr should be a string containing the actual passphrase (if desired).
-    """
-    _set_umask()
-    if use_rsautl:
-        # Generate priv key:
-        cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
-        if pphr:
-            cmdGEN += ['-aes256', '-passout', 'stdin']
-        _sys_call(cmdGEN + [str(bits)], stdin=pphr)
-
-        # Extract pub from priv:
-        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
-                     '-pubout', '-out', pub]
-        if pphr:
-            cmdEXTpub += ['-passin', 'stdin']
-        _sys_call(cmdEXTpub, stdin=pphr)
-    else:
-        raise NotImplementedError
-
-    _unset_umask()
-    return abspath(pub), abspath(priv)
-
-
-def genRsaKeys(interactive=True):
-    """Command line dialog to generate an RSA key pair, PEM format.
-
-    Launch from the command line::
-
-        % python pyfilesec.py genrsa
-
-    Choose from 2048, 4096, or 8192 bits; 1024 is not secure for medium-term
-    storage, and 16384 bits is not needed (nor is 8192). A passphrase is
-    required, or one will be auto generated and printed to the console (this is
-    the only copy, don't lose it). Ideally, generate a strong passphrase using
-    a password manager (e.g., KeePassX), save there, paste it into the dialog.
-
-    You may only ever need to do this once. You may also want to generate keys
-    for testing purposes, and then generate keys for actual use.
-    """
-    # `interactive=False` is for automated test coverage
-    def _cleanup(msg):
-        print(msg)
-        try:
-            destroy(priv)
-        except:
-            pass
-        try:
-            os.unlink(pub)
-        except:
-            pass
-
-    if not args:
-        return 'generate keys via command line: $ python pyfilesec.py genrsa'
-
-    # use args for filenames if given explicitly:
-    pub = args.pub or abspath(_uniq_file('pub_RSA.pem'))  # ensure unique
-    priv = args.priv or pub.replace('pub_RSA', 'priv_RSA')  # matched pair
-    pub = abspath(pub)
-    priv = abspath(priv)
-    if pub == priv:
-        priv += '_priv.pem'
-
-    if os.path.exists(priv):
-        msg = ('%s ' % lib_name +
-               'RSA key generation.\n  %s already exists\n' % priv +
-               '  > Clean up files and try again. Exiting. <')
-        print(msg)
-        return None, None
-
-    msg = ('\n%s: ' % lib_name +
-           'RSA key-pair generation\n\nWill try to create two files:')
-    print(msg)
-    pub_msg = '  pub  = %s' % pub
-    print(pub_msg)
-    priv_msg = '  priv = %s' % priv
-    print(priv_msg)
-    print('\nEnter a passphrase for the private key (16 or more chars)\n'
-          '  or press <return> to auto-generate a passphrase')
-    if interactive:
-        pphr = getpass.getpass('Passphrase: ')
-    else:
-        pphr = ''
-    if pphr:
-        pphr2 = getpass.getpass('same again: ')
-        if pphr != pphr2:
-            print('  > Passphrase mismatch. Exiting. <')
-            return None, None
-        pphr_auto = False
-    else:
-        print('(auto-generating a passphrase)\n')
-        pphr = _printable_pwd(128)  # or a word-based generator?
-        pphr_auto = True
-    if pphr and len(pphr) < 16:
-        print('  > passphrase too short; exiting <')
-        return None, None
-    if interactive:
-        bits = 4096  # default
-        b = input23('Enter the desired RSA key length (2048, 4096, 8192): ')
-        if b in ['2048', '4096', '8192']:
-            bits = int(b)
-    else:
-        bits = 2048
-    bits_msg = '  using %i' % bits
-    if bits > 4096:
-        bits_msg += '; this will take a minute!'
-    print(bits_msg)
-    ent_msg = '  entropy: ' + _entropy_check()
-    print(ent_msg)
-    print('\nMove the mouse around for 5s (to help generate entropy)')
-    if interactive:
-        try:
-            time.sleep(5)
-        except KeyboardInterrupt:
-            return None, None
-    msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
-    print(msg)
-
-    try:
-        _genRsa(pub, priv, pphr, bits)
-    except KeyboardInterrupt:
-        _cleanup('\n  > Removing temp files. Exiting. <')
-        return None, None
-
-    pub_msg = 'public key:  ' + pub
-    print(pub_msg)
-    priv_msg = 'private key: ' + priv
-    print(priv_msg)
-    if pphr_auto:
-        pphr_msg = 'passphrase:  ' + pphr
-    else:
-        pphr_msg = 'passphrase:  (entered by hand)'
-    print(pphr_msg)
-    warn_msg = (' >> Keep the private key private! <<\n' +
-           '  >> Do not lose the passphrase! <<')
-    print(warn_msg)
-    if not interactive:
-        # pick up test coverage
-        _cleanup('')
-        save_pub, save_priv = pub, priv
-        pub = priv = ''
-        _cleanup('')
-        pub, priv = save_pub, save_priv
-
-    return pub, priv
+            filename = base + '_' + str(count) + filext
+    return filename
 
 
 def get_version():
@@ -2390,7 +2438,7 @@ class Tests(object):
         # test malformed archive:
         archname = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
         bad_arch = make_archive(datafile, archname)  # datafile extension bad
-        with pytest.raises(InternalFormatError):
+        with pytest.raises(SecFileArchiveFormatError):
             decrypt(bad_arch, priv1, pphr1)
 
         # test decrypt with good passphrase in a FILE:
@@ -2593,7 +2641,7 @@ class Tests(object):
         assert get_file_permissions(dec) == PERMISSIONS  # restricted
         os.umask(umask_restore)
 
-        _set_file_permissions('no file test only', PERMISSIONS)
+        _set_permissions('no file test only', PERMISSIONS)
 
     def test_hmac(self):
         # verify pfs hmac implementation against a widely used example:
