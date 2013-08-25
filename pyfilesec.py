@@ -124,11 +124,10 @@ class PFSCodecRegistry(object):
     new_enc() and new_dec() methods, should be possible with `*args **kwargs`.
     """
 
-    def __init__(self, openssl, defaults={}):
+    def __init__(self, defaults={}):
         self.name = 'PFSCodecRegistry'
         self._functions = {}
         self.register(defaults)
-        self.openssl = openssl
 
     def keys(self):
         return list(self._functions.keys())
@@ -238,6 +237,10 @@ def _setup_logging():
     else:
         msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
+
+    # always log like this:
+    msgfmt = "%.4f  " + lib_name + ": %s"
+    logging = _log2stdout()
     return logging, logging_t0
 
 
@@ -512,12 +515,19 @@ class SecFile(object):
     """
     def __init__(self, infile=None, pub=None, pad=None, priv=None, pphr=None,
                  openssl=None):
-        self._autodetect_file(infile)
-        self.pub = pub  # string or file --> file
-        self.priv = priv  # string or file --> file if priv is encrypted, otherwise string
-        self.pphr = pphr  # string or file --> string
+        self.update(infile)
+        self.get_pub(pub)
+        self.get_priv(priv)  # string or file --> file if priv is encrypted, otherwise string
+        self.get_pphr(pphr)  # string or file --> string
         self._openssl = openssl
         self._openssl_version = None
+
+    def __str__(self):
+        if hasattr(self, 'filename'):
+            name = self.filename
+        else:
+            name = 'None'
+        return '<pyfilesec.SecFile object, file=%s>' % (type(self), name)
 
     @property
     def is_encrypted(self):
@@ -541,18 +551,42 @@ class SecFile(object):
             self._openssl_version = _sys_call([self.openssl, 'version'])
         return self._openssl_version
 
-    def _autodetect_file(self, infile):
+    @property
+    def size(self):
+        if not hasattr(self, 'filename') or not self.filename:
+            return None
+        return getsize(self.filename)
+
+    def reset(self):
+        """Reinitialize, preserving keys and openssl settings, eg. post destroy()
+        """
+        self.__init__(infile=None, pub=self.pub,
+                      priv=self.priv, pphr=self.pphr, openssl=self.openssl)
+        if hasattr(self, 'filename'):
+            self.filename = None
+        if hasattr(self, 'status'):
+            self.status = None
+
+    def update(self, infile):
+        """Set the filename to use internally, set that file's permissions, reset status.
+        """
+        name = 'update'
         if infile is None:
+            logging.info(name + ': received filename: None')
             return
         if not isinstance(infile, basestring):
             _fatal('infile expected as a string', AttributeError)
+        logging.info(name + ': received infile=%s' % infile)
         self.filename = _abspath(infile)
+        self._set_file_permissions(0o600)
+        self.status = None
+        logging.debug(name + ': set status None')
 
-    def update(self, infile):
-        self._autodetect_file(infile)
         return self
 
-    def get_filename(self):
+    def get_filename(self, infile=None):
+        if infile:
+            self.update(infile)
         if not hasattr(self, 'filename'):
             self.filename = None
         return self.filename
@@ -700,7 +734,53 @@ class SecFile(object):
 
         return self
 
-    def encrypt(self, datafile, pub, meta=True, date=True, keep=False,
+    def get_pub(self, pub=None):
+        """Get pub from self or from param, set as needed
+        """
+        # TO DO: screen for small RSA modulus
+        if isinstance(pub, basestring):
+            if exists(pub) and 'PUBLIC KEY' in open(pub, 'rb').read():
+                # screen for RSA modulus
+                self.pub = _abspath(pub)
+            else:
+                logging.error('bad pub key %s' % pub)
+        if not hasattr(self, 'pub'):
+            self.pub = None
+        return self.pub
+
+    def get_priv(self, priv=None):
+        """Get pub from self or from param, set as needed
+        """
+        # TO DO: screen for small RSA modulus
+        if isinstance(priv, basestring):
+            if exists(priv) and 'PRIVATE KEY' in open(priv, 'rb').read():
+                # got a file
+                self.priv = _abspath(priv)
+            elif 'PRIVATE KEY' in priv:
+                # got actual key
+                self.priv = priv
+            else:
+                logging.error('bad pub key %s' % priv)
+        if not hasattr(self, 'priv'):
+            self.priv = None
+        return self.priv
+
+    def get_pphr(self, pphr=None):
+        """Get pphr from self, param, set as needed
+
+        Load from file if give a file
+        """
+        # TO DO: screen for weak passphrase
+        if isinstance(pphr, basestring):
+            if exists(pphr):
+                self.pphr = open(pphr, 'rb').read()
+            else:
+                self.pphr = pphr
+        if not hasattr(self, 'pphr'):
+            self.pphr = None
+        return self.pphr
+
+    def encrypt(self, pub=None, meta=True, date=True, keep=False,
                 enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
         """Encrypt a file using AES-256, encrypt the password with RSA public-key.
 
@@ -716,8 +796,7 @@ class SecFile(object):
         Files larger than 8G before encryption will raise an error.
 
         To mask small file sizes, `pad()` them to a desired minimum
-        size before calling `encrypt()`. To encrypt a directory, first call
-        ``make_archive()`` to create a single file, which you can then `encrypt()`.
+        size before calling `encrypt()`.
 
         :Parameters:
 
@@ -754,6 +833,8 @@ class SecFile(object):
         """
         _set_umask()
         name = 'encrypt: '
+        datafile = self.get_filename()
+        pub = self.get_pub(pub)
         logging.debug(name + 'start')
         if not codec.is_registered(enc_method):
             _fatal(name + "requested encMethod '%s' not registered" % enc_method)
@@ -795,7 +876,7 @@ class SecFile(object):
         else:  # True or exising md
             if meta is True:
                 meta = {}
-            md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
+            md = self._get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
             meta.update(md)
         with open(metafile, 'wb') as fd:
             json.dump(meta, fd)
@@ -803,15 +884,16 @@ class SecFile(object):
         # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc archive:
         fullpath_files = [data_enc, pwd_rsa, metafile]
         files = [os.path.split(f)[1] for f in fullpath_files]
-        archive = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
-        make_archive(files, archive, keep=False)
+        archive_name = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
+        arch = _SecFileArchive(archive_name)
+        arch.pack(files, keep=False)
 
         if not keep:
             # secure-delete unencrypted original, unless encrypt did not succeed:
-            ok_to_destroy = (ok_encrypt and isfile(archive) and
-                             os.stat(archive)[stat.ST_SIZE])
+            ok_to_destroy = (ok_encrypt and isfile(arch.name) and
+                             os.stat(arch.name)[stat.ST_SIZE])
             if ok_to_destroy:
-                destroy(datafile)
+                self.destroy(datafile)
                 logging.info(name +
                     'secure delete original plain-text file (destroy)')
             else:
@@ -819,9 +901,48 @@ class SecFile(object):
                     'retaining original file, encryption did not succeed')
 
         _unset_umask()
-        return self #abspath(archive)
+        self.update(arch.name)
+        return self
 
-    def decrypt(self, data_enc, priv, pphr='', dec_method=None):
+    def _get_metadata(self, datafile, data_enc, pub, enc_method, date=True, hmac=None):
+        """Return info about an encryption context, as a {date-now: {info}} dict.
+
+        If `date` is True, date-now is numerical date of the form
+        year-month-day-localtime,
+        If `date` is False, date-now is '(date-time suppressed)'. The date values
+        are also keys to the meta-data dict, and their format is chosen so that
+        they will sort to be in chronological order, even if the original
+        encryption date was suppressed (it comes first). Only do `date=False` for
+        the first initial encryption, not for rotation.
+        """
+
+        md = {'clear-text-file': abspath(datafile),
+            'sha256 of encrypted file': '%s' % _sha256(data_enc)}
+        if hmac:
+            hmac_val = hmac_sha256(hmac, data_enc)
+            md.update({'hmac-sha256 of encrypted file': hmac_val})
+        md.update({'sha256 of public key': _sha256(pub),
+            'encryption method': lib_name + '.' + enc_method,
+            'sha256 of lib %s' % lib_name: _sha256(lib_path),
+            'rsa padding': RSA_PADDING,
+            'max_file_size_limit': MAX_FILE_SIZE})
+        if date:
+            now = time.strftime("%Y_%m_%d_%H%M", time.localtime())
+            m = int(get_time() / 60)
+            s = (get_time() - m * 60)
+            now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
+                # only want ms precision for testing, which can easily
+                # generate two files within ms of each other
+        else:
+            now = DATE_UNKNOWN
+        md.update({'encrypted year-month-day-localtime-Hm.s.ms': now,
+            'openssl version': openssl_version,
+            'platform': sys.platform,
+            'python version': '%d.%d.%d' % sys.version_info[:3]})
+
+        return {'meta-data %s' % now: md}
+
+    def decrypt(self, priv=None, pphr='', dec_method=None):
         """Decrypt a file that was encoded using ``encrypt()``.
 
         To get the data back, need two files: ``data.enc`` and ``privkey.pem``.
@@ -850,18 +971,22 @@ class SecFile(object):
         """
         _set_umask()
         name = 'decrypt: '
+        data_enc = self.get_filename()
+        priv = self.get_priv(priv)
+        pphr = self.get_pphr(pphr)
         logging.debug(name + 'start')
 
-        priv = abspath(priv)
-        data_enc = abspath(data_enc)
-        if is_in_dropbox(data_enc):
+        #priv = abspath(priv)
+        #data_enc = abspath(data_enc)  # should be done already
+        if self.is_in_dropbox:
             msg = name + 'file in Dropbox folder (unsafe to decrypt here)'
             _fatal(msg, DecryptError)
-        if is_versioned(data_enc):
+        if self.is_versioned:
             logging.warning(name + 'file exposed to version control')
-        if pphr and isfile(pphr):
-            pphr = open(abspath(pphr), 'rb').read()
-        elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
+        # should be done already:
+        #if pphr and isfile(pphr):
+        #    pphr = open(abspath(pphr), 'rb').read()
+        if not self.pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
             _fatal(name + 'missing passphrase (encrypted privkey)', DecryptError)
 
         # Extract files from the archive (dataFileEnc) into the same directory,
@@ -872,7 +997,8 @@ class SecFile(object):
             logging.info('decrypting into %s' % dest_dir)
 
             # Unpack the .enc file bundle into a new tmp dir:
-            data_aes, pwd_file, meta_file = _unpack(data_enc)
+            arch = _SecFileArchive(data_enc)
+            data_aes, pwd_file, meta_file = arch._unpack(data_enc)
             if not all([data_aes, pwd_file, meta_file]):
                 logging.warn('did not find 3 files in archive %s' % data_enc)
                 # ? or _fatal(msg, InternalFormatError) + suggest rotate() to fix
@@ -880,7 +1006,7 @@ class SecFile(object):
 
             # Get a valid decrypt method, from meta-data or argument:
             clear_text = None  # file name; set in case _get_dec_method raise()es
-            dec_method = _get_dec_method(meta_file, dec_method)
+            dec_method = self._get_dec_method(meta_file, dec_method)
             if not dec_method:
                 _fatal('Could not get a valid decryption method', DecryptError)
 
@@ -899,7 +1025,7 @@ class SecFile(object):
                 if not destroy(data_dec)[0] == pfs_DESTROYED:
                     msg = name + 'destroy tmp clear txt failed: %s' % data_dec
                     _fatal(msg, DestroyError)
-            perm_str = '0o' + oct(get_file_permissions(clear_text))[1:]
+            perm_str = '0o' + oct(self.get_file_permissions(clear_text))[1:]
             logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
             if meta_file:
                 newMeta = _uniq_file(clear_text + META_EXT)
@@ -911,11 +1037,11 @@ class SecFile(object):
                     if not destroy(meta_file)[0] == pfs_DESTROYED:
                         msg = name + 'destroy tmp meta-data failed: %s' % meta_file
                         _fatal(msg, DestroyError)
-                perm_str = '0o' + oct(get_file_permissions(newMeta))[1:]
+                perm_str = '0o' + oct(self.get_file_permissions(newMeta))[1:]
                 logging.info('meta-data, permissions ' + perm_str + ': ' + newMeta)
         finally:
             try:
-                # clean-up, nothing clear text inside
+                # clean-up, nothing clear-text inside
                 shutil.rmtree(tmp_dir, ignore_errors=True)
             except:
                 pass
@@ -927,7 +1053,65 @@ class SecFile(object):
                 pass
 
         _unset_umask()
-        return self  #abspath(clear_text)
+        self.update(clear_text)
+        return self
+
+    def _get_dec_method(self, meta_file, dec_method):
+        """Return a valid decryption method, based on meta-data or default.
+
+        Cross-validate requested dec_method against meta-data, or warn if mismatch.
+        """
+        enc_method = 'unknown'
+        if meta_file:
+            md = self.load_metadata(meta_file)
+            dates = list(md.keys())  # dates of meta-data events
+            most_recent = sorted(dates)[-1]
+            if not 'encryption method' in list(md[most_recent].keys()):
+                enc_method = 'unknown'
+                _dec_from_enc = enc_method
+            else:
+                enc_method = md[most_recent]['encryption method'].split('.')[1]
+                _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
+
+            if dec_method:
+                if dec_method != _dec_from_enc:
+                    msg = 'requested decryption function (%s)' % dec_method +\
+                          ' != encryption function (meta-data: %s)' % enc_method
+                    logging.warning(msg)
+            else:
+                try:
+                    dec_method = str(_dec_from_enc)  # avoid unicode issue
+                except:
+                    dec_method = _dec_from_enc
+                logging.info('implicitly want "' + dec_method + '" (meta-data)')
+        if not meta_file or enc_method == 'unknown':
+            # can't infer, no meta-data
+            if not dec_method or enc_method == 'unknown':
+                # ... and nothing explicit either, so go with default:
+                logging.info('falling through to default decryption')
+                available = [f for f in list(default_codec.keys())
+                             if f.startswith('_decrypt_')]
+                dec_method = available[0]
+
+        if not codec.is_registered(dec_method):
+            _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method,
+                   CodecRegistryError)
+        logging.info('_get_dec_method: dec fxn set to: ' + str(dec_method))
+
+        return dec_method
+
+    def load_metadata(self, md_file):
+        """Convenience function to read meta-data from a file, return it as a dict.
+        """
+        return json.load(open(md_file, 'rb'))
+
+    def log_metadata(self, md, log=True):
+        """Convenience function to log and return meta-data in human-friendly form.
+        """
+        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
+        if log:
+            logging.info(md_fmt)
+        return md_fmt
 
     def rotate(self, data_enc, pub, priv, pphr=None,  # priv pphr = old, pub = new
                priv_new=None, pphr_new=None,
@@ -1055,7 +1239,7 @@ class SecFile(object):
 
         return result in ['Verification OK', 'Verified OK']
 
-    def destroy(self, filename, cmdList=()):
+    def destroy(self, new_file=None):
         """Try to secure-delete a file; returns (status, link count, time taken).
 
         Calls an OS-specific secure-delete utility, defaulting to::
@@ -1064,49 +1248,57 @@ class SecFile(object):
             Linux:   /usr/bin/shred -f -u -n 7 filename
             Windows: sdelete.exe    -q -p 7 filename
 
-        If these are not available, `destroy` will warn and fall through to trying
-        to merely overwrite the data with 0's (with unknown effectiveness)
-
-        As an alternative, a custom command sequence can be specified::
-
-            cmdList = (command, option1, option2, ..., filename)
+        If these are not available, ``destroy()`` will warn and fall through to trying
+        to merely overwrite the data with 0's (with unknown effectiveness). Do
+        not reply on this fall-through.
 
         Ideally avoid the need to destroy files. Keep all sensitive data in RAM.
         File systems that are journaled, have RAID, are mirrored, or other back-up
         are much trickier to secure-delete.
 
-        `destroy` may fail to remove all traces of a file if multiple hard-links
+        ``destroy()`` may fail to remove all traces of a file if multiple hard-links
         exist for the file. For this reason, the original link count is returned.
         In the case of multiple hardlinks, Linux (shred) and Windows (sdelete)
-        do appear to destroy the data, whereas Mac (srm) will not.
+        do appear to destroy the data (the inode), whereas Mac (srm) does not.
 
-        The time required can help confirm whether it was a secure removal (slow)
-        or an ordinary removal (unlinking is fast).
+        If ``destroy()`` succeeds, the SecFile object is ``reset()``, and the return
+        code is the only status available. If ``destroy()`` fails, ``.status`` is
+        set to the return code and the SecFile object is not reset.
 
-        If a NamedTemporaryFile object is given instead of a filename, destroy()
-        will try to secure-delete the contents and close the file. Other open
-        file-objects will raise a DestroyError, because the file is not removed.
+        API note:
+
+            ``destroy`` returns (disposition, original link count, time taken)
+            as an exit code. (This is different from most other SecFile methods, which return ``self``.)
+            The dispostion is one of pfs_DESTROYED, pfs_UNLINKED, and
+            pfs_UNKNOWN. Time taken is reported in seconds to help confirm whether
+            it was a secure removal (slow) or an ordinary unlink (very fast).
+
         """
 
-        name = 'destroy'
-        got_file_object = hasattr(filename, 'close')
-        if got_file_object:
-            filename, file_object = filename.name, filename
-            file_object.seek(0)
+        #If a NamedTemporaryFile object is given instead of a filename, destroy()
+        #will try to secure-delete the contents and close the file. Other open
+        #file-objects will raise a DestroyError, because the file is not removed.
 
-        if is_in_dropbox(filename):
+        name = 'destroy'
+        logging.debug(name + ': start, new_file=%s' % new_file)
+        if new_file:
+            self.update(new_file)
+        filename = self.get_filename()
+        #got_file_object = hasattr(filename, 'close')
+        #if got_file_object:
+        #    filename, file_object = filename.name, filename
+        #    file_object.seek(0)
+
+        if self.is_in_dropbox:
             logging.error(name + ': in dropbox; no secure delete of remote files')
-        vc = is_versioned(filename)
-        if vc:
-            logging.warning(name + ': file exposed to %s version control' % vc)
-        os.chmod(filename, 0o600)  # raises OSError if no file or cant change
-        filename = abspath(filename)
-        t0 = get_time()
+        if self.is_versioned:
+            logging.warning(name + ': file exposed to version control')
+        destroy_t0 = get_time()
 
         # Try to detect & inform about hardlinks:
         # srm will detect but not affect those links or the inode data
         # shred and fsutil will blast the inode's data, but not unlink other links
-        orig_links = _get_hardlink_count(filename)
+        orig_links = self._get_hardlink_count()
         if sys.platform != 'win32' and orig_links > 1:
             mount_path = abspath(filename)
             while not os.path.ismount(mount_path):
@@ -1118,11 +1310,7 @@ class SecFile(object):
             vals = (filename, inode, mount_path, inode)
             logging.warning(msg % vals)
 
-        if not cmdList:
-            cmdList = (destroy_TOOL,) + destroy_OPTS + (filename,)
-        else:
-            logging.info(name + ': %s' % ' '.join(cmdList))
-
+        cmdList = (destroy_TOOL,) + destroy_OPTS + (filename,)
         good_sys_call = False
         try:
             __, err = _sys_call(cmdList, stderr=True)
@@ -1132,42 +1320,59 @@ class SecFile(object):
             logging.warning(name + ': %s' % e)
             logging.warning(name + ': %s' % ' '.join(cmdList))
         finally:
-            if got_file_object:
-                try:
-                    file_object.close()
-                    file_object.unlink()
-                    del(file_object.name)
-                except:
-                    pass  # gives an OSError but has done something
-            if not isfile(filename):
-                if good_sys_call:
-                    return pfs_DESTROYED, orig_links, get_time() - t0
-                return pfs_UNKNOWN, orig_links, get_time() - t0
+            #if got_file_object: only for NamedTemporaryFiles
+            #    try:
+            #        file_object.close()
+            #        file_object.unlink()
+            #        del(file_object.name)
+            #    except:
+            #        pass  # gives an OSError but has done something
+            pass
 
-        # file should have been overwritten and removed; if not...
-        logging.warning(name + ': falling through to 1 pass of zeros')
-        with open(filename, 'wb') as fd:
-            fd.write(chr(0) * getsize(filename))
-        shutil.rmtree(filename, ignore_errors=True)
-        if isfile(filename):  # yikes, file remains
-            msg = name + ': %s remains' % filename
+        if not isfile(filename):
+            # there's no longer a file
+            if good_sys_call:
+                disposition = pfs_DESTROYED
+            else:
+                disposition = pfs_UNKNOWN
+        else:
+            # there is a file still, or something
+            logging.error(name + ': falling through to trying 1 pass of zeros; unknown effectiveness')
+            with open(filename, 'wb') as fd:
+                fd.write(chr(0) * getsize(filename))
+            shutil.rmtree(filename, ignore_errors=True)
+            disposition = pfs_UNKNOWN
+
+        duration = round(get_time() - destroy_t0, 4)  # 0.1ms precision
+        if isfile(filename):  # yikes, file still remains
+            self.status = disposition, orig_links, duration
+            msg = name + ': %s remains after destroy() attempted' % filename
             _fatal(msg, DestroyError)
 
-        return pfs_UNKNOWN, orig_links, get_time() - t0
+        self.reset()  # clear everything, including self.status
+        return disposition, orig_links, duration
 
     def get_file_permissions(self, filename):
         return int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
 
-    def _set_file_permissions(self, filename, mode):
-        pass
-        # import win32security  # looks interesting
-        # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
-        #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
-        # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
-        # win32security.GetFileSecurity(filename, info)
-        # win32security.SetFileSecurity
+    def _set_file_permissions(self, mode):
+        name = '_set_file_permissions'
+        filename = self.get_filename()
+        if sys.platform not in ['win32']:
+            new_value_str = oct(mode)
+            os.chmod(filename, mode)
+        else:
+            # import win32security  # looks interesting
+            # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
+            #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
+            # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
+            # win32security.GetFileSecurity(filename, info)
+            # win32security.SetFileSecurity
+            new_value_str = 'NOT CHANGED'
+        logging.info(name + ': %s %s' % (filename, new_value_str))
 
-    def _get_hardlink_count(self, filename):
+    def _get_hardlink_count(self):
+        filename = self.get_filename()
         if sys.platform == 'win32':
             if user_can_link:
                 cmd = ('fsutil', 'hardlink', 'list', filename)
@@ -1179,16 +1384,6 @@ class SecFile(object):
         else:
             count = os.stat(filename)[stat.ST_NLINK]
         return count
-
-    def _uniq_file(self, filename):
-        """Avoid file name collisions by appending a count before extension.
-        """
-        count = 0
-        base, filext = os.path.splitext(filename)
-        while isfile(filename) or os.path.isdir(filename):
-            count += 1
-            filename = base + '_' + str(count) + filext
-        return filename
 
     @property
     def is_in_dropbox(self):
@@ -1232,7 +1427,7 @@ class SecFile(object):
         except OSError:
             # no git
             return False
-        cmd = ['git', 'ls-files', abspath(path), '--error-unmatch']
+        cmd = ['git', 'ls-files', abspath(path)]
         reported = _sys_call(cmd, ignore_error=True)
         is_tracked = bool(reported)
 
@@ -1260,15 +1455,26 @@ class SecFile(object):
         return has_hg_dir
 
 
-class EncArchive(object):
+def _uniq_file(filename):
+    """Avoid file name collisions by appending a count before extension.
+    """
+    count = 0
+    base, filext = os.path.splitext(filename)
+    while isfile(filename) or os.path.isdir(filename):
+        count += 1
+        filename = base + '_' + str(count) + filext
+    return filename
+
+
+class _SecFileArchive(object):
     """Class for working with an archive .enc file, holding exactly 3 files.
 
     Currently an archive is a normal .tar.gz file.
     """
-    def __init__(self, filename):
-        self.filename = abspath_(filename)
+    def __init__(self, name=''):
+        self.name = name
 
-    def make_archive(self, paths, name='', keep=True):
+    def pack(self, paths, keep=True):
         """Make a tgz file from a list of paths, set permissions. Directories ok.
 
         Eventually might take an arg to decide whether to use tar or zip.
@@ -1280,10 +1486,10 @@ class EncArchive(object):
         _set_umask()
         if isinstance(paths, str):
             paths = [paths]
-        if not name:
-            name = os.path.splitext(paths[0])[0].strip(os.sep) + '.tgz'
-        name = _uniq_file(name)
-        tar_fd = tarfile.open(name, "w:gz")
+        if not self.name:
+            self.name = os.path.splitext(paths[0])[0].strip(os.sep) + '.tgz'
+        self.name = _uniq_file(self.name)
+        tar_fd = tarfile.open(self.name, "w:gz")
         for p in paths:
             tar_fd.add(p, recursive=True)  # True by default, get whole directory
             if not keep:
@@ -1294,7 +1500,7 @@ class EncArchive(object):
         tar_fd.close()
 
         _unset_umask()
-        return name
+        return self.name
 
     def _unpack(self, data_enc):
         """Extract files from archive into a tmp dir, return paths to files.
@@ -1338,101 +1544,6 @@ class EncArchive(object):
 
         _unset_umask()
         return data_aes, pwdFileRsa, meta_file
-
-    def _get_dec_method(self, meta_file, dec_method):
-        """Return a valid decryption method, based on meta-data or default.
-
-        Cross-validate requested dec_method against meta-data, or warn if mismatch.
-        """
-        enc_method = 'unknown'
-        if meta_file:
-            md = load_metadata(meta_file)
-            dates = list(md.keys())  # dates of meta-data events
-            most_recent = sorted(dates)[-1]
-            if not 'encryption method' in list(md[most_recent].keys()):
-                enc_method = 'unknown'
-                _dec_from_enc = enc_method
-            else:
-                enc_method = md[most_recent]['encryption method'].split('.')[1]
-                _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
-
-            if dec_method:
-                if dec_method != _dec_from_enc:
-                    msg = 'requested decryption function (%s)' % dec_method +\
-                          ' != encryption function (meta-data: %s)' % enc_method
-                    logging.warning(msg)
-            else:
-                try:
-                    dec_method = str(_dec_from_enc)  # avoid unicode issue
-                except:
-                    dec_method = _dec_from_enc
-                logging.info('implicitly want "' + dec_method + '" (meta-data)')
-        if not meta_file or enc_method == 'unknown':
-            # can't infer, no meta-data
-            if not dec_method or enc_method == 'unknown':
-                # ... and nothing explicit either, so go with default:
-                logging.info('falling through to default decryption')
-                available = [f for f in list(default_codec.keys())
-                             if f.startswith('_decrypt_')]
-                dec_method = available[0]
-
-        if not codec.is_registered(dec_method):
-            _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method,
-                   CodecRegistryError)
-        logging.info('_get_dec_method: dec fxn set to: ' + str(dec_method))
-
-        return dec_method
-
-    def _get_metadata(self, datafile, data_enc, pub, enc_method, date=True, hmac=None):
-        """Return info about an encryption context, as a {date-now: {info}} dict.
-
-        If `date` is True, date-now is numerical date of the form
-        year-month-day-localtime,
-        If `date` is False, date-now is '(date-time suppressed)'. The date values
-        are also keys to the meta-data dict, and their format is chosen so that
-        they will sort to be in chronological order, even if the original
-        encryption date was suppressed (it comes first). Only do `date=False` for
-        the first initial encryption, not for rotation.
-        """
-
-        md = {'clear-text-file': abspath(datafile),
-            'sha256 of encrypted file': '%s' % _sha256(data_enc)}
-        if hmac:
-            hmac_val = hmac_sha256(hmac, data_enc)
-            md.update({'hmac-sha256 of encrypted file': hmac_val})
-        md.update({'sha256 of public key': _sha256(pub),
-            'encryption method': lib_name + '.' + enc_method,
-            'sha256 of lib %s' % lib_name: _sha256(lib_path),
-            'rsa padding': RSA_PADDING,
-            'max_file_size_limit': MAX_FILE_SIZE})
-        if date:
-            now = time.strftime("%Y_%m_%d_%H%M", time.localtime())
-            m = int(get_time() / 60)
-            s = (get_time() - m * 60)
-            now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
-                # only want ms precision for testing, which can easily
-                # generate two files within ms of each other
-        else:
-            now = DATE_UNKNOWN
-        md.update({'encrypted year-month-day-localtime-Hm.s.ms': now,
-            'openssl version': openssl_version,
-            'platform': sys.platform,
-            'python version': '%d.%d.%d' % sys.version_info[:3]})
-
-        return {'meta-data %s' % now: md}
-
-    def load_metadata(self, md_file):
-        """Convenience function to read meta-data from a file, return it as a dict.
-        """
-        return json.load(open(md_file, 'rb'))
-
-    def log_metadata(self, md, log=True):
-        """Convenience function to log and return meta-data in human-friendly form.
-        """
-        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
-        if log:
-            logging.info(md_fmt)
-        return md_fmt
 
 
 def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
@@ -1515,6 +1626,10 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
     try:
         pwd, se_RSA = _sys_call(cmdRSA, stdin=pphr, stderr=True)
         ___, se_AES = _sys_call(cmdAES, stdin=pwd, stderr=True)
+    except KeyboardInterrupt:
+        if isfile(data_dec):
+            destroy(data_dec)
+        _fatal('%s: Could not decrypt' % name, KeyboardInterrupt)
     except:
         if isfile(data_dec):
             destroy(data_dec)

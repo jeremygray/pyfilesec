@@ -71,6 +71,6 @@ Sol Simpson - Windows compatibility
 Milestones
 -----------
 
-- 0.3  Python 3 (looks easy, ``2to3`` passes now)
+- 0.3  Refactor into a class (huge API changes); Lots of tests; Python 3
 - 0.4  An alternative encryption backend (possibly pycrypto, some gpg support)
 - 0.5  Windows file-permissions
