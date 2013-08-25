@@ -520,7 +520,6 @@ class SecFile(object):
         self.get_priv(priv)  # string or file --> file if priv is encrypted, otherwise string
         self.get_pphr(pphr)  # string or file --> string
         self._openssl = openssl
-        self._openssl_version = None
 
     def __str__(self):
         if hasattr(self, 'filename'):
@@ -539,11 +538,18 @@ class SecFile(object):
         # placeholder; will detect format regardless of name
         return isinstance(self.file, basestring) and not self.file.endswith('.enc')
 
-    @property
-    def openssl(self):
+    def _get_openssl(self):
         if not self._openssl:
             self._openssl = OPENSSL
+            logging.info('openssl set to %s' % self._openssl)
+            self._openssl_version = None
         return self._openssl
+
+    def _set_openssl(self, openssl):
+        set_openssl(openssl)
+        self._openssl_version = None  # force update if/when needed
+
+    openssl = property(_get_openssl, _set_openssl, None, 'path to openssl to use.')
 
     @property
     def openssl_version(self):
@@ -553,13 +559,16 @@ class SecFile(object):
 
     @property
     def size(self):
-        if not hasattr(self, 'file') or not self.file:
+        f = self.get_file()
+        if f is None:
             return None
-        return getsize(self.file)
+        else:
+            return getsize(f)
 
     def reset(self):
-        """Reinitialize, preserving keys and openssl settings, eg. post destroy()
+        """Reinitialize, preserve keys and openssl, eg. after destroy()
         """
+        logging.info('reset requested')
         self.__init__(infile=None, pub=self.pub,
                       priv=self.priv, pphr=self.pphr, openssl=self.openssl)
         if hasattr(self, 'file'):
@@ -576,7 +585,7 @@ class SecFile(object):
             return
         if not isinstance(infile, basestring):
             _fatal('infile expected as a string', AttributeError)
-        logging.info(name + ': received infile=%s' % infile)
+        logging.info(name + ': received filename: %s' % infile)
         self.file = _abspath(infile)
         self.permissions = 0o600
         self.status = None
@@ -874,7 +883,8 @@ class SecFile(object):
 
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = codec.get_function(enc_method)
-        data_enc, pwd_rsa = ENCRYPT_FXN(datafile, pub, OPENSSL)
+        data_enc, pwd_rsa = ENCRYPT_FXN(datafile, pub,
+                                        openssl=self.openssl)
         ok_encrypt = (isfile(data_enc) and
                         os.stat(data_enc)[stat.ST_SIZE] and
                         isfile(pwd_rsa) and
@@ -1026,7 +1036,8 @@ class SecFile(object):
 
             # Decrypt (into same new tmp dir):
             DECRYPT_FXN = codec.get_function(dec_method)
-            data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, OPENSSL=OPENSSL)
+            data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr,
+                                   openssl=self.openssl)
 
             # Rename decrypted and meta files (mv to dest_dir):
             _new_path = os.path.join(dest_dir, os.path.basename(data_dec))
@@ -1337,7 +1348,7 @@ class SecFile(object):
         logging.info(name + ': %s %s' % (filename, permissions_str(filename)))
 
     permissions = property(_get_permissions, _set_permissions, None,
-        "Returns POSIX ugo permissions; win32 not implemented, returns -1")
+        "mac/nix:  Returns POSIX ugo permissions\nwin32  :  not implemented, returns -1")
 
     @property
     def hardlink_count(self):
@@ -1372,10 +1383,11 @@ class SecFile(object):
 
     @property
     def is_versioned(self):
-        """Try to detect if a file is under version control (svn, git, hg).
+        """Try to detect if this file is under version control (svn, git, hg).
 
-        Returns a string: 'git', 'svn', 'hg', or ''
-        Only approximate: the directory might be versioned, but not this file
+        Returns a boolean.
+        Only approximate: the directory might be versioned, but not this file;
+        or versioned with git but git is not call-able.
         """
         filename = self.get_file()
         logging.debug('trying to detect version control (svn, git, hg)')
@@ -1386,6 +1398,11 @@ class SecFile(object):
 
     def get_git_info(self, path):
         """Report whether a directory or file is in a git repo (version control).
+
+        Can test any generic filename, not just current file::
+
+            >>> from pyfilesec import SecFile
+            >>> SecFile().get_git_info(path)
 
         Files can be in the repo directory but not actually tracked by git.
         Assumes path is not versioned by git if git is not call-able.
@@ -1424,6 +1441,10 @@ class SecFile(object):
         logging.debug('path %s tracked in hg repo: %s' % (path, has_hg_dir))
         return has_hg_dir
 
+    # short-cuts for interactive use:
+    enc = encrypt
+    dec = decrypt
+    rot = rotate
 
 class SecFileArchive(object):
     """Class for working with an archive .enc file, holding exactly 3 files.
@@ -1742,12 +1763,16 @@ class GenRSA(object):
         return pub, priv
 
 
-def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
+def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
     """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
+
+    Path to openssl must always be given explicitly.
     """
     _set_umask()
     name = '_encrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
+    if not openssl or not isfile(openssl):
+        _fatal(name + ': require path to openssl executable')
 
     # Define file paths:
     data_enc = _uniq_file(abspath(datafile + AES_EXT))
@@ -1760,7 +1785,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     assert len(pwd) == 64  # hex characters
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
-    cmd_RSA = [OPENSSL, 'rsautl',
+    cmd_RSA = [openssl, 'rsautl',
           '-out', pwd_rsa,
           '-inkey', pub,
           '-keyform', 'PEM',
@@ -1768,7 +1793,7 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
           RSA_PADDING, '-encrypt']
 
     # Define command to AES-256-CBC encrypt datafile using the password:
-    cmd_AES = [OPENSSL, 'enc', '-aes-256-cbc',
+    cmd_AES = [openssl, 'enc', '-aes-256-cbc',
               '-a', '-salt',
               '-in', datafile,
               '-out', data_enc,
@@ -1788,27 +1813,30 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     return abspath(data_enc), abspath(pwd_rsa)
 
 
-def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
+def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
 
-    if present, pphr must be the actual password, not a filename
+    If present, pphr must be the actual password, not a filename.
+    Path to openssl must always be given explicitly.
     """
     _set_umask()
     name = '_decrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
+    if not openssl or not isfile(openssl):
+        _fatal(name + ': require path to openssl executable')
 
     # set the name for decrypted file:
     data_dec = os.path.splitext(abspath(data_enc))[0]
 
     # set up the command to retrieve password from pwdFileRsa
-    cmdRSA = [OPENSSL, 'rsautl', '-in', pwd_rsa, '-inkey', priv]
+    cmdRSA = [openssl, 'rsautl', '-in', pwd_rsa, '-inkey', priv]
     if pphr:
         # if isfile(pphr):  # always handled by decrypt
         cmdRSA += ['-passin', 'stdin']
     cmdRSA += [RSA_PADDING, '-decrypt']
 
     # set up the command to decrypt the data using pwd:
-    cmdAES = [OPENSSL, 'enc', '-d', '-aes-256-cbc', '-a',
+    cmdAES = [openssl, 'enc', '-d', '-aes-256-cbc', '-a',
               '-in', data_enc, '-out', data_dec, '-pass', 'stdin']
 
     # decrypt pwd (digital envelope "session" key) to RAM using private key
