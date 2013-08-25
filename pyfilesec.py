@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.2.01beta'
+__version__ = '0.2.01beta - class branch'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
@@ -53,54 +53,6 @@ import argparse
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__)
 lib_dir = os.path.split(lib_path)[0]
-
-
-def _parse_args():
-    """Parse and return command line arguments.
-
-    a file name is typically the first (required) argument
-    passphrases for command-line usage must go through files;
-        will get a logging.warning()
-    currently not possible to register a new enc/dec method via command line
-    """
-    parser = argparse.ArgumentParser(
-        description='File-oriented privacy & integrity management library.',
-        epilog="See https://pypi.python.org/pypi/pyFileSec/")
-    parser.add_argument('filename', help='one of: path to file to process, "genrsa", or "debug"')
-    parser.add_argument('--version', action='version', version=__version__)
-    parser.add_argument('--verbose', action='store_true', help='print logging info to stdout')
-
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-o][-m][-n][-c][-z][-e][-k])')
-    group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v [-o][-d][-r])')
-    group.add_argument('--rotate', action='store_true', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
-    group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r])')
-    group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -s)')
-    group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
-    group.add_argument('--destroy', action='store_true', help='secure delete')
-
-    parser.add_argument('--openssl', help='specify path of the openssl binary to use')
-    parser.add_argument('-o', '--out', help='path name for generated (output) file')
-    parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
-    parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
-    parser.add_argument('-V', '--nprv', help='path to new private key (--rotate only)')
-    parser.add_argument('-r', '--pphr', help='path to file containing passphrase for private key')
-    parser.add_argument('-R', '--nppr', help='path to file containing passphrase for new priv key')
-    parser.add_argument('-m', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
-    parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
-    parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
-    parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
-    parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
-    parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
-    parser.add_argument('-g', '--gc', action='store_true', help='debug will set gc.DEBUG_LEAK (garbage collection)', default=False)
-
-    return parser.parse_args()
-
-# set args depending on how __file__ is called:
-if __name__ == "__main__":
-    args = _parse_args()
-else:
-    args = None
 
 # python 3 compatibility:
 input23 = (input, raw_input)[sys.version < '3.']
@@ -172,10 +124,11 @@ class PFSCodecRegistry(object):
     new_enc() and new_dec() methods, should be possible with `*args **kwargs`.
     """
 
-    def __init__(self, defaults={}):
+    def __init__(self, openssl, defaults={}):
         self.name = 'PFSCodecRegistry'
         self._functions = {}
         self.register(defaults)
+        self.openssl = openssl
 
     def keys(self):
         return list(self._functions.keys())
@@ -242,7 +195,6 @@ class PFSCodecRegistry(object):
         """Returns True if `fxn_name` is registered; validated at registration.
         """
         return fxn_name in self._functions
-
 
 def _set_umask():
     # avoid decorator
@@ -470,27 +422,6 @@ if True:
     dropbox_path = None
 
 
-def _entropy_check():
-    """Basic query for some indication that entropy is available.
-    """
-    if sys.platform == 'darwin':
-        # SecurityServer daemon is supposed to ensure entropy is available:
-        ps = _sys_call(['ps', '-e'])
-        securityd = _sys_call(['which', 'securityd'])  # full path
-        if securityd in ps:
-            e = securityd + ' running'
-        else:
-            e = ''
-        rdrand = _sys_call(['sysctl', 'hw.optional.rdrand'])
-        e += '; rdrand: ' + rdrand
-    elif sys.platform.startswith('linux'):
-        avail = _sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
-        e = 'entropy_avail: ' + avail
-    else:
-        e = '(unknown)'
-    return e
-
-
 def _sha256(filename):
     """Return sha256 hex-digest of a file, buffered for large files.
     """
@@ -537,495 +468,960 @@ def _printable_pwd(nbits=256):
     return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
 
 
-def make_archive(paths, name='', keep=True):
-    """Make a tgz file from a list of paths, set permissions. Directories ok.
+class SecFile(object):
+    """Class for working with a file, moving between plain-text & cipher-text.
 
-    Eventually might take an arg to decide whether to use tar or zip.
-    Just a tarfile wrapper with extension, permissions, unlink options.
-    unlink is whether to unlink the original files after making an archive, not
-    a secure-delete option.
+    Example:
+      sf = SecFile(filename).encrypt(pub)
+
+    1. Will change the file on disk: encrypt, destroy, decrypt, rotate, pad
+       No change to file: sign, verify
+       self.filename changes to reflect .enc status (as does filename on disk)
+
+    2. infile is auto-detected as being cleartext, ciphertext; SecFile instance not supported
+    2a type(infile) == string & is path to plaintext
+      sf = SecFile(cleartext_file)  # init + auto-detect as non-enc
+    Encrypt
+      sf.encrypt(pub)
+    Same as:
+      sf.pub = pub
+      sf.encrypt()
+    Update with new file
+      sf.update(filename).encrypt()  # type auto-detected, keys retained
+      sf.update(filename.enc).decrypt()
+
+    sf = SecFile(cleartext_file, pub, pad=n)  # init + implicit encrypt(pub)
+    sf = SecFile(cleartext_file).encrypt(pub, pad=n)  # good
+    sf = SecFile(cleartext_file).pad(n).encrypt(pub)  # best
+    sf.filename  # same, new extention .enc
+    sf.decrypt(priv, pphr)
+    sf.destroy()
+    sf.status
+
+    2b. type(infile) == string & is path to encrypted (.enc)
+    sf = SecFile(encrypted_file)  # init + auto-detect as .enc
+    sf = SecFile(encrypted_file, priv, pphr)  # init + decrypt()
+
+    Key rotation:
+      sf = SecFile(filename.enc1).rotate(priv1, pphr1, pub2, pad2)
+
+    2c. type(infile) == SecFile ==> complex / error prone and pointless
+
+    3. interesting but too complicated for now should a SecFile "claim" a disk
+    file in some way, to avoid conflict with other SecFile instances?
     """
+    def __init__(self, infile=None, pub=None, pad=None, priv=None, pphr=None,
+                 openssl=None):
+        self._autodetect_file(infile)
+        self.pub = pub  # string or file --> file
+        self.priv = priv  # string or file --> file if priv is encrypted, otherwise string
+        self.pphr = pphr  # string or file --> string
+        self._openssl = openssl
+        self._openssl_version = None
 
-    _set_umask()
-    if isinstance(paths, str):
-        paths = [paths]
-    if not name:
-        name = os.path.splitext(paths[0])[0].strip(os.sep) + '.tgz'
-    name = _uniq_file(name)
-    tar_fd = tarfile.open(name, "w:gz")
-    for p in paths:
-        tar_fd.add(p, recursive=True)  # True by default, get whole directory
-        if not keep:
+    @property
+    def is_encrypted(self):
+        # placeholder; will detect format regardless of name
+        return isinstance(self.filename, basestring) and self.filename.endswith('.enc')
+
+    @property
+    def is_plaintext(self):
+        # placeholder; will detect format regardless of name
+        return isinstance(self.filename, basestring) and not self.filename.endswith('.enc')
+
+    @property
+    def openssl(self):
+        if not self._openssl:
+            self._openssl = OPENSSL
+        return self._openssl
+
+    @property
+    def openssl_version(self):
+        if not self._openssl_version:
+            self._openssl_version = _sys_call([self.openssl, 'version'])
+        return self._openssl_version
+
+    def _autodetect_file(self, infile):
+        if not isinstance(infile, basestring):
+            return
+        self.filename = _abspath(infile)
+
+    def update(self, infile):
+        self._autodetect_file(infile)
+        return self
+
+    def pad(self, filename, size=DEFAULT_PAD_SIZE):
+        """Append null bytes to ``filename`` until it has length ``size``.
+
+        The size is changed but `the fact that it was changed` is only obscured if
+        the padded file is encrypted. ``pad`` only changes the effective length.
+
+        Files shorter than `size` will be padded out to `size` (see details below).
+        The minimum resulting file size is 128 bytes. Files that are already padded
+        will first have any padding removed, and then be padded out to the new
+        target size.
+
+        Padded files include a few bytes for padding-descriptor tags, not just null
+        bytes. Thus files that are close to ``size`` already would not have their
+        sizes obscured AND also be marked as being padded (in the last ~36 bytes),
+        raising a ``PaddingError``. To avoid this, you can check using the
+        convenience function ``ok_to_pad()`` before calling ``pad()``.
+
+        Internal padding format:
+
+            ``file + n bytes + padding descriptors + final byte``
+
+        The padding descriptors consist of ``10-digits + one byte + PFS_PAD``,
+        where ``byte`` is b'\0' (the null byte). The process does not depend on the
+        value of the byte. The 10 digits gives the length of the padding as an
+        integer, in bytes. ``n`` is selected to make the new file size equal the
+        requested ``size``.
+
+        To make unpadding easier and more robust (and enable human inspection),
+        the end bytes provide the number of padding bytes that were added, plus an
+        identifier. 10 digits is not hard-coded as 10, but as the length of
+        ``str(max_file_size)``, where the ``max_file_size`` constant is 8G by
+        default. This means that any changes to the max file size constant can thus
+        cause pad / unpad failures across versions.
+
+        Special ``size`` values:
+
+           0 : unpad = remove any existing padding, no error if not present
+
+           -1 : strict unpad = remove padding if present, raise ``PaddingError``
+           if not present
+        """
+        name = 'pad: '
+        logging.debug(name + 'start')
+        size = int(size)
+        if 0 < size < PAD_MIN:
+            logging.info(name + 'requested size increased to %i bytes' % PAD_MIN)
+            size = PAD_MIN
+        if size > MAX_FILE_SIZE:
+            _fatal('pad: size must be <= %d (maximum file size)' % MAX_FILE_SIZE)
+        # handle special size values (0, -1) => unpad
+        pad_count = pad_len(filename)
+        if size < 1:
+            if pad_count or size == -1:
+                return unpad(filename)  # or fail appropriately
+            return getsize(filename)  # size==0, not padded
+
+        if pad_count:
+            unpad(filename, pad_count)
+        filesize = getsize(filename)
+        needed = ok_to_pad(filename, size, pad_count)
+        if needed == 0:
+            msg = name + 'file length not obscured (length >= requested size)'
+            _fatal(msg, PaddingError)
+        pad_bytes = PAD_STR + "%010d" % (needed + PAD_LEN)
+
+        # append bytes to pad the file:
+        with open(filename, 'a+b') as fd:
+            chunk = 1024  # cap memory usage
+            chunkbytes = PAD_BYTE * chunk
+            for i in range(needed // chunk):
+                fd.write(chunkbytes)
+            extrabytes = PAD_BYTE * (needed % chunk)
+            fd.write(extrabytes + pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE)
+            logging.info(name + 'append bytes to get to %d bytes' % size)
+
+        return self
+
+    def ok_to_pad(self, filename, size, pad_count=None):
+        """Return 0 if ``size`` is not adequate to obscure the file length.
+        Else return the (non-zero) size.
+        """
+        # bug: what about very short < 128 minimum
+        if pad_count is None:
+            pad_count = pad_len(filename)
+        size = max(size, PAD_MIN)
+        return max(0, size - (getsize(filename) - pad_count) - PAD_LEN)
+
+    def pad_len(self, filename=None):
+        """Returns ``pad_count`` (in bytes) if the file contains PFS-style padding.
+
+        Returns 0 if bad or missing padding.
+        """
+        name = 'pad_len'
+        filename = self.filename
+        logging.debug(name + ': start, file="%s"' % filename)
+        filelen = getsize(filename)
+        if filelen < PAD_LEN:
+            return 0
+        with open(filename, 'rb') as fd:
+            # read end bytes and then split
+            fd.seek(filelen - PAD_LEN)
+            pad_stuff = fd.read()
+            last_byte = pad_stuff[-1]  # expect all padding to be this byte
+            if last_byte != PAD_BYTE:
+                return 0
             try:
-                shutil.rmtree(p)  # might be a directory
-            except OSError:
-                os.unlink(p)
-    tar_fd.close()
-
-    _unset_umask()
-    return name
-
-
-def destroy(filename, cmdList=()):
-    """Try to secure-delete a file; returns (status, link count, time taken).
-
-    Calls an OS-specific secure-delete utility, defaulting to::
-
-        Mac:     /usr/bin/srm   -f -z --medium  filename
-        Linux:   /usr/bin/shred -f -u -n 7 filename
-        Windows: sdelete.exe    -q -p 7 filename
-
-    If these are not available, `destroy` will warn and fall through to trying
-    to merely overwrite the data with 0's (with unknown effectiveness)
-
-    As an alternative, a custom command sequence can be specified::
-
-        cmdList = (command, option1, option2, ..., filename)
-
-    Ideally avoid the need to destroy files. Keep all sensitive data in RAM.
-    File systems that are journaled, have RAID, are mirrored, or other back-up
-    are much trickier to secure-delete.
-
-    `destroy` may fail to remove all traces of a file if multiple hard-links
-    exist for the file. For this reason, the original link count is returned.
-    In the case of multiple hardlinks, Linux (shred) and Windows (sdelete)
-    do appear to destroy the data, whereas Mac (srm) will not.
-
-    The time required can help confirm whether it was a secure removal (slow)
-    or an ordinary removal (unlinking is fast).
-
-    If a NamedTemporaryFile object is given instead of a filename, destroy()
-    will try to secure-delete the contents and close the file. Other open
-    file-objects will raise a DestroyError, because the file is not removed.
-    """
-
-    name = 'destroy'
-    got_file_object = hasattr(filename, 'close')
-    if got_file_object:
-        filename, file_object = filename.name, filename
-        file_object.seek(0)
-
-    if is_in_dropbox(filename):
-        logging.error(name + ': in dropbox; no secure delete of remote files')
-    vc = is_versioned(filename)
-    if vc:
-        logging.warning(name + ': file exposed to %s version control' % vc)
-    os.chmod(filename, 0o600)  # raises OSError if no file or cant change
-    filename = abspath(filename)
-    t0 = get_time()
-
-    # Try to detect & inform about hardlinks:
-    # srm will detect but not affect those links or the inode data
-    # shred and fsutil will blast the inode's data, but not unlink other links
-    orig_links = _get_hardlink_count(filename)
-    if sys.platform != 'win32' and orig_links > 1:
-        mount_path = abspath(filename)
-        while not os.path.ismount(mount_path):
-            mount_path = os.path.dirname(mount_path)
-        msg = name + """: '%s' (inode %d) has other hardlinks:
-            `find %s -xdev -inum %d`""".replace('    ', '')
-        file_stat = os.stat(filename)
-        inode = file_stat[stat.ST_INO]
-        vals = (filename, inode, mount_path, inode)
-        logging.warning(msg % vals)
-
-    if not cmdList:
-        cmdList = (destroy_TOOL,) + destroy_OPTS + (filename,)
-    else:
-        logging.info(name + ': %s' % ' '.join(cmdList))
-
-    good_sys_call = False
-    try:
-        __, err = _sys_call(cmdList, stderr=True)
-        good_sys_call = not err
-    except OSError as e:
-        good_sys_call = False
-        logging.warning(name + ': %s' % e)
-        logging.warning(name + ': %s' % ' '.join(cmdList))
-    finally:
-        if got_file_object:
-            try:
-                file_object.close()
-                file_object.unlink()
-                del(file_object.name)
+                pad_tag_count, pad_marker = pad_stuff.split(PAD_BYTE)[-3:-1]
+                pad_count = int(pad_tag_count.split(PAD_STR)[-1])
+                assert pad_marker == PFS_PAD
             except:
-                pass  # gives an OSError but has done something
-        if not isfile(filename):
-            if good_sys_call:
-                return pfs_DESTROYED, orig_links, get_time() - t0
-            return pfs_UNKNOWN, orig_links, get_time() - t0
+                return 0
+            if pad_count > filelen or pad_count > MAX_FILE_SIZE or pad_count < 0:
+                return 0
+        return pad_count
 
-    # file should have been overwritten and removed; if not...
-    logging.warning(name + ': falling through to 1 pass of zeros')
-    with open(filename, 'wb') as fd:
-        fd.write(chr(0) * getsize(filename))
-    shutil.rmtree(filename, ignore_errors=True)
-    if isfile(filename):  # yikes, file remains
-        msg = name + ': %s remains' % filename
-        _fatal(msg, DestroyError)
+    def unpad(self, filename, pad_count=None):
+        """Removes PFS padding from the file. raise ``PaddingError`` if no padding.
 
-    return pfs_UNKNOWN, orig_links, get_time() - t0
+        Truncates the file to remove padding; does not `destroy` the padding.
+        """
+        name = 'unpad'
+        logging.debug(name + ': start, file="%s"' % filename)
+        filelen = getsize(filename)
+        if pad_count is None:
+            pad_count = pad_len(filename)
+        if not pad_count:
+            msg = name + ": file not padded, can't unpad"
+            _fatal(msg, PaddingError)
+        with open(filename, 'r+b') as fd:
+            new_length = filelen - pad_count
+            logging.info(name + ': found padding in file %s' % filename)
+            # try to overwrite padding info, unknown effectiveness
+            overwrite = min(PAD_LEN, filelen - new_length)
+            if overwrite > 0:
+                for i in range(7):
+                    fd.seek(filelen - overwrite)
+                    fd.write(_printable_pwd(overwrite * 4))
+            # trim the padding length info
+            fd.truncate(new_length)
+            logging.info(name + ': truncated the file to remove padding')
 
+        return getsize(filename)
 
-def get_file_permissions(filename):
-    return int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+    def encrypt(self, datafile, pub, meta=True, date=True, keep=False,
+                enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
+        """Encrypt a file using AES-256, encrypt the password with RSA public-key.
 
+        Returns: full path to the encrypted file (= .tgz bundle of 3 files).
 
-def _set_file_permissions(filename, mode):
-    pass
-    # import win32security  # looks interesting
-    # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
-    #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
-    # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
-    # win32security.GetFileSecurity(filename, info)
-    # win32security.SetFileSecurity
+        The idea is that you can have and share a public key, which anyone can
+        use to encrypt things that only you can decrypt. Generating good keys and
+        managing them is non-trivial (see `genRsaKeys()` and documentation).
 
+        By default, the original plaintext is secure-deleted after encryption (see
+        parameter `keep=False`).
 
-def _get_hardlink_count(filename):
-    if sys.platform == 'win32':
-        if user_can_link:
-            cmd = ('fsutil', 'hardlink', 'list', filename)
-            links = _sys_call(cmd)
-            count = len([f for f in links.splitlines() if f.strip()])
-        else:
-            logging.warning('need to be an admin to use fsutil.exe (hardlink)')
-            count = -1
-    else:
-        count = os.stat(filename)[stat.ST_NLINK]
-    return count
+        Files larger than 8G before encryption will raise an error.
 
+        To mask small file sizes, `pad()` them to a desired minimum
+        size before calling `encrypt()`. To encrypt a directory, first call
+        ``make_archive()`` to create a single file, which you can then `encrypt()`.
 
-def _uniq_file(filename):
-    """Avoid file name collisions by appending a count before extension.
-    """
-    count = 0
-    base, filext = os.path.splitext(filename)
-    while isfile(filename) or os.path.isdir(filename):
-        count += 1
-        filename = base + '_' + str(count) + filext
-    return filename
+        :Parameters:
 
+            `datafile`:
+                The path (name) of the original plaintext file to be encrypted.
+                NB: To encrypt a whole directory, first convert it to a single
+                file (using `archive`), then encrypt the archive file.
+            `pub`:
+                The public key to use, specified as the path to a ``.pem`` file.
+                The minimum recommended key length is 2048 bits; 1024 is allowed
+                but strongly discouraged as it is not medium-term secure.
+            `meta`:
+                If ``True`` or a dict, include the meta-data (plaintext) in the
+                archive. If given a dict, the dict will be updated with new
+                meta-data. This allows all meta-data to be retained from the
+                initial encryption through multiple rotations of the encryption.
+                If ``False``, will indicate that the meta-data were suppressed.
 
-def _get_metadata(datafile, data_enc, pub, enc_method, date=True, hmac=None):
-    """Return info about an encryption context, as a {date-now: {info}} dict.
+                See ``load_metadata()`` and ``log_metadata()``.
+            `date`:
+                ``True`` : save the date in the clear-text meta-data.
+                ``False`` : suppress the date (if the date itself is sensitive)
+                File time-stamps are NOT obscured, even if ``date=False``.
+            `keep`:
+                ``False`` = remove original (unencrypted) file
+                ``True``  = leave original file
+            `enc_method`:
+                name of the function / method to use (currently only one option)
+            `hmac_key`:
+                optional key to use for a message authentication (HMAC-SHA256,
+                post-encryption); if a key is provided, the HMAC will be generated
+                and stored with the meta-data. (This is encrypt-then-MAC.)
+                For stronger integrity assurance, use ``sign()``.
+        """
+        _set_umask()
+        name = 'encrypt: '
+        logging.debug(name + 'start')
+        if not codec.is_registered(enc_method):
+            _fatal(name + "requested encMethod '%s' not registered" % enc_method)
+        if not pub or not isfile(pub):
+            _fatal(name + "no public-key.pem; file '%s' not found" % pub)
+        if not datafile or not isfile(datafile):
+            _fatal(name + "no data; file '%s' not found" % datafile)
 
-    If `date` is True, date-now is numerical date of the form
-    year-month-day-localtime,
-    If `date` is False, date-now is '(date-time suppressed)'. The date values
-    are also keys to the meta-data dict, and their format is chosen so that
-    they will sort to be in chronological order, even if the original
-    encryption date was suppressed (it comes first). Only do `date=False` for
-    the first initial encryption, not for rotation.
-    """
+        # Handle file size constraints:
+        size = getsize(datafile)
+        if size > MAX_FILE_SIZE:
+            _fatal(name + "file too large (max size %d bytes)" % MAX_FILE_SIZE)
 
-    md = {'clear-text-file': abspath(datafile),
-        'sha256 of encrypted file': '%s' % _sha256(data_enc)}
-    if hmac:
-        hmac_val = hmac_sha256(hmac, data_enc)
-        md.update({'hmac-sha256 of encrypted file': hmac_val})
-    md.update({'sha256 of public key': _sha256(pub),
-        'encryption method': lib_name + '.' + enc_method,
-        'sha256 of lib %s' % lib_name: _sha256(lib_path),
-        'rsa padding': RSA_PADDING,
-        'max_file_size_limit': MAX_FILE_SIZE})
-    if date:
-        now = time.strftime("%Y_%m_%d_%H%M", time.localtime())
-        m = int(get_time() / 60)
-        s = (get_time() - m * 60)
-        now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
-            # only want ms precision for testing, which can easily
-            # generate two files within ms of each other
-    else:
-        now = DATE_UNKNOWN
-    md.update({'encrypted year-month-day-localtime-Hm.s.ms': now,
-        'openssl version': openssl_version,
-        'platform': sys.platform,
-        'python version': '%d.%d.%d' % sys.version_info[:3]})
+        # Refuse to proceed without a pub key of sufficient bits:
+        bits = get_key_length(pub)
+        logging.info(name + 'pubkey length %d' % bits)
+        if bits < 1024:
+            _fatal("public key < 1024 bits; too short!", PublicKeyTooShortError)
+        if bits < 2048:
+            logging.error(name + 'public key < 2048 bits, no real security')
+        if not keep in [True, False]:
+            _fatal(name + "bad value for 'keep' parameter")
 
-    return {'meta-data %s' % now: md}
+        # Do the encryption, using a registered `encMethod`:
+        ENCRYPT_FXN = codec.get_function(enc_method)
+        data_enc, pwd_rsa = ENCRYPT_FXN(datafile, pub, OPENSSL)
+        ok_encrypt = (isfile(data_enc) and
+                        os.stat(data_enc)[stat.ST_SIZE] and
+                        isfile(pwd_rsa) and
+                        os.stat(pwd_rsa)[stat.ST_SIZE] >= PAD_MIN)
 
+        # Get and save meta-data (including HMAC):
+        metafile = os.path.split(datafile)[1] + META_EXT
+        # meta is True, False, or a meta-data dict to update with this session
+        if not type(meta) in [bool, dict]:
+            _fatal(name + 'meta must be True, False, or dict', AttributeError)
+        if not meta:  # False or {}
+            meta = NO_META_DATA
+        else:  # True or exising md
+            if meta is True:
+                meta = {}
+            md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
+            meta.update(md)
+        with open(metafile, 'wb') as fd:
+            json.dump(meta, fd)
 
-def load_metadata(md_file):
-    """Convenience function to read meta-data from a file, return it as a dict.
-    """
-    return json.load(open(md_file, 'rb'))
+        # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc archive:
+        fullpath_files = [data_enc, pwd_rsa, metafile]
+        files = [os.path.split(f)[1] for f in fullpath_files]
+        archive = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
+        make_archive(files, archive, keep=False)
 
+        if not keep:
+            # secure-delete unencrypted original, unless encrypt did not succeed:
+            ok_to_destroy = (ok_encrypt and isfile(archive) and
+                             os.stat(archive)[stat.ST_SIZE])
+            if ok_to_destroy:
+                destroy(datafile)
+                logging.info(name +
+                    'secure delete original plain-text file (destroy)')
+            else:
+                logging.error(name +
+                    'retaining original file, encryption did not succeed')
 
-def log_metadata(md, log=True):
-    """Convenience function to log and return meta-data in human-friendly form.
-    """
-    md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
-    if log:
-        logging.info(md_fmt)
-    return md_fmt
+        _unset_umask()
+        return self #abspath(archive)
 
+    def decrypt(self, data_enc, priv, pphr='', dec_method=None):
+        """Decrypt a file that was encoded using ``encrypt()``.
 
-def pad(filename, size=DEFAULT_PAD_SIZE):
-    """Append null bytes to ``filename`` until it has length ``size``.
+        To get the data back, need two files: ``data.enc`` and ``privkey.pem``.
+        If the private key has a passphrase, you'll need to provide that too.
+        `pphr` should be the passphrase itself (a string), not a file name.
 
-    The size is changed but `the fact that it was changed` is only obscured if
-    the padded file is encrypted. ``pad`` only changes the effective length.
+        Works on a copy of data.enc, tries to decrypt, clean-up only those files.
+        The original data.enc is not used (except to make a copy).
 
-    Files shorter than `size` will be padded out to `size` (see details below).
-    The minimum resulting file size is 128 bytes. Files that are already padded
-    will first have any padding removed, and then be padded out to the new
-    target size.
+        Tries to detect whether the decrypted file would end up inside a Dropbox
+        folder; if so, refuse to proceed.
 
-    Padded files include a few bytes for padding-descriptor tags, not just null
-    bytes. Thus files that are close to ``size`` already would not have their
-    sizes obscured AND also be marked as being padded (in the last ~36 bytes),
-    raising a ``PaddingError``. To avoid this, you can check using the
-    convenience function ``ok_to_pad()`` before calling ``pad()``.
+        :Parameters:
 
-    Internal padding format:
+            `data_enc` :
+                path to the encrypted file, as returned by ``encrypt()``; typically
+                ends with ``.enc``
+            `priv` :
+                path to the private key that is paired with the ``pub`` key used at
+                encryption; ``.pem`` format
+            `pphr` :
+                passphrase for the private key (as a string, or filename)
+            `dec_method` :
+                name of a decruption method that has been registered in
+                the ``codec`` (see ``PFSCodecRegistry``)
+        """
+        _set_umask()
+        name = 'decrypt: '
+        logging.debug(name + 'start')
 
-        ``file + n bytes + padding descriptors + final byte``
+        priv = abspath(priv)
+        data_enc = abspath(data_enc)
+        if is_in_dropbox(data_enc):
+            msg = name + 'file in Dropbox folder (unsafe to decrypt here)'
+            _fatal(msg, DecryptError)
+        if is_versioned(data_enc):
+            logging.warning(name + 'file exposed to version control')
+        if pphr and isfile(pphr):
+            pphr = open(abspath(pphr), 'rb').read()
+        elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
+            _fatal(name + 'missing passphrase (encrypted privkey)', DecryptError)
 
-    The padding descriptors consist of ``10-digits + one byte + PFS_PAD``,
-    where ``byte`` is b'\0' (the null byte). The process does not depend on the
-    value of the byte. The 10 digits gives the length of the padding as an
-    integer, in bytes. ``n`` is selected to make the new file size equal the
-    requested ``size``.
-
-    To make unpadding easier and more robust (and enable human inspection),
-    the end bytes provide the number of padding bytes that were added, plus an
-    identifier. 10 digits is not hard-coded as 10, but as the length of
-    ``str(max_file_size)``, where the ``max_file_size`` constant is 8G by
-    default. This means that any changes to the max file size constant can thus
-    cause pad / unpad failures across versions.
-
-    Special ``size`` values:
-
-       0 : unpad = remove any existing padding, no error if not present
-
-       -1 : strict unpad = remove padding if present, raise ``PaddingError``
-       if not present
-    """
-    name = 'pad: '
-    logging.debug(name + 'start')
-    size = int(size)
-    if 0 < size < PAD_MIN:
-        logging.info(name + 'requested size increased to %i bytes' % PAD_MIN)
-        size = PAD_MIN
-    if size > MAX_FILE_SIZE:
-        _fatal('pad: size must be <= %d (maximum file size)' % MAX_FILE_SIZE)
-    # handle special size values (0, -1) => unpad
-    pad_count = pad_len(filename)
-    if size < 1:
-        if pad_count or size == -1:
-            return unpad(filename)  # or fail appropriately
-        return getsize(filename)  # size==0, not padded
-
-    if pad_count:
-        unpad(filename, pad_count)
-    filesize = getsize(filename)
-    needed = ok_to_pad(filename, size, pad_count)
-    if needed == 0:
-        msg = name + 'file length not obscured (length >= requested size)'
-        _fatal(msg, PaddingError)
-    pad_bytes = PAD_STR + "%010d" % (needed + PAD_LEN)
-
-    # append bytes to pad the file:
-    with open(filename, 'a+b') as fd:
-        chunk = 1024  # cap memory usage
-        chunkbytes = PAD_BYTE * chunk
-        for i in range(needed // chunk):
-            fd.write(chunkbytes)
-        extrabytes = PAD_BYTE * (needed % chunk)
-        fd.write(extrabytes + pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE)
-        logging.info(name + 'append bytes to get to %d bytes' % size)
-
-    return getsize(filename)
-
-
-def ok_to_pad(filename, size, pad_count=None):
-    """Return 0 if ``size`` is not adequate to obscure the file length.
-    Else return the (non-zero) size.
-    """
-    # bug: what about very short < 128 minimum
-    if pad_count is None:
-        pad_count = pad_len(filename)
-    size = max(size, PAD_MIN)
-    return max(0, size - (getsize(filename) - pad_count) - PAD_LEN)
-
-
-def pad_len(filename):
-    """Returns ``pad_count`` (in bytes) if the file contains PFS-style padding.
-
-    Returns 0 if bad or missing padding.
-    """
-    name = 'pad_len'
-    logging.debug(name + ': start, file="%s"' % filename)
-    filelen = getsize(filename)
-    if filelen < PAD_LEN:
-        return 0
-    with open(filename, 'rb') as fd:
-        # read end bytes and then split
-        fd.seek(filelen - PAD_LEN)
-        pad_stuff = fd.read()
-        last_byte = pad_stuff[-1]  # expect all padding to be this byte
-        if last_byte != PAD_BYTE:
-            return 0
+        # Extract files from the archive (dataFileEnc) into the same directory,
+        # avoid name collisions, decrypt:
         try:
-            pad_tag_count, pad_marker = pad_stuff.split(PAD_BYTE)[-3:-1]
-            pad_count = int(pad_tag_count.split(PAD_STR)[-1])
-            assert pad_marker == PFS_PAD
-        except:
-            return 0
-        if pad_count > filelen or pad_count > MAX_FILE_SIZE or pad_count < 0:
-            return 0
-    return pad_count
+            # Unpack from archive into the same dir as the .enc file:
+            dest_dir = os.path.split(data_enc)[0]
+            logging.info('decrypting into %s' % dest_dir)
 
+            # Unpack the .enc file bundle into a new tmp dir:
+            data_aes, pwd_file, meta_file = _unpack(data_enc)
+            if not all([data_aes, pwd_file, meta_file]):
+                logging.warn('did not find 3 files in archive %s' % data_enc)
+                # ? or _fatal(msg, InternalFormatError) + suggest rotate() to fix
+            tmp_dir = os.path.split(data_aes)[0]
 
-def unpad(filename, pad_count=None):
-    """Removes PFS padding from the file. raise ``PaddingError`` if no padding.
+            # Get a valid decrypt method, from meta-data or argument:
+            clear_text = None  # file name; set in case _get_dec_method raise()es
+            dec_method = _get_dec_method(meta_file, dec_method)
+            if not dec_method:
+                _fatal('Could not get a valid decryption method', DecryptError)
 
-    Truncates the file to remove padding; does not `destroy` the padding.
-    """
-    name = 'unpad'
-    logging.debug(name + ': start, file="%s"' % filename)
-    filelen = getsize(filename)
-    if pad_count is None:
-        pad_count = pad_len(filename)
-    if not pad_count:
-        msg = name + ": file not padded, can't unpad"
-        _fatal(msg, PaddingError)
-    with open(filename, 'r+b') as fd:
-        new_length = filelen - pad_count
-        logging.info(name + ': found padding in file %s' % filename)
-        # try to overwrite padding info, unknown effectiveness
-        overwrite = min(PAD_LEN, filelen - new_length)
-        if overwrite > 0:
-            for i in range(7):
-                fd.seek(filelen - overwrite)
-                fd.write(_printable_pwd(overwrite * 4))
-        # trim the padding length info
-        fd.truncate(new_length)
-        logging.info(name + ': truncated the file to remove padding')
+            # Decrypt (into same new tmp dir):
+            DECRYPT_FXN = codec.get_function(dec_method)
+            data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, OPENSSL=OPENSSL)
 
-    return getsize(filename)
+            # Rename decrypted and meta files (mv to dest_dir):
+            _new_path = os.path.join(dest_dir, os.path.basename(data_dec))
+            clear_text = _uniq_file(_new_path)
+            try:
+                os.rename(data_dec, clear_text)
+            except OSError:
+                # if /tmp is on another partition
+                shutil.copy(data_dec, clear_text)
+                if not destroy(data_dec)[0] == pfs_DESTROYED:
+                    msg = name + 'destroy tmp clear txt failed: %s' % data_dec
+                    _fatal(msg, DestroyError)
+            perm_str = '0o' + oct(get_file_permissions(clear_text))[1:]
+            logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
+            if meta_file:
+                newMeta = _uniq_file(clear_text + META_EXT)
+                try:
+                    os.rename(meta_file, newMeta)
+                except OSError:
+                    # if /tmp is on another partition
+                    shutil.copy(meta_file, newMeta)
+                    if not destroy(meta_file)[0] == pfs_DESTROYED:
+                        msg = name + 'destroy tmp meta-data failed: %s' % meta_file
+                        _fatal(msg, DestroyError)
+                perm_str = '0o' + oct(get_file_permissions(newMeta))[1:]
+                logging.info('meta-data, permissions ' + perm_str + ': ' + newMeta)
+        finally:
+            try:
+                # clean-up, nothing clear text inside
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except:
+                pass
+            try:
+                # redundant (umask on mac, linux) or no effect (win):
+                os.chmod(clear_text, PERMISSIONS)
+                os.chmod(newMeta, PERMISSIONS)
+            except:
+                pass
 
+        _unset_umask()
+        return self  #abspath(clear_text)
 
-def encrypt(datafile, pub, meta=True, date=True, keep=False,
-            enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
-    """Encrypt a file using AES-256, encrypt the password with RSA public-key.
+    def rotate(self, data_enc, pub, priv, pphr=None,  # priv pphr = old, pub = new
+               priv_new=None, pphr_new=None,
+               hmac_new=None, pad_new=None):
+        """Swap old encryption (priv) for new (pub), i.e., decrypt-then-re-encrypt.
 
-    Returns: full path to the encrypted file (= .tgz bundle of 3 files).
+        Returns the path to the "same" underlying file (i.e., same contents, new
+        encryption). New meta-data are added alongside the original meta-data. If
+        `new_pad` is given, the padding will be updated to the new value prior to
+        re-encryption.
 
-    The idea is that you can have and share a public key, which anyone can
-    use to encrypt things that only you can decrypt. Generating good keys and
-    managing them is non-trivial (see `genRsaKeys()` and documentation).
+        Conceptually there are three separate steps: rotate, verify the new file,
+        and destroy the old file. By default, `rotate()` will only do rotation. To
+        do the other two steps, `rotate()` requires an existence proof that the new
+        encrypted file can be decrypted. If decrypting the new file succeeds (which
+        requires `priv_new` and `pphr_new`), then original file will be destroyed.
 
-    By default, the original plaintext is secure-deleted after encryption (see
-    parameter `keep=False`).
+        The dilemma is that it would be highly undesirable to re-encrypt the data
+        with a new public key for which the private key is not available. But
+        simply retaining the original encrypted file is also not ideal: Key
+        rotation is typically done when the old keys are no longer considered
+        secure. It is desirable to destroy the old encrypted file as soon as it is
+        safe to do so. Hashes are used to determine whether the file contents match
+        (ignoring possible differences in padding).
 
-    Files larger than 8G before encryption will raise an error.
+        `rotate()` will generally try to be permissive about its inputs, so that
+        its possible to rotate the encryption to recover from internal formatting
+        errors.
+        """
+        _set_umask()
+        name = 'rotate'
+        logging.debug(name + ': start')
+        file_dec = decrypt(data_enc, priv, pphr=pphr)
+        try:
+            old_meta = file_dec + META_EXT
+            # Always store the date of the rotation
+            if isfile(old_meta):
+                try:
+                    md = load_metadata(old_meta)
+                except:
+                    logging.error(name + ': failed to read metadata from file')
+                    md = _get_no_metadata()
+            else:
+                md = _get_no_metadata()
+            if pad_new > 0:  # can be -1
+                pad(file_dec, pad_new)
+            # for verification, only hash after changing the padding
+            hash_old = _sha256(file_dec)
+            new_enc = encrypt(file_dec, pub, date=True, meta=md,
+                                 keep=False, hmac_key=hmac_new)
+        finally:
+            # Never want the intermediate clear-text; encrypt() will destroy
+            # it but there might be an exception before getting to encrypt()
+            if isfile(file_dec):
+                destroy(file_dec)
+            if isfile(old_meta):
+                destroy(old_meta)
 
-    To mask small file sizes, `pad()` them to a desired minimum
-    size before calling `encrypt()`. To encrypt a directory, first call
-    ``make_archive()`` to create a single file, which you can then `encrypt()`.
+        # Check the rotation if given a key to do so; destroy data_enc if safe:
+        if priv_new:
+            # if a hash of decrypted file is good, delete original data_enc
+            new_dec = decrypt(new_enc, priv_new, pphr=pphr_new)
+            hash_new = _sha256(new_dec)
+            destroy(new_dec)  # just wanted to get a hash
+            new_meta = new_dec + META_EXT
+            if isfile(new_meta):
+                destroy(new_meta)
+            if hash_new != hash_old:
+                _fatal(name + ': failed to verify, retaining original')
+            else:
+                logging.info(name + ': verified, deleting original')
+                destroy(data_enc)
 
-    :Parameters:
+        _unset_umask()
+        return self  # new_enc
 
-        `datafile`:
-            The path (name) of the original plaintext file to be encrypted.
-            NB: To encrypt a whole directory, first convert it to a single
-            file (using `archive`), then encrypt the archive file.
-        `pub`:
-            The public key to use, specified as the path to a ``.pem`` file.
-            The minimum recommended key length is 2048 bits; 1024 is allowed
-            but strongly discouraged as it is not medium-term secure.
-        `meta`:
-            If ``True`` or a dict, include the meta-data (plaintext) in the
-            archive. If given a dict, the dict will be updated with new
-            meta-data. This allows all meta-data to be retained from the
-            initial encryption through multiple rotations of the encryption.
-            If ``False``, will indicate that the meta-data were suppressed.
+    def sign(self, filename, priv, pphr=None, out=None):
+        """Sign a given file with a private key, via `openssl dgst`.
 
-            See ``load_metadata()`` and ``log_metadata()``.
-        `date`:
-            ``True`` : save the date in the clear-text meta-data.
-            ``False`` : suppress the date (if the date itself is sensitive)
-            File time-stamps are NOT obscured, even if ``date=False``.
-        `keep`:
-            ``False`` = remove original (unencrypted) file
-            ``True``  = leave original file
-        `enc_method`:
-            name of the function / method to use (currently only one option)
-        `hmac_key`:
-            optional key to use for a message authentication (HMAC-SHA256,
-            post-encryption); if a key is provided, the HMAC will be generated
-            and stored with the meta-data. (This is encrypt-then-MAC.)
-            For stronger integrity assurance, use ``sign()``.
-    """
-    _set_umask()
-    name = 'encrypt: '
-    logging.debug(name + 'start')
-    if not codec.is_registered(enc_method):
-        _fatal(name + "requested encMethod '%s' not registered" % enc_method)
-    if not pub or not isfile(pub):
-        _fatal(name + "no public-key.pem; file '%s' not found" % pub)
-    if not datafile or not isfile(datafile):
-        _fatal(name + "no data; file '%s' not found" % datafile)
-
-    # Handle file size constraints:
-    size = getsize(datafile)
-    if size > MAX_FILE_SIZE:
-        _fatal(name + "file too large (max size %d bytes)" % MAX_FILE_SIZE)
-
-    # Refuse to proceed without a pub key of sufficient bits:
-    bits = get_key_length(pub)
-    logging.info(name + 'pubkey length %d' % bits)
-    if bits < 1024:
-        _fatal("public key < 1024 bits; too short!", PublicKeyTooShortError)
-    if bits < 2048:
-        logging.error(name + 'public key < 2048 bits, no real security')
-    if not keep in [True, False]:
-        _fatal(name + "bad value for 'keep' parameter")
-
-    # Do the encryption, using a registered `encMethod`:
-    ENCRYPT_FXN = codec.get_function(enc_method)
-    data_enc, pwd_rsa = ENCRYPT_FXN(datafile, pub, OPENSSL)
-    ok_encrypt = (isfile(data_enc) and
-                    os.stat(data_enc)[stat.ST_SIZE] and
-                    isfile(pwd_rsa) and
-                    os.stat(pwd_rsa)[stat.ST_SIZE] >= PAD_MIN)
-
-    # Get and save meta-data (including HMAC):
-    metafile = os.path.split(datafile)[1] + META_EXT
-    # meta is True, False, or a meta-data dict to update with this session
-    if not type(meta) in [bool, dict]:
-        _fatal(name + 'meta must be True, False, or dict', AttributeError)
-    if not meta:  # False or {}
-        meta = NO_META_DATA
-    else:  # True or exising md
-        if meta is True:
-            meta = {}
-        md = _get_metadata(datafile, data_enc, pub, enc_method, date, hmac_key)
-        meta.update(md)
-    with open(metafile, 'wb') as fd:
-        json.dump(meta, fd)
-
-    # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc archive:
-    fullpath_files = [data_enc, pwd_rsa, metafile]
-    files = [os.path.split(f)[1] for f in fullpath_files]
-    archive = _uniq_file(os.path.splitext(datafile)[0] + ARCHIVE_EXT)
-    make_archive(files, archive, keep=False)
-
-    if not keep:
-        # secure-delete unencrypted original, unless encrypt did not succeed:
-        ok_to_destroy = (ok_encrypt and isfile(archive) and
-                         os.stat(archive)[stat.ST_SIZE])
-        if ok_to_destroy:
-            destroy(datafile)
-            logging.info(name +
-                'secure delete original plain-text file (destroy)')
+        Get a digest of the file, sign the digest, return base64-encoded signature.
+        """
+        name = 'sign'
+        logging.debug(name + ': start')
+        sig_out = filename + '.sig'
+        if use_rsautl:
+            cmd_SIGN = [OPENSSL, 'dgst', '-sign', priv, '-out', sig_out]
+            if pphr:
+                if isfile(pphr):
+                    logging.warning(name + ': reading passphrase from file')
+                    pphr = open(pphr, 'rb').read()
+                cmd_SIGN += ['-passin', 'stdin']
+            cmd_SIGN += ['-keyform', 'PEM', filename]
         else:
-            logging.error(name +
-                'retaining original file, encryption did not succeed')
+            _fatal('only rsautl is supported', NotImplementedError)
+        if pphr:
+            _sys_call(cmd_SIGN, stdin=pphr)
+        else:
+            _sys_call(cmd_SIGN)
+        sig = open(sig_out, 'rb').read()
 
-    _unset_umask()
-    return abspath(archive)
+        if out:
+            with open(out, 'wb') as fd:
+                fd.write(b64encode(sig))
+            return out
+        return b64encode(sig)
+
+    def verify(self, filename, pub, sig):
+        """Verify signature of filename using pubkey
+
+        `sig` should be a base64-encoded signature, or a path to a signature file.
+        """
+        name = 'verify'
+        logging.debug(name + ': start, file ' + filename)
+        if use_rsautl:
+            cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform', 'PEM']
+        else:
+            _fatal('only rsautl is supported', NotImplementedError)
+
+        if isfile(sig):
+            sig = open(sig, 'rb').read()
+        with NamedTemporaryFile(delete=False) as sig_file:
+            sig_file.write(b64decode(sig))
+        result = _sys_call(cmd_VERIFY + ['-signature', sig_file.name, filename])
+        os.unlink(sig_file.name)
+
+        return result in ['Verification OK', 'Verified OK']
+
+    def destroy(self, filename, cmdList=()):
+        """Try to secure-delete a file; returns (status, link count, time taken).
+
+        Calls an OS-specific secure-delete utility, defaulting to::
+
+            Mac:     /usr/bin/srm   -f -z --medium  filename
+            Linux:   /usr/bin/shred -f -u -n 7 filename
+            Windows: sdelete.exe    -q -p 7 filename
+
+        If these are not available, `destroy` will warn and fall through to trying
+        to merely overwrite the data with 0's (with unknown effectiveness)
+
+        As an alternative, a custom command sequence can be specified::
+
+            cmdList = (command, option1, option2, ..., filename)
+
+        Ideally avoid the need to destroy files. Keep all sensitive data in RAM.
+        File systems that are journaled, have RAID, are mirrored, or other back-up
+        are much trickier to secure-delete.
+
+        `destroy` may fail to remove all traces of a file if multiple hard-links
+        exist for the file. For this reason, the original link count is returned.
+        In the case of multiple hardlinks, Linux (shred) and Windows (sdelete)
+        do appear to destroy the data, whereas Mac (srm) will not.
+
+        The time required can help confirm whether it was a secure removal (slow)
+        or an ordinary removal (unlinking is fast).
+
+        If a NamedTemporaryFile object is given instead of a filename, destroy()
+        will try to secure-delete the contents and close the file. Other open
+        file-objects will raise a DestroyError, because the file is not removed.
+        """
+
+        name = 'destroy'
+        got_file_object = hasattr(filename, 'close')
+        if got_file_object:
+            filename, file_object = filename.name, filename
+            file_object.seek(0)
+
+        if is_in_dropbox(filename):
+            logging.error(name + ': in dropbox; no secure delete of remote files')
+        vc = is_versioned(filename)
+        if vc:
+            logging.warning(name + ': file exposed to %s version control' % vc)
+        os.chmod(filename, 0o600)  # raises OSError if no file or cant change
+        filename = abspath(filename)
+        t0 = get_time()
+
+        # Try to detect & inform about hardlinks:
+        # srm will detect but not affect those links or the inode data
+        # shred and fsutil will blast the inode's data, but not unlink other links
+        orig_links = _get_hardlink_count(filename)
+        if sys.platform != 'win32' and orig_links > 1:
+            mount_path = abspath(filename)
+            while not os.path.ismount(mount_path):
+                mount_path = os.path.dirname(mount_path)
+            msg = name + """: '%s' (inode %d) has other hardlinks:
+                `find %s -xdev -inum %d`""".replace('    ', '')
+            file_stat = os.stat(filename)
+            inode = file_stat[stat.ST_INO]
+            vals = (filename, inode, mount_path, inode)
+            logging.warning(msg % vals)
+
+        if not cmdList:
+            cmdList = (destroy_TOOL,) + destroy_OPTS + (filename,)
+        else:
+            logging.info(name + ': %s' % ' '.join(cmdList))
+
+        good_sys_call = False
+        try:
+            __, err = _sys_call(cmdList, stderr=True)
+            good_sys_call = not err
+        except OSError as e:
+            good_sys_call = False
+            logging.warning(name + ': %s' % e)
+            logging.warning(name + ': %s' % ' '.join(cmdList))
+        finally:
+            if got_file_object:
+                try:
+                    file_object.close()
+                    file_object.unlink()
+                    del(file_object.name)
+                except:
+                    pass  # gives an OSError but has done something
+            if not isfile(filename):
+                if good_sys_call:
+                    return pfs_DESTROYED, orig_links, get_time() - t0
+                return pfs_UNKNOWN, orig_links, get_time() - t0
+
+        # file should have been overwritten and removed; if not...
+        logging.warning(name + ': falling through to 1 pass of zeros')
+        with open(filename, 'wb') as fd:
+            fd.write(chr(0) * getsize(filename))
+        shutil.rmtree(filename, ignore_errors=True)
+        if isfile(filename):  # yikes, file remains
+            msg = name + ': %s remains' % filename
+            _fatal(msg, DestroyError)
+
+        return pfs_UNKNOWN, orig_links, get_time() - t0
+
+    def get_file_permissions(self, filename):
+        return int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+
+    def _set_file_permissions(self, filename, mode):
+        pass
+        # import win32security  # looks interesting
+        # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
+        #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
+        # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
+        # win32security.GetFileSecurity(filename, info)
+        # win32security.SetFileSecurity
+
+    def _get_hardlink_count(self, filename):
+        if sys.platform == 'win32':
+            if user_can_link:
+                cmd = ('fsutil', 'hardlink', 'list', filename)
+                links = _sys_call(cmd)
+                count = len([f for f in links.splitlines() if f.strip()])
+            else:
+                logging.warning('need to be an admin to use fsutil.exe (hardlink)')
+                count = -1
+        else:
+            count = os.stat(filename)[stat.ST_NLINK]
+        return count
+
+    def _uniq_file(self, filename):
+        """Avoid file name collisions by appending a count before extension.
+        """
+        count = 0
+        base, filext = os.path.splitext(filename)
+        while isfile(filename) or os.path.isdir(filename):
+            count += 1
+            filename = base + '_' + str(count) + filext
+        return filename
+
+    def is_in_dropbox(self, filename):
+        """Return True if the file is within a Dropbox folder.
+        """
+        filename = _abspath(filename)
+        db_path = get_dropbox_path()
+        if not db_path:
+            return False
+
+        inside = (filename.startswith(db_path + os.sep) or
+                  filename == db_path)
+        logging.info('%s is%s inside Dropbox' % (filename, (' not', '')[inside]))
+
+        return inside
+
+    def is_versioned(self, filename):
+        """Try to detect if a file is under version control (svn, git, hg).
+
+        Returns a string: 'git', 'svn', 'hg', or ''
+        Only approximate: the directory might be versioned, but not this file
+        """
+        logging.debug('trying to detect version control (svn, git, hg)')
+
+        return any([get_svn_info(filename),
+                    get_git_info(filename),
+                    get_hg_info(filename)])
+
+    def get_git_info(self, path):
+        """Report whether a directory or file is in a git repo (version control).
+
+        Files can be in the repo directory but not actually tracked by git.
+        """
+        if not path or not exists(path):
+            return False
+        try:
+            _sys_call(['git'])
+        except OSError:
+            # no git
+            return False
+        cmd = ['git', 'ls-files', abspath(path), '--error-unmatch']
+        reported = _sys_call(cmd, ignore_error=True)
+        is_tracked = bool(reported)
+
+        logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
+        return is_tracked
+
+    def get_svn_info(self, path):
+        """Tries to discover if a file is under svn (version control).
+        """
+        if not isdir(path):
+            path = dirname(path)
+        has_svn_dir = isdir(os.path.join(path, '.svn'))
+        logging.debug('path %s tracked in svn repo: %s' % (path, has_svn_dir))
+        return has_svn_dir
+
+    def get_hg_info(self, path):
+        """Tries to discover if a file is under mercurial (version control).
+
+        `detailed=True` not tested recently (similar code worked before).
+        """
+        if not isdir(path):
+            path = dirname(path)
+        has_hg_dir = isdir(os.path.join(path, '.hg'))
+        logging.debug('path %s tracked in hg repo: %s' % (path, has_hg_dir))
+        return has_hg_dir
+
+
+class EncArchive(object):
+    """Class for working with an archive .enc file, holding exactly 3 files.
+
+    Currently an archive is a normal .tar.gz file.
+    """
+    def __init__(self, filename):
+        self.filename = abspath_(filename)
+
+    def make_archive(self, paths, name='', keep=True):
+        """Make a tgz file from a list of paths, set permissions. Directories ok.
+
+        Eventually might take an arg to decide whether to use tar or zip.
+        Just a tarfile wrapper with extension, permissions, unlink options.
+        unlink is whether to unlink the original files after making an archive, not
+        a secure-delete option.
+        """
+
+        _set_umask()
+        if isinstance(paths, str):
+            paths = [paths]
+        if not name:
+            name = os.path.splitext(paths[0])[0].strip(os.sep) + '.tgz'
+        name = _uniq_file(name)
+        tar_fd = tarfile.open(name, "w:gz")
+        for p in paths:
+            tar_fd.add(p, recursive=True)  # True by default, get whole directory
+            if not keep:
+                try:
+                    shutil.rmtree(p)  # might be a directory
+                except OSError:
+                    os.unlink(p)
+        tar_fd.close()
+
+        _unset_umask()
+        return name
+
+    def _unpack(self, data_enc):
+        """Extract files from archive into a tmp dir, return paths to files.
+        """
+        _set_umask()
+        name = 'unpack'
+        logging.debug(name + ': start')
+
+        # Check for bad paths:
+        if not data_enc or not isfile(data_enc):
+            _fatal("could not find <file>%s '%s'" % (ARCHIVE_EXT, str(data_enc)))
+        if not tarfile.is_tarfile(data_enc):
+            _fatal(name + ': %s not expected format (.tgz)' % data_enc,
+                   InternalFormatError)
+
+        # Check for bad internal paths:
+        #    can't "with open(tarfile...) as tar" in python 2.6.6
+        tar = tarfile.open(data_enc, "r:gz")
+        badNames = [f for f in tar.getmembers()
+                    if f.name[0] in ['.', os.sep] or f.name[1:3] == ':\\']
+        if badNames:
+            _fatal(name + ': bad/dubious internal file names' % os.sep,
+                   InternalFormatError)
+
+        # Extract:
+        tmp_dir = mkdtemp()
+        tar.extractall(path=tmp_dir)
+        tar.close()
+
+        fileList = os.listdir(tmp_dir)
+        data_aes = pwdFileRsa = meta_file = None
+        for fname in fileList:
+            if fname.endswith(AES_EXT):
+                data_aes = os.path.join(tmp_dir, fname)
+            elif fname.endswith(RSA_EXT):
+                pwdFileRsa = os.path.join(tmp_dir, fname)
+            elif fname.endswith(META_EXT):
+                meta_file = os.path.join(tmp_dir, fname)
+            else:
+                _fatal(name + ': unexpected file in archive', InternalFormatError)
+
+        _unset_umask()
+        return data_aes, pwdFileRsa, meta_file
+
+    def _get_dec_method(self, meta_file, dec_method):
+        """Return a valid decryption method, based on meta-data or default.
+
+        Cross-validate requested dec_method against meta-data, or warn if mismatch.
+        """
+        enc_method = 'unknown'
+        if meta_file:
+            md = load_metadata(meta_file)
+            dates = list(md.keys())  # dates of meta-data events
+            most_recent = sorted(dates)[-1]
+            if not 'encryption method' in list(md[most_recent].keys()):
+                enc_method = 'unknown'
+                _dec_from_enc = enc_method
+            else:
+                enc_method = md[most_recent]['encryption method'].split('.')[1]
+                _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
+
+            if dec_method:
+                if dec_method != _dec_from_enc:
+                    msg = 'requested decryption function (%s)' % dec_method +\
+                          ' != encryption function (meta-data: %s)' % enc_method
+                    logging.warning(msg)
+            else:
+                try:
+                    dec_method = str(_dec_from_enc)  # avoid unicode issue
+                except:
+                    dec_method = _dec_from_enc
+                logging.info('implicitly want "' + dec_method + '" (meta-data)')
+        if not meta_file or enc_method == 'unknown':
+            # can't infer, no meta-data
+            if not dec_method or enc_method == 'unknown':
+                # ... and nothing explicit either, so go with default:
+                logging.info('falling through to default decryption')
+                available = [f for f in list(default_codec.keys())
+                             if f.startswith('_decrypt_')]
+                dec_method = available[0]
+
+        if not codec.is_registered(dec_method):
+            _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method,
+                   CodecRegistryError)
+        logging.info('_get_dec_method: dec fxn set to: ' + str(dec_method))
+
+        return dec_method
+
+    def _get_metadata(self, datafile, data_enc, pub, enc_method, date=True, hmac=None):
+        """Return info about an encryption context, as a {date-now: {info}} dict.
+
+        If `date` is True, date-now is numerical date of the form
+        year-month-day-localtime,
+        If `date` is False, date-now is '(date-time suppressed)'. The date values
+        are also keys to the meta-data dict, and their format is chosen so that
+        they will sort to be in chronological order, even if the original
+        encryption date was suppressed (it comes first). Only do `date=False` for
+        the first initial encryption, not for rotation.
+        """
+
+        md = {'clear-text-file': abspath(datafile),
+            'sha256 of encrypted file': '%s' % _sha256(data_enc)}
+        if hmac:
+            hmac_val = hmac_sha256(hmac, data_enc)
+            md.update({'hmac-sha256 of encrypted file': hmac_val})
+        md.update({'sha256 of public key': _sha256(pub),
+            'encryption method': lib_name + '.' + enc_method,
+            'sha256 of lib %s' % lib_name: _sha256(lib_path),
+            'rsa padding': RSA_PADDING,
+            'max_file_size_limit': MAX_FILE_SIZE})
+        if date:
+            now = time.strftime("%Y_%m_%d_%H%M", time.localtime())
+            m = int(get_time() / 60)
+            s = (get_time() - m * 60)
+            now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
+                # only want ms precision for testing, which can easily
+                # generate two files within ms of each other
+        else:
+            now = DATE_UNKNOWN
+        md.update({'encrypted year-month-day-localtime-Hm.s.ms': now,
+            'openssl version': openssl_version,
+            'platform': sys.platform,
+            'python version': '%d.%d.%d' % sys.version_info[:3]})
+
+        return {'meta-data %s' % now: md}
+
+    def load_metadata(self, md_file):
+        """Convenience function to read meta-data from a file, return it as a dict.
+        """
+        return json.load(open(md_file, 'rb'))
+
+    def log_metadata(self, md, log=True):
+        """Convenience function to log and return meta-data in human-friendly form.
+        """
+        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
+        if log:
+            logging.info(md_fmt)
+        return md_fmt
 
 
 def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
@@ -1075,204 +1471,6 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
 
     _unset_umask()
     return abspath(data_enc), abspath(pwd_rsa)
-
-
-def _unpack(data_enc):
-    """Extract files from archive into a tmp dir, return paths to files.
-    """
-    _set_umask()
-    name = 'unpack'
-    logging.debug(name + ': start')
-
-    # Check for bad paths:
-    if not data_enc or not isfile(data_enc):
-        _fatal("could not find <file>%s '%s'" % (ARCHIVE_EXT, str(data_enc)))
-    if not tarfile.is_tarfile(data_enc):
-        _fatal(name + ': %s not expected format (.tgz)' % data_enc,
-               InternalFormatError)
-
-    # Check for bad internal paths:
-    #    can't "with open(tarfile...) as tar" in python 2.6.6
-    tar = tarfile.open(data_enc, "r:gz")
-    badNames = [f for f in tar.getmembers()
-                if f.name[0] in ['.', os.sep] or f.name[1:3] == ':\\']
-    if badNames:
-        _fatal(name + ': bad/dubious internal file names' % os.sep,
-               InternalFormatError)
-
-    # Extract:
-    tmp_dir = mkdtemp()
-    tar.extractall(path=tmp_dir)
-    tar.close()
-
-    fileList = os.listdir(tmp_dir)
-    data_aes = pwdFileRsa = meta_file = None
-    for fname in fileList:
-        if fname.endswith(AES_EXT):
-            data_aes = os.path.join(tmp_dir, fname)
-        elif fname.endswith(RSA_EXT):
-            pwdFileRsa = os.path.join(tmp_dir, fname)
-        elif fname.endswith(META_EXT):
-            meta_file = os.path.join(tmp_dir, fname)
-        else:
-            _fatal(name + ': unexpected file in archive', InternalFormatError)
-
-    _unset_umask()
-    return data_aes, pwdFileRsa, meta_file
-
-
-def _get_dec_method(meta_file, dec_method):
-    """Return a valid decryption method, based on meta-data or default.
-
-    Cross-validate requested dec_method against meta-data, or warn if mismatch.
-    """
-    enc_method = 'unknown'
-    if meta_file:
-        md = load_metadata(meta_file)
-        dates = list(md.keys())  # dates of meta-data events
-        most_recent = sorted(dates)[-1]
-        if not 'encryption method' in list(md[most_recent].keys()):
-            enc_method = 'unknown'
-            _dec_from_enc = enc_method
-        else:
-            enc_method = md[most_recent]['encryption method'].split('.')[1]
-            _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
-
-        if dec_method:
-            if dec_method != _dec_from_enc:
-                msg = 'requested decryption function (%s)' % dec_method +\
-                      ' != encryption function (meta-data: %s)' % enc_method
-                logging.warning(msg)
-        else:
-            try:
-                dec_method = str(_dec_from_enc)  # avoid unicode issue
-            except:
-                dec_method = _dec_from_enc
-            logging.info('implicitly want "' + dec_method + '" (meta-data)')
-    if not meta_file or enc_method == 'unknown':
-        # can't infer, no meta-data
-        if not dec_method or enc_method == 'unknown':
-            # ... and nothing explicit either, so go with default:
-            logging.info('falling through to default decryption')
-            available = [f for f in list(default_codec.keys())
-                         if f.startswith('_decrypt_')]
-            dec_method = available[0]
-
-    if not codec.is_registered(dec_method):
-        _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method,
-               CodecRegistryError)
-    logging.info('_get_dec_method: dec fxn set to: ' + str(dec_method))
-
-    return dec_method
-
-
-def decrypt(data_enc, priv, pphr='', dec_method=None):
-    """Decrypt a file that was encoded using ``encrypt()``.
-
-    To get the data back, need two files: ``data.enc`` and ``privkey.pem``.
-    If the private key has a passphrase, you'll need to provide that too.
-    `pphr` should be the passphrase itself (a string), not a file name.
-
-    Works on a copy of data.enc, tries to decrypt, clean-up only those files.
-    The original data.enc is not used (except to make a copy).
-
-    Tries to detect whether the decrypted file would end up inside a Dropbox
-    folder; if so, refuse to proceed.
-
-    :Parameters:
-
-        `data_enc` :
-            path to the encrypted file, as returned by ``encrypt()``; typically
-            ends with ``.enc``
-        `priv` :
-            path to the private key that is paired with the ``pub`` key used at
-            encryption; ``.pem`` format
-        `pphr` :
-            passphrase for the private key (as a string, or filename)
-        `dec_method` :
-            name of a decruption method that has been registered in
-            the ``codec`` (see ``PFSCodecRegistry``)
-    """
-    _set_umask()
-    name = 'decrypt: '
-    logging.debug(name + 'start')
-
-    priv = abspath(priv)
-    data_enc = abspath(data_enc)
-    if is_in_dropbox(data_enc):
-        msg = name + 'file in Dropbox folder (unsafe to decrypt here)'
-        _fatal(msg, DecryptError)
-    if is_versioned(data_enc):
-        logging.warning(name + 'file exposed to version control')
-    if pphr and isfile(pphr):
-        pphr = open(abspath(pphr), 'rb').read()
-    elif not pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
-        _fatal(name + 'missing passphrase (encrypted privkey)', DecryptError)
-
-    # Extract files from the archive (dataFileEnc) into the same directory,
-    # avoid name collisions, decrypt:
-    try:
-        # Unpack from archive into the same dir as the .enc file:
-        dest_dir = os.path.split(data_enc)[0]
-        logging.info('decrypting into %s' % dest_dir)
-
-        # Unpack the .enc file bundle into a new tmp dir:
-        data_aes, pwd_file, meta_file = _unpack(data_enc)
-        if not all([data_aes, pwd_file, meta_file]):
-            logging.warn('did not find 3 files in archive %s' % data_enc)
-            # ? or _fatal(msg, InternalFormatError) + suggest rotate() to fix
-        tmp_dir = os.path.split(data_aes)[0]
-
-        # Get a valid decrypt method, from meta-data or argument:
-        clear_text = None  # file name; set in case _get_dec_method raise()es
-        dec_method = _get_dec_method(meta_file, dec_method)
-        if not dec_method:
-            _fatal('Could not get a valid decryption method', DecryptError)
-
-        # Decrypt (into same new tmp dir):
-        DECRYPT_FXN = codec.get_function(dec_method)
-        data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr, OPENSSL=OPENSSL)
-
-        # Rename decrypted and meta files (mv to dest_dir):
-        _new_path = os.path.join(dest_dir, os.path.basename(data_dec))
-        clear_text = _uniq_file(_new_path)
-        try:
-            os.rename(data_dec, clear_text)
-        except OSError:
-            # if /tmp is on another partition
-            shutil.copy(data_dec, clear_text)
-            if not destroy(data_dec)[0] == pfs_DESTROYED:
-                msg = name + 'destroy tmp clear txt failed: %s' % data_dec
-                _fatal(msg, DestroyError)
-        perm_str = '0o' + oct(get_file_permissions(clear_text))[1:]
-        logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
-        if meta_file:
-            newMeta = _uniq_file(clear_text + META_EXT)
-            try:
-                os.rename(meta_file, newMeta)
-            except OSError:
-                # if /tmp is on another partition
-                shutil.copy(meta_file, newMeta)
-                if not destroy(meta_file)[0] == pfs_DESTROYED:
-                    msg = name + 'destroy tmp meta-data failed: %s' % meta_file
-                    _fatal(msg, DestroyError)
-            perm_str = '0o' + oct(get_file_permissions(newMeta))[1:]
-            logging.info('meta-data, permissions ' + perm_str + ': ' + newMeta)
-    finally:
-        try:
-            # clean-up, nothing clear text inside
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except:
-            pass
-        try:
-            # redundant (umask on mac, linux) or no effect (win):
-            os.chmod(clear_text, PERMISSIONS)
-            os.chmod(newMeta, PERMISSIONS)
-        except:
-            pass
-
-    _unset_umask()
-    return abspath(clear_text)
 
 
 def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
@@ -1335,133 +1533,25 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
     return abspath(data_dec)
 
 
-def rotate(data_enc, pub, priv, pphr=None,  # priv pphr = old, pub = new
-           priv_new=None, pphr_new=None,
-           hmac_new=None, pad_new=None):
-    """Swap old encryption (priv) for new (pub), i.e., decrypt-then-re-encrypt.
-
-    Returns the path to the "same" underlying file (i.e., same contents, new
-    encryption). New meta-data are added alongside the original meta-data. If
-    `new_pad` is given, the padding will be updated to the new value prior to
-    re-encryption.
-
-    Conceptually there are three separate steps: rotate, verify the new file,
-    and destroy the old file. By default, `rotate()` will only do rotation. To
-    do the other two steps, `rotate()` requires an existence proof that the new
-    encrypted file can be decrypted. If decrypting the new file succeeds (which
-    requires `priv_new` and `pphr_new`), then original file will be destroyed.
-
-    The dilemma is that it would be highly undesirable to re-encrypt the data
-    with a new public key for which the private key is not available. But
-    simply retaining the original encrypted file is also not ideal: Key
-    rotation is typically done when the old keys are no longer considered
-    secure. It is desirable to destroy the old encrypted file as soon as it is
-    safe to do so. Hashes are used to determine whether the file contents match
-    (ignoring possible differences in padding).
-
-    `rotate()` will generally try to be permissive about its inputs, so that
-    its possible to rotate the encryption to recover from internal formatting
-    errors.
+def _entropy_check():
+    """Basic query for some indication that entropy is available.
     """
-    _set_umask()
-    name = 'rotate'
-    logging.debug(name + ': start')
-    file_dec = decrypt(data_enc, priv, pphr=pphr)
-    try:
-        old_meta = file_dec + META_EXT
-        # Always store the date of the rotation
-        if isfile(old_meta):
-            try:
-                md = load_metadata(old_meta)
-            except:
-                logging.error(name + ': failed to read metadata from file')
-                md = _get_no_metadata()
+    if sys.platform == 'darwin':
+        # SecurityServer daemon is supposed to ensure entropy is available:
+        ps = _sys_call(['ps', '-e'])
+        securityd = _sys_call(['which', 'securityd'])  # full path
+        if securityd in ps:
+            e = securityd + ' running'
         else:
-            md = _get_no_metadata()
-        if pad_new > 0:  # can be -1
-            pad(file_dec, pad_new)
-        # for verification, only hash after changing the padding
-        hash_old = _sha256(file_dec)
-        new_enc = encrypt(file_dec, pub, date=True, meta=md,
-                             keep=False, hmac_key=hmac_new)
-    finally:
-        # Never want the intermediate clear-text; encrypt() will destroy
-        # it but there might be an exception before getting to encrypt()
-        if isfile(file_dec):
-            destroy(file_dec)
-        if isfile(old_meta):
-            destroy(old_meta)
-
-    # Check the rotation if given a key to do so; destroy data_enc if safe:
-    if priv_new:
-        # if a hash of decrypted file is good, delete original data_enc
-        new_dec = decrypt(new_enc, priv_new, pphr=pphr_new)
-        hash_new = _sha256(new_dec)
-        destroy(new_dec)  # just wanted to get a hash
-        new_meta = new_dec + META_EXT
-        if isfile(new_meta):
-            destroy(new_meta)
-        if hash_new != hash_old:
-            _fatal(name + ': failed to verify, retaining original')
-        else:
-            logging.info(name + ': verified, deleting original')
-            destroy(data_enc)
-
-    _unset_umask()
-    return new_enc
-
-
-def sign(filename, priv, pphr=None, out=None):
-    """Sign a given file with a private key, via `openssl dgst`.
-
-    Get a digest of the file, sign the digest, return base64-encoded signature.
-    """
-    name = 'sign'
-    logging.debug(name + ': start')
-    sig_out = filename + '.sig'
-    if use_rsautl:
-        cmd_SIGN = [OPENSSL, 'dgst', '-sign', priv, '-out', sig_out]
-        if pphr:
-            if isfile(pphr):
-                logging.warning(name + ': reading passphrase from file')
-                pphr = open(pphr, 'rb').read()
-            cmd_SIGN += ['-passin', 'stdin']
-        cmd_SIGN += ['-keyform', 'PEM', filename]
+            e = ''
+        rdrand = _sys_call(['sysctl', 'hw.optional.rdrand'])
+        e += '; rdrand: ' + rdrand
+    elif sys.platform.startswith('linux'):
+        avail = _sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
+        e = 'entropy_avail: ' + avail
     else:
-        _fatal('only rsautl is supported', NotImplementedError)
-    if pphr:
-        _sys_call(cmd_SIGN, stdin=pphr)
-    else:
-        _sys_call(cmd_SIGN)
-    sig = open(sig_out, 'rb').read()
-
-    if out:
-        with open(out, 'wb') as fd:
-            fd.write(b64encode(sig))
-        return out
-    return b64encode(sig)
-
-
-def verify(filename, pub, sig):
-    """Verify signature of filename using pubkey
-
-    `sig` should be a base64-encoded signature, or a path to a signature file.
-    """
-    name = 'verify'
-    logging.debug(name + ': start, file ' + filename)
-    if use_rsautl:
-        cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform', 'PEM']
-    else:
-        _fatal('only rsautl is supported', NotImplementedError)
-
-    if isfile(sig):
-        sig = open(sig, 'rb').read()
-    with NamedTemporaryFile(delete=False) as sig_file:
-        sig_file.write(b64decode(sig))
-    result = _sys_call(cmd_VERIFY + ['-signature', sig_file.name, filename])
-    os.unlink(sig_file.name)
-
-    return result in ['Verification OK', 'Verified OK']
+        e = '(unknown)'
+    return e
 
 
 def _genRsa(pub='pub.pem', priv='priv.pem', pphr=None, bits=2048):
@@ -1619,23 +1709,10 @@ def get_version():
     return tuple(map(int, __version__.strip('beta').split('.')))
 
 
-def is_in_dropbox(filename):
-    """Return True if the file is within a Dropbox folder.
+def _abspath(filename):
+    """Returns the absolute path (norm-pathed), Capitalize first char (win32)
     """
-    filename = _abspath_winDriveCap(filename)
-    db_path = get_dropbox_path()
-    if not db_path:
-        return False
-
-    inside = (filename.startswith(db_path + os.sep) or
-              filename == db_path)
-    logging.info('%s is%s inside Dropbox' % (filename, (' not', '')[inside]))
-
-    return inside
-
-
-def _abspath_winDriveCap(filename):
-    f = abspath(filename)  # implicitly does normpath too
+    f = os.path.abspath(filename)  # implicitly does normpath too
     return f[0].capitalize() + f[1:]
 
 
@@ -1656,66 +1733,10 @@ def get_dropbox_path():
         else:
             db_path_b64 = open(host_db, 'rb').readlines()[1]  # second line
             db_path = b64decode(db_path_b64.strip())
-            dropbox_path = _abspath_winDriveCap(db_path)
+            dropbox_path = _abspath(db_path)
             logging.info('found Dropbox folder %s' % dropbox_path)
 
     return dropbox_path
-
-
-def is_versioned(filename):
-    """Try to detect if a file is under version control (svn, git, hg).
-
-    Returns a string: 'git', 'svn', 'hg', or ''
-    Only approximate: the directory might be versioned, but not this file, etc.
-    """
-    logging.debug('trying to detect version control (svn, git, hg)')
-
-    return any([get_svn_info(filename),
-                get_git_info(filename),
-                get_hg_info(filename)])
-
-
-def get_git_info(path):
-    """Report whether a directory or file is in a git repo (version control).
-
-    Files can be in the repo directory but not actually tracked by git.
-    """
-    if not path or not exists(path):
-        return False
-
-    try:
-        _sys_call(['git'])
-    except OSError:
-        # no git
-        return False
-    cmd = ['git', 'ls-files', abspath(path), '--error-unmatch']
-    reported = _sys_call(cmd, ignore_error=True)
-    is_tracked = bool(reported)
-
-    logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
-    return is_tracked
-
-
-def get_svn_info(path):
-    """Tries to discover if a file is under svn (version control).
-    """
-    if not isdir(path):
-        path = dirname(path)
-    has_svn_dir = isdir(os.path.join(path, '.svn'))
-    logging.debug('path %s tracked in svn repo: %s' % (path, has_svn_dir))
-    return has_svn_dir
-
-
-def get_hg_info(path):
-    """Tries to discover if a file is under mercurial (version control).
-
-    `detailed=True` not tested recently (similar code worked before).
-    """
-    if not isdir(path):
-        path = dirname(path)
-    has_hg_dir = isdir(os.path.join(path, '.hg'))
-    logging.debug('path %s tracked in hg repo: %s' % (path, has_hg_dir))
-    return has_hg_dir
 
 
 def command_alias():
@@ -2780,24 +2801,6 @@ class Tests(object):
         dropbox_path = orig_path
 
 
-# Basic set-up (order matters) ------------------------------------------------
-logging, logging_t0 = _setup_logging()
-if not user_can_link:
-    logging.warning('%s: User cannot check hardlinks' % lib_name)
-
-# set OPENSSL path, openssl_version, use_rsautl:
-if args and args.openssl:
-    set_openssl(args.openssl)
-else:
-    set_openssl()
-# set destroy_TOOL path, destroy_OPTS; don't think we need an arg:
-set_destroy()
-
-default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
-                 '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
-codec = PFSCodecRegistry(default_codec)
-
-
 def _main():
     logging.info("%s with %s" % (lib_name, openssl_version))
     if args.filename == 'debug':
@@ -2889,6 +2892,72 @@ def _main():
 
         result = fxn(args.filename, **kw)
         print(result)
+
+
+def _parse_args():
+    """Parse and return command line arguments.
+
+    a file name is typically the first (required) argument
+    passphrases for command-line usage must go through files;
+        will get a logging.warning()
+    currently not possible to register a new enc/dec method via command line
+    """
+    parser = argparse.ArgumentParser(
+        description='File-oriented privacy & integrity management library.',
+        epilog="See https://pypi.python.org/pypi/pyFileSec/")
+    parser.add_argument('filename', help='one of: path to file to process, "genrsa", or "debug"')
+    parser.add_argument('--version', action='version', version=__version__)
+    parser.add_argument('--verbose', action='store_true', help='print logging info to stdout')
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-o][-m][-n][-c][-z][-e][-k])')
+    group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v [-o][-d][-r])')
+    group.add_argument('--rotate', action='store_true', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
+    group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r])')
+    group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -s)')
+    group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
+    group.add_argument('--destroy', action='store_true', help='secure delete')
+
+    parser.add_argument('--openssl', help='specify path of the openssl binary to use')
+    parser.add_argument('-o', '--out', help='path name for generated (output) file')
+    parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
+    parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
+    parser.add_argument('-V', '--nprv', help='path to new private key (--rotate only)')
+    parser.add_argument('-r', '--pphr', help='path to file containing passphrase for private key')
+    parser.add_argument('-R', '--nppr', help='path to file containing passphrase for new priv key')
+    parser.add_argument('-m', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
+    parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
+    parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
+    parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
+    parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
+    parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
+    parser.add_argument('-g', '--gc', action='store_true', help='debug will set gc.DEBUG_LEAK (garbage collection)', default=False)
+
+    return parser.parse_args()
+
+
+# Basic set-up (order matters) ------------------------------------------------
+
+# set args depending on how __file__ is called:
+if __name__ == "__main__":
+    args = _parse_args()
+else:
+    args = None
+logging, logging_t0 = _setup_logging()
+if __name__ == "__main__":
+    if args.openssl:
+        set_openssl(args.openssl)
+else:
+    set_openssl()
+if not user_can_link:
+    logging.warning('%s: User cannot check hardlinks' % lib_name)
+
+# set destroy tool and options to use with it:
+set_destroy()
+
+default_pfs_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
+                     '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
+codec = PFSCodecRegistry(default_pfs_codec)
 
 if __name__ == '__main__':
     _main()
