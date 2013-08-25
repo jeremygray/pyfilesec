@@ -542,15 +542,22 @@ class SecFile(object):
         return self._openssl_version
 
     def _autodetect_file(self, infile):
-        if not isinstance(infile, basestring):
+        if infile is None:
             return
+        if not isinstance(infile, basestring):
+            _fatal('infile expected as a string', AttributeError)
         self.filename = _abspath(infile)
 
     def update(self, infile):
         self._autodetect_file(infile)
         return self
 
-    def pad(self, filename, size=DEFAULT_PAD_SIZE):
+    def get_filename(self):
+        if not hasattr(self, 'filename'):
+            self.filename = None
+        return self.filename
+
+    def pad(self, size=DEFAULT_PAD_SIZE):
         """Append null bytes to ``filename`` until it has length ``size``.
 
         The size is changed but `the fact that it was changed` is only obscured if
@@ -592,6 +599,7 @@ class SecFile(object):
            if not present
         """
         name = 'pad: '
+        filename = self.get_filename()
         logging.debug(name + 'start')
         size = int(size)
         if 0 < size < PAD_MIN:
@@ -600,16 +608,16 @@ class SecFile(object):
         if size > MAX_FILE_SIZE:
             _fatal('pad: size must be <= %d (maximum file size)' % MAX_FILE_SIZE)
         # handle special size values (0, -1) => unpad
-        pad_count = pad_len(filename)
+        pad_count = self.pad_len()
         if size < 1:
             if pad_count or size == -1:
-                return unpad(filename)  # or fail appropriately
-            return getsize(filename)  # size==0, not padded
+                self.unpad()  # or fail appropriately
+            return self  #getsize(filename)  # size==0, not padded
 
         if pad_count:
-            unpad(filename, pad_count)
+            self.unpad()
         filesize = getsize(filename)
-        needed = ok_to_pad(filename, size, pad_count)
+        needed = self.ok_to_pad(size)
         if needed == 0:
             msg = name + 'file length not obscured (length >= requested size)'
             _fatal(msg, PaddingError)
@@ -627,23 +635,22 @@ class SecFile(object):
 
         return self
 
-    def ok_to_pad(self, filename, size, pad_count=None):
+    def ok_to_pad(self, size):
         """Return 0 if ``size`` is not adequate to obscure the file length.
         Else return the (non-zero) size.
         """
-        # bug: what about very short < 128 minimum
-        if pad_count is None:
-            pad_count = pad_len(filename)
+        filename = self.get_filename()
+        pad_count = self.pad_len()
         size = max(size, PAD_MIN)
         return max(0, size - (getsize(filename) - pad_count) - PAD_LEN)
 
-    def pad_len(self, filename=None):
-        """Returns ``pad_count`` (in bytes) if the file contains PFS-style padding.
+    def pad_len(self):
+        """Returns ``pad_count`` (in bytes) if the file contains PFS padding.
 
         Returns 0 if bad or missing padding.
         """
         name = 'pad_len'
-        filename = self.filename
+        filename = self.get_filename()
         logging.debug(name + ': start, file="%s"' % filename)
         filelen = getsize(filename)
         if filelen < PAD_LEN:
@@ -661,20 +668,20 @@ class SecFile(object):
                 assert pad_marker == PFS_PAD
             except:
                 return 0
-            if pad_count > filelen or pad_count > MAX_FILE_SIZE or pad_count < 0:
-                return 0
+        if pad_count > filelen or pad_count > MAX_FILE_SIZE or pad_count < 0:
+            return 0
         return pad_count
 
-    def unpad(self, filename, pad_count=None):
-        """Removes PFS padding from the file. raise ``PaddingError`` if no padding.
+    def unpad(self):
+        """Removes PFS padding from the file. raise ``PaddingError`` if no pad.
 
         Truncates the file to remove padding; does not `destroy` the padding.
         """
         name = 'unpad'
+        filename = self.get_filename()
         logging.debug(name + ': start, file="%s"' % filename)
         filelen = getsize(filename)
-        if pad_count is None:
-            pad_count = pad_len(filename)
+        pad_count = self.pad_len()
         if not pad_count:
             msg = name + ": file not padded, can't unpad"
             _fatal(msg, PaddingError)
@@ -691,7 +698,7 @@ class SecFile(object):
             fd.truncate(new_length)
             logging.info(name + ': truncated the file to remove padding')
 
-        return getsize(filename)
+        return self
 
     def encrypt(self, datafile, pub, meta=True, date=True, keep=False,
                 enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
@@ -1183,31 +1190,35 @@ class SecFile(object):
             filename = base + '_' + str(count) + filext
         return filename
 
-    def is_in_dropbox(self, filename):
+    @property
+    def is_in_dropbox(self):
         """Return True if the file is within a Dropbox folder.
         """
-        filename = _abspath(filename)
+        filename = self.get_filename()
         db_path = get_dropbox_path()
         if not db_path:
-            return False
-
-        inside = (filename.startswith(db_path + os.sep) or
+            inside = False
+        else:
+            inside = (filename.startswith(db_path + os.sep) or
                   filename == db_path)
-        logging.info('%s is%s inside Dropbox' % (filename, (' not', '')[inside]))
+        not_or_blank = (' not', '')[inside]
+        logging.info('%s is%s inside Dropbox' % (filename, not_or_blank))
 
         return inside
 
-    def is_versioned(self, filename):
+    @property
+    def is_versioned(self):
         """Try to detect if a file is under version control (svn, git, hg).
 
         Returns a string: 'git', 'svn', 'hg', or ''
         Only approximate: the directory might be versioned, but not this file
         """
+        filename = self.get_filename()
         logging.debug('trying to detect version control (svn, git, hg)')
 
-        return any([get_svn_info(filename),
-                    get_git_info(filename),
-                    get_hg_info(filename)])
+        return any([self.get_svn_info(filename),
+                    self.get_git_info(filename),
+                    self.get_hg_info(filename)])
 
     def get_git_info(self, path):
         """Report whether a directory or file is in a git repo (version control).
