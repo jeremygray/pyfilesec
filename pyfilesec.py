@@ -1013,14 +1013,14 @@ class SecFile(object):
 
             # Unpack the .enc file bundle into a new tmp dir:
             arch = SecFileArchive(data_enc)
-            data_aes, pwd_file, meta_file = arch.unpack(data_enc, keep=keep_enc)
+            data_aes, pwd_file, meta_file = arch.unpack(data_enc)
             if not all([data_aes, pwd_file, meta_file]):
                 logging.warn('did not find 3 files in archive %s' % data_enc)
             tmp_dir = os.path.split(data_aes)[0]
 
             # Get a valid decrypt method, from meta-data or argument:
             clear_text = None  # file name; set in case _get_dec_method raise()es
-            dec_method = self._get_dec_method(meta_file, dec_method)
+            dec_method = arch.get_dec_method()  # from .meta, or default
             if not dec_method:
                 _fatal('Could not get a valid decryption method', DecryptError)
 
@@ -1067,65 +1067,10 @@ class SecFile(object):
                 pass
 
         _unset_umask()
+        if not keep_enc:
+            os.unlink(data_enc)
         self.update(clear_text)
         return self
-
-    def _get_dec_method(self, meta_file, dec_method):
-        """Return a valid decryption method, based on meta-data or default.
-
-        Cross-validate requested dec_method against meta-data, or warn if mismatch.
-        """
-        enc_method = 'unknown'
-        if meta_file:
-            md = self.load_metadata(meta_file)
-            dates = list(md.keys())  # dates of meta-data events
-            most_recent = sorted(dates)[-1]
-            if not 'encryption method' in list(md[most_recent].keys()):
-                enc_method = 'unknown'
-                _dec_from_enc = enc_method
-            else:
-                enc_method = md[most_recent]['encryption method'].split('.')[1]
-                _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
-
-            if dec_method:
-                if dec_method != _dec_from_enc:
-                    msg = 'requested decryption function (%s)' % dec_method +\
-                          ' != encryption function (meta-data: %s)' % enc_method
-                    logging.warning(msg)
-            else:
-                try:
-                    dec_method = str(_dec_from_enc)  # avoid unicode issue
-                except:
-                    dec_method = _dec_from_enc
-                logging.info('implicitly want "' + dec_method + '" (meta-data)')
-        if not meta_file or enc_method == 'unknown':
-            # can't infer, no meta-data
-            if not dec_method or enc_method == 'unknown':
-                # ... and nothing explicit either, so go with default:
-                logging.info('falling through to default decryption')
-                available = [f for f in list(default_codec.keys())
-                             if f.startswith('_decrypt_')]
-                dec_method = available[0]
-
-        if not codec.is_registered(dec_method):
-            _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method,
-                   CodecRegistryError)
-        logging.info('_get_dec_method: dec fxn set to: ' + str(dec_method))
-
-        return dec_method
-
-    def load_metadata(self, md_file):
-        """Convenience function to read meta-data from a file, return it as a dict.
-        """
-        return json.load(open(md_file, 'rb'))
-
-    def log_metadata(self, md, log=True):
-        """Convenience function to log and return meta-data in human-friendly form.
-        """
-        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
-        if log:
-            logging.info(md_fmt)
-        return md_fmt
 
     def rotate(self, data_enc, pub, priv, pphr=None,  # priv pphr = old, pub = new
                priv_new=None, pphr_new=None,
@@ -1521,7 +1466,7 @@ class SecFileArchive(object):
         _unset_umask()
         return self.name
 
-    def unpack(self, data_enc, keep=True):
+    def unpack(self, data_enc):
         """Extract files from archive into a tmp dir, return paths to files.
 
         :Parameters:
@@ -1567,9 +1512,62 @@ class SecFileArchive(object):
                 _fatal(name + ': unexpected file in archive', SecFileArchiveFormatError)
 
         _unset_umask()
-        if not keep:
-            os.unlink(data_enc)
+        self.meta_file = meta_file
+
         return data_aes, pwdFileRsa, meta_file
+
+    def get_dec_method(self):
+        """Return a valid decryption method from meta-data or default.
+
+        Cross-validate requested dec_method against meta-data, warn if mismatch.
+        """
+        enc_method = 'unknown'
+        meta_file = self.meta_file
+
+        if meta_file:
+            md = self.load_metadata()
+            dates = list(md.keys())  # dates of meta-data events
+            most_recent = sorted(dates)[-1]
+            if not 'encryption method' in list(md[most_recent].keys()):
+                enc_method = 'unknown'
+                _dec_from_enc = enc_method
+            else:
+                enc_method = md[most_recent]['encryption method'].split('.')[1]
+                _dec_from_enc = enc_method.replace('_encrypt', '_decrypt')
+
+            try:
+                dec_method = str(_dec_from_enc)  # avoid unicode issue
+            except:
+                dec_method = _dec_from_enc
+            logging.info('implicitly want "' + dec_method + '" (meta-data)')
+        if not meta_file or enc_method == 'unknown':
+            # can't infer, no meta-data
+            if not dec_method or enc_method == 'unknown':
+                # ... and nothing explicit either, so go with default:
+                logging.info('falling through to default decryption')
+                available = [f for f in list(default_codec.keys())
+                             if f.startswith('_decrypt_')]
+                dec_method = available[0]
+
+        if not codec.is_registered(dec_method):
+            _fatal("_get_dec_method: dec fxn '%s' not registered" % dec_method,
+                   CodecRegistryError)
+        logging.info('_get_dec_method: dec fxn set to: ' + str(dec_method))
+
+        return dec_method
+
+    def load_metadata(self):
+        """Read meta-data file, return it as a dict.
+        """
+        return json.load(open(self.meta_file, 'rb'))
+
+    def log_metadata(self, md, log=True):
+        """Log and return meta-data dict in human-friendly form.
+        """
+        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
+        if log:
+            logging.info(md_fmt)
+        return md_fmt
 
 
 class GenRSA(object):
