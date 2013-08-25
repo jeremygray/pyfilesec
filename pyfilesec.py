@@ -329,9 +329,9 @@ def set_openssl(path=None):
 
     # use_rsautl = (openssl_version < 'OpenSSL 1.0')  # ideally use pkeyutl
     # but -decrypt with passphrase fails with pkeyutl, so always use rsautl:
-    use_rsautl = True
+    #use_rsautl = True
 
-    return OPENSSL, openssl_version, use_rsautl
+    return OPENSSL, openssl_version
 
 
 def set_destroy():
@@ -899,7 +899,7 @@ class SecFile(object):
         fullpath_files = [data_enc, pwd_rsa, metafile]
         files = [os.path.split(f)[1] for f in fullpath_files]
 
-        arch = _SecFileArchive(datafile, files, keep=False)
+        arch = SecFileArchive(datafile, files, keep=False)
 
         if not keep:
             # secure-delete unencrypted original, unless encrypt did not succeed:
@@ -955,7 +955,8 @@ class SecFile(object):
 
         return {'meta-data %s' % now: md}
 
-    def decrypt(self, priv=None, pphr='', dec_method=None):
+    def decrypt(self, priv=None, pphr='', dec_method=None,
+                keep_meta=False, keep_enc=False):
         """Decrypt a file that was encoded using ``encrypt()``.
 
         To get the data back, need two files: ``data.enc`` and ``privkey.pem``.
@@ -981,6 +982,10 @@ class SecFile(object):
             `dec_method` :
                 name of a decruption method that has been registered in
                 the ``codec`` (see ``PFSCodecRegistry``)
+            `keep_meta` :
+                if False, unlink the meta file after decrypt
+            `keep_enc` :
+                if False, unlink the encrypted file after decryption
         """
         _set_umask()
         name = 'decrypt: '
@@ -996,9 +1001,6 @@ class SecFile(object):
             _fatal(msg, DecryptError)
         if self.is_versioned:
             logging.warning(name + 'file exposed to version control')
-        # should be done already:
-        #if pphr and isfile(pphr):
-        #    pphr = open(abspath(pphr), 'rb').read()
         if not self.pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
             _fatal(name + 'missing passphrase (encrypted privkey)', DecryptError)
 
@@ -1010,11 +1012,10 @@ class SecFile(object):
             logging.info('decrypting into %s' % dest_dir)
 
             # Unpack the .enc file bundle into a new tmp dir:
-            arch = _SecFileArchive(data_enc)
-            data_aes, pwd_file, meta_file = arch.unpack(data_enc)
+            arch = SecFileArchive(data_enc)
+            data_aes, pwd_file, meta_file = arch.unpack(data_enc, keep=keep_enc)
             if not all([data_aes, pwd_file, meta_file]):
                 logging.warn('did not find 3 files in archive %s' % data_enc)
-                # ? or _fatal(msg, SecFileArchiveFormatError) + suggest rotate() to fix
             tmp_dir = os.path.split(data_aes)[0]
 
             # Get a valid decrypt method, from meta-data or argument:
@@ -1040,7 +1041,7 @@ class SecFile(object):
                     _fatal(msg, DestroyError)
             perm_str = permissions_str(clear_text)
             logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
-            if meta_file:
+            if meta_file and keep_meta:
                 newMeta = _uniq_file(clear_text + META_EXT)
                 try:
                     os.rename(meta_file, newMeta)
@@ -1479,7 +1480,7 @@ class SecFile(object):
         return has_hg_dir
 
 
-class _SecFileArchive(object):
+class SecFileArchive(object):
     """Class for working with an archive .enc file, holding exactly 3 files.
 
     Currently an archive is a normal .tar.gz file.
@@ -1520,8 +1521,13 @@ class _SecFileArchive(object):
         _unset_umask()
         return self.name
 
-    def unpack(self, data_enc):
+    def unpack(self, data_enc, keep=True):
         """Extract files from archive into a tmp dir, return paths to files.
+
+        :Parameters:
+            ``keep`` :
+                ``False`` will unlink the data_enc file after unpacking, but
+                only if there were no errors during unpacking
         """
         _set_umask()
         name = 'unpack'
@@ -1561,6 +1567,8 @@ class _SecFileArchive(object):
                 _fatal(name + ': unexpected file in archive', SecFileArchiveFormatError)
 
         _unset_umask()
+        if not keep:
+            os.unlink(data_enc)
         return data_aes, pwdFileRsa, meta_file
 
 
@@ -1754,15 +1762,12 @@ def _encrypt_rsa_aes256cbc(datafile, pub, OPENSSL=''):
     assert len(pwd) == 64  # hex characters
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
-    if use_rsautl:
-        cmd_RSA = [OPENSSL, 'rsautl',
-              '-out', pwd_rsa,
-              '-inkey', pub,
-              '-keyform', 'PEM',
-              '-pubin',
-              RSA_PADDING, '-encrypt']
-    else:
-        raise NotImplementedError
+    cmd_RSA = [OPENSSL, 'rsautl',
+          '-out', pwd_rsa,
+          '-inkey', pub,
+          '-keyform', 'PEM',
+          '-pubin',
+          RSA_PADDING, '-encrypt']
 
     # Define command to AES-256-CBC encrypt datafile using the password:
     cmd_AES = [OPENSSL, 'enc', '-aes-256-cbc',
@@ -1798,14 +1803,11 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
     data_dec = os.path.splitext(abspath(data_enc))[0]
 
     # set up the command to retrieve password from pwdFileRsa
-    if use_rsautl:
-        cmdRSA = [OPENSSL, 'rsautl', '-in', pwd_rsa, '-inkey', priv]
-        if pphr:
-            # if isfile(pphr):  # always handled by decrypt
-            cmdRSA += ['-passin', 'stdin']
-        cmdRSA += [RSA_PADDING, '-decrypt']
-    else:
-        raise NotImplementedError
+    cmdRSA = [OPENSSL, 'rsautl', '-in', pwd_rsa, '-inkey', priv]
+    if pphr:
+        # if isfile(pphr):  # always handled by decrypt
+        cmdRSA += ['-passin', 'stdin']
+    cmdRSA += [RSA_PADDING, '-decrypt']
 
     # set up the command to decrypt the data using pwd:
     cmdAES = [OPENSSL, 'enc', '-d', '-aes-256-cbc', '-a',
@@ -1847,7 +1849,6 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, OPENSSL=''):
 
     _unset_umask()
     return abspath(data_dec)
-
 
 
 def permissions_str(filename):
@@ -3005,7 +3006,7 @@ def _main():
     elif args.filename == 'genrsa':
         """Walk through key generation on command line.
         """
-        genRsaKeys()
+        GenRSA.genRsaKeys()
     elif not isfile(args.filename):
         raise ValueError('Requires a file, "genrsa", or "debug" argument')
     else:
