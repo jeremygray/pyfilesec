@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.2.01beta - class branch'
+__version__ = '0.2.01alpha (branch = SecFile class)'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
@@ -92,6 +92,9 @@ class CodecRegistryError(PyFileSecError):
 
 class DestroyError(PyFileSecError):
     '''Error to indicate secure delete problem, e.g., destroy failed.'''
+
+class ArgumentError(PyFileSecError):
+    '''Error to indicate an argument problem, e.g., no file specified.'''
 
 
 class PFSCodecRegistry(object):
@@ -240,9 +243,6 @@ def _setup_logging():
         msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
 
-    # will always log if like this; use for dev work
-    msgfmt = "%.4f  " + lib_name + ": %s"
-    logging = _log2stdout()
     return logging, logging_t0
 
 
@@ -271,7 +271,7 @@ def _sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
 def set_openssl(path=None):
     """Find, check, set, and report info about the OpenSSL binary to be used.
     """
-    global OPENSSL, openssl_version, use_rsautl
+    global OPENSSL, openssl_version
 
     if path:  # command-line arg or parameter
         OPENSSL = path
@@ -328,10 +328,6 @@ def set_openssl(path=None):
         _fatal('OpenSSL too old (%s)' % openssl_version, RuntimeError)
     logging.info('OpenSSL binary  = %s' % OPENSSL)
     logging.info('OpenSSL version = %s' % openssl_version)
-
-    # use_rsautl = (openssl_version < 'OpenSSL 1.0')  # ideally use pkeyutl
-    # but -decrypt with passphrase fails with pkeyutl, so always use rsautl:
-    #use_rsautl = True
 
     return OPENSSL, openssl_version
 
@@ -414,6 +410,7 @@ if True:
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
 
     # destroy() return codes:
+    destroy_code = {1: 'secure deleted', 0: 'unlinked', -1: 'unknown'}
     pfs_DESTROYED = 1
     pfs_UNLINKED = 0
     pfs_UNKNOWN = -1
@@ -596,19 +593,17 @@ class SecFile(object):
         logging.info(name + ' start')
 
         # save current info:
-        pub, priv, pphr, openssl = self.pub, self.priv, self.pphr, self.openssl
+        pub, priv, pphr, openssl = self.pub, self.priv, self.pphr, self._openssl
         self.__init__()  # params here will trigger auto-enc, dec, etc
 
         # restore current info:
         if save_keys:
             self.pub, self.priv, self.pphr = pub, priv, pphr
-        self.openssl = openssl
+        self._openssl = openssl
 
         if hasattr(self, 'file'):
             self.file = None
-        if hasattr(self, 'srm_status'):
-            self.destroy_status = None
-            logging.debug(name + ': setting .destroy_status=None')
+        self.result = 'reset'
 
     def update(self, infile):
         """Set the filename to use internally; set that file's permissions.
@@ -711,6 +706,7 @@ class SecFile(object):
         name = 'pad: '
         filename = self.require_file()
         logging.debug(name + 'start')
+        self.result = None
         size = int(size)
         if 0 < size < PAD_MIN:
             logging.info(name + 'requested size increased to %i bytes' % PAD_MIN)
@@ -743,6 +739,7 @@ class SecFile(object):
             fd.write(extrabytes + pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE)
             logging.info(name + 'append bytes to get to %d bytes' % size)
 
+        self.result = getsize(filename)
         return self
 
     def ok_to_pad(self, size):
@@ -912,6 +909,7 @@ class SecFile(object):
         datafile = self.require_file()
         pub = self.get_pub(pub)
         logging.debug(name + 'start')
+        self.result = None
         if self.is_encrypted:
             logging.warning(name + "file is already encrypted; encrypting again")
         if not self.codec.is_registered(enc_method):
@@ -980,6 +978,7 @@ class SecFile(object):
                     'retaining original file, encryption did not succeed')
 
         _unset_umask()
+        self.result = archive.name
         return self
 
     def _get_metadata(self, datafile, data_enc, pub, enc_method, date=True, hmac=None):
@@ -1059,6 +1058,7 @@ class SecFile(object):
         _set_umask()
         name = 'decrypt: '
         arch = self._require_enc_file()  # no tmp files yet
+        self.result = None
         data_enc = arch.name
 
         priv = self.get_priv(priv)
@@ -1140,6 +1140,8 @@ class SecFile(object):
         if keep_meta:
             self.meta = newMeta
         self.update(clear_text)
+        self.result = clear_text
+
         return self
 
     def rotate(self, data_enc=None, pub=None, priv=None, pphr=None,  # priv pphr = old, pub = new
@@ -1164,6 +1166,7 @@ class SecFile(object):
         _set_umask()
         name = 'rotate'
         logging.debug(name + ': start (decrypt old, [pad new,] encrypt new)')
+        self.result = None
         pub = self.get_pub(pub)
         priv = self.get_priv(priv)
         pphr = self.get_pphr(pphr)
@@ -1201,6 +1204,9 @@ class SecFile(object):
                 del self.meta  # var
 
         _unset_umask()
+        self.result = {'good rotate': True,
+                       'old': os.path.split(priv)[1],
+                       'new': os.path.split(pub)[1]}
         return self
 
     def load_metadata(self):
@@ -1239,11 +1245,12 @@ class SecFile(object):
             _sys_call(cmd_SIGN)
         sig = open(sig_out, 'rb').read()
 
+        self.result = b64encode(sig)
         if out:
             with open(out, 'wb') as fd:
-                fd.write(b64encode(sig))
-            return out
-        return b64encode(sig)
+                fd.write(self.result)
+            self.result = out
+        return self.result
 
     def verify(self, filename=None, pub=None, sig=None):
         """Verify signature of filename using pubkey
@@ -1264,8 +1271,9 @@ class SecFile(object):
             sig_file.write(b64decode(sig))
         cmd_VERIFY += ['-signature', sig_file.name, filename]
         result = _sys_call(cmd_VERIFY)
-        os.unlink(sig_file.name)
+        os.unlink(sig_file.name)  # b/c delete=False
 
+        self.result = result
         return result in ['Verification OK', 'Verified OK']
 
     def destroy(self, new_file=None):
@@ -1310,6 +1318,7 @@ class SecFile(object):
 
         name = 'destroy'
         logging.debug(name + ': start, new_file=%s' % new_file)
+        self.result = None
         if new_file:
             self.update(new_file)
         target_file = self.require_file()
@@ -1372,15 +1381,16 @@ class SecFile(object):
                 fd.write(chr(0) * getsize(target_file))
             shutil.rmtree(target_file, ignore_errors=True)
 
-        duration = round(get_time() - destroy_t0, 4)  # 0.1ms precision
+        duration = round(get_time() - destroy_t0, 4)
+        self.reset()  # clear everything, including self.result
+        vals = destroy_code[disposition], orig_links, duration, target_file
+        keys = ('disposition', 'orig_links', 'seconds', 'target_file')
+        self.result = dict(zip(keys, vals))
         if isfile(target_file):  # yikes, file still remains
-            self.destroy_status = disposition, orig_links, duration, target_file
             msg = name + ': %s remains after destroy() attempted' % target_file
             _fatal(msg, DestroyError)
 
-        self.reset()  # clear everything, including self.status
-        self.destroy_status = disposition, orig_links, duration, target_file
-        return self.destroy_status
+        return self.result
 
     def _get_permissions(self):
         name = '_get_permissions'
@@ -1390,6 +1400,8 @@ class SecFile(object):
         else:
             perm = int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
         logging.debug(name + ': %s %d base10' % (filename, perm))
+        if args:
+            self.result = permissions_str(filename)
         return perm
 
     def _set_permissions(self, mode):
@@ -1425,6 +1437,9 @@ class SecFile(object):
             count = os.stat(filename)[stat.ST_NLINK]
         return count
 
+    def _get_hardlink_count(self):
+        self.result = self.hardlink_count
+
     @property
     def is_in_dropbox(self):
         """Return True if the file is within a Dropbox folder.
@@ -1441,6 +1456,9 @@ class SecFile(object):
 
         return inside
 
+    def _get_is_in_dropbox(self):
+        self.result = self.is_in_dropbox
+
     @property
     def is_versioned(self):
         """Try to detect if this file is under version control (svn, git, hg).
@@ -1455,6 +1473,9 @@ class SecFile(object):
         return any([self.get_svn_info(filename),
                     self.get_git_info(filename),
                     self.get_hg_info(filename)])
+
+    def _get_is_versioned(self):
+        self.result = self.is_versioned
 
     def get_git_info(self, path):
         """Report whether a directory or file is in a git repo (version control).
@@ -3123,7 +3144,7 @@ def _main():
         """
         GenRSA.genRsaKeys()
     elif not isfile(args.filename):
-        raise ValueError('Requires a file, "genrsa", or "debug" argument')
+        raise ArgumentError('Requires genrsa, debug, or a file name as an argument')
     else:
         """Call requested function with arguments, return result (to stdout)
 
@@ -3135,9 +3156,10 @@ def _main():
         # "kw.update()" ==> required arg, use kw even though its position-able
         # "arg and kw.update(arg)" ==> optional args; watch out for value == 0
 
+        sf = SecFile(args.filename)
         # mutually exclusive args.fxn:
         if args.encrypt:
-            fxn = encrypt
+            sf_fxn = sf.encrypt
             # convenience arg: pad the file prior to encryption
             if args.size >= -1:
                 pad(args.filename, size=args.size)
@@ -3147,12 +3169,12 @@ def _main():
             meta and kw.update({'meta': meta})
             args.hmac and kw.update({'hmac_key': args.hmac})
         elif args.decrypt:
-            fxn = decrypt
+            sf_fxn = sf.decrypt
             kw.update({'priv': args.priv})
             args.pphr and kw.update({'pphr': args.pphr})
             args.out and kw.update({'out': args.out})
         elif args.rotate:
-            fxn = rotate
+            sf_fxn = sf.rotate
             kw.update({'priv': args.priv})
             kw.update({'pub': args.pub})
             args.pphr and kw.update({'pphr': args.pphr})
@@ -3163,25 +3185,33 @@ def _main():
             if args.size >= -1:
                 kw.update({'pad_new': args.size})
         elif args.pad:
-            fxn = pad
+            sf_fxn = sf.pad
             if args.size >= -1:
                 kw.update({'size': args.size})
             elif args.size is not None:
                 raise ValueError('bad argument for -z/--size to pad')
         elif args.sign:
-            fxn = sign
+            sf_fxn = sf.sign
             kw.update({'priv': args.priv})
             args.pphr and kw.update({'pphr': args.pphr})
             args.out and kw.update({'out': args.out})
         elif args.verify:
-            fxn = verify
+            sf_fxn = sf.verify
             kw.update({'pub': args.pub})
             kw.update({'sig': args.sig})
         elif args.destroy:
-            fxn = destroy
+            sf_fxn = sf.destroy
+        elif args.hardlinks:
+            sf_fxn = sf._get_hardlink_count
+        elif args.versioned:
+            sf_fxn = sf._get_is_versioned
+        elif args.permissions:
+            sf_fxn = sf._get_permissions
+        elif args.dropbox:
+            sf_fxn = sf._get_is_in_dropbox
 
-        result = fxn(args.filename, **kw)
-        print(result)
+        sf_fxn(**kw)  # make it happen
+        print sf.result
 
 
 def _parse_args():
@@ -3200,26 +3230,28 @@ def _parse_args():
     parser.add_argument('--verbose', action='store_true', help='print logging info to stdout')
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-o][-m][-n][-c][-z][-e][-k])')
-    group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v [-o][-d][-r])')
+    group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-m][-n][-c][-z][-e][-k])')
+    group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v [-d][-r])')
     group.add_argument('--rotate', action='store_true', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
-    group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r])')
+    group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r][-o])')
     group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -s)')
     group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
     group.add_argument('--destroy', action='store_true', help='secure delete')
+    group.add_argument('--hardlinks', action='store_true',help='return number of hardlinks to a file', default=False)
+    group.add_argument('--versioned', action='store_true',help='return True if a file is under version control', default=False)
+    group.add_argument('--permissions', action='store_true',help='return file permissoins', default=False)
+    group.add_argument('--dropbox', action='store_true',help='return True if a file is in Dropbox folder', default=False)
 
     parser.add_argument('--openssl', help='specify path of the openssl binary to use')
     parser.add_argument('-o', '--out', help='path name for generated (output) file')
     parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
     parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
-    parser.add_argument('-V', '--nprv', help='path to new private key (--rotate only)')
-    parser.add_argument('-r', '--pphr', help='path to file containing passphrase for private key')
-    parser.add_argument('-R', '--nppr', help='path to file containing passphrase for new priv key')
-    parser.add_argument('-m', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
+    parser.add_argument('-p', '--pphr', help='path to file containing passphrase for private key')
+    parser.add_argument('-M', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
     parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
-    parser.add_argument('-n', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
+    parser.add_argument('-N', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
     parser.add_argument('-g', '--gc', action='store_true', help='debug will set gc.DEBUG_LEAK (garbage collection)', default=False)
 
@@ -3234,11 +3266,9 @@ if __name__ == "__main__":
 else:
     args = None
 logging, logging_t0 = _setup_logging()
-if __name__ == "__main__":
-    if args.openssl:
-        set_openssl(args.openssl)
-else:
-    set_openssl()
+
+set_openssl(args and args.openssl)
+
 if not user_can_link:
     logging.warning('%s: User cannot check hardlinks' % lib_name)
 
