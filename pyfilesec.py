@@ -1513,7 +1513,8 @@ class SecFileArchive(object):
                     self.name = path + ARCHIVE_EXT
                     break
             else:
-                self.name = _uniq_file('secFileArchive' + ARCHIVE_EXT)
+                path, ext = os.path.splitext(paths[0])
+                self.name = path + ARCHIVE_EXT
         else:
             self.name = _uniq_file('secFileArchive' + ARCHIVE_EXT)
         logging.debug('SecFileArchive.__init__ %s' % self.name)

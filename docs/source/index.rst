@@ -1,5 +1,5 @@
 
-:mod:`pyFileSec` File-oriented privacy and integrity management tools *(beta)*
+:mod:`pyFileSec` File-oriented privacy and integrity management tools *(alpha)*
 
 .. toctree::
    :maxdepth: 2
@@ -61,16 +61,13 @@ on your behalf. With encryption, however, it would likely be prohibitively expen
 to hire someone to "break in on your behalf"; hopefully that is not possible,
 even for a well-funded adversary. So it is possible to lose data by trying to secure it.
 
-**Development status:** As of version 0.2.0, the development status is **beta**,
-meaning that things seem to be working well, despite some rough edges and known
-limitations. The limitations are hopefully described clearly, but this is not
-certain. Being beta, API changes are still possible if needed, and will be documented in the
-changelog. The development emphasis now is mostly on making sure that the current
-features are as secure as possible, as easy as feasible, and work as intended
-cross-platform (on Mac, Linux, and Windows). Documentation is a work in progress.
-A few extensions are planned, notably an alternative encryption backend and zip for archive. Setting file
-permissions on Windows needs work. Python 3 support looks easy; ``2to3`` passes
-now, but python 3 is completely untested.
+**Development status:** As of version 0.2.0, the development status is still **alpha**,
+meaning that major API changes and bugs are likely. The development emphasis is
+currently on refactoring the code from a function-based organization (0.2.0)
+to a class-based organization (milestone 0.3 release). class SecFile will be the
+core class provided by the package. Documentation is a work in progress. A few
+extensions are planned, e.g., an alternative encryption backend and zip. File
+permissions on Windows needs work. Python 3 is completely untested.
 
 Comments and code contributions are welcome. Feedback can be posted on github
 (see issues at https://github.com/jeremygray/pyfilesec/). Contact by
