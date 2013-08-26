@@ -1687,14 +1687,18 @@ class GenRSA(object):
             ps = _sys_call(['ps', '-e'])
             securityd = _sys_call(['which', 'securityd'])  # full path
             if securityd in ps:
-                e = securityd + ' running'
+                e = securityd + ' running   (= good)'
             else:
                 e = ''
             rdrand = _sys_call(['sysctl', 'hw.optional.rdrand'])
-            e += '; rdrand: ' + rdrand
+            e += '\n           rdrand: ' + rdrand
+            if rdrand == 'hw.optional.rdrand: 1':
+                e += ' (= good)'
         elif sys.platform.startswith('linux'):
             avail = _sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
             e = 'entropy_avail: ' + avail
+            if int(avail) < 50:
+                e += ' (= not so much...)'
         else:
             e = '(unknown)'
         return e
@@ -1705,31 +1709,36 @@ class GenRSA(object):
         pphr should be a string containing the actual passphrase (if desired).
         """
         _set_umask()
-        if use_rsautl:
-            # Generate priv key:
-            cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
-            if pphr:
-                cmdGEN += ['-aes256', '-passout', 'stdin']
-            _sys_call(cmdGEN + [str(bits)], stdin=pphr)
+        # Generate priv key:
+        cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
+        if pphr:
+            cmdGEN += ['-aes256', '-passout', 'stdin']
+        _sys_call(cmdGEN + [str(bits)], stdin=pphr)
 
-            # Extract pub from priv:
-            cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
-                         '-pubout', '-out', pub]
-            if pphr:
-                cmdEXTpub += ['-passin', 'stdin']
-            _sys_call(cmdEXTpub, stdin=pphr)
-        else:
-            raise NotImplementedError
+        # Extract pub from priv:
+        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
+                     '-pubout', '-out', pub]
+        if pphr:
+            cmdEXTpub += ['-passin', 'stdin']
+        _sys_call(cmdEXTpub, stdin=pphr)
 
         _unset_umask()
-        return abspath(pub), abspath(priv)
+        return _abspath(pub), _abspath(priv)
 
-    def dialog(self, interactive=True):
+    def dialog(self, interactive=True, out=None):
         """Command line dialog to generate an RSA key pair, PEM format.
 
         Launch from the command line::
 
             % python pyfilesec.py genrsa
+
+        or same thing, but save the passphrase into a file named 'pphr'::
+
+            % python pyfilesec.py genrsa --out pphr
+
+        The passphrase will not be printed if it was entered manually. If it is
+        auto-generated, it will either be printed or saved to a file (if option
+        ``--out`` is used). This is the only copy of the passphrase.
 
         Choose from 2048, 4096, or 8192 bits; 1024 is not secure for medium-term
         storage, and 16384 bits is not needed (nor is 8192). A passphrase is
@@ -1753,30 +1762,40 @@ class GenRSA(object):
                 pass
 
         if not args:
-            return 'generate keys via command line: $ python pyfilesec.py genrsa'
+            _fatal('generate RSA keys interactively from the command line '
+                   '(genrsa option)', RuntimeError)
+
+        # constant:
+        AUTO_PPHR_BITS = 128
 
         # use args for filenames if given explicitly:
         pub = args.pub or abspath(_uniq_file('pub_RSA.pem'))  # ensure unique
         priv = args.priv or pub.replace('pub_RSA', 'priv_RSA')  # matched pair
+        if args.passfile:
+            pphr_out = pub.replace('pub_RSA', 'pphr_RSA')  # matched name
+            pphr_out = os.path.splitext(pphr_out)[0] + '.txt'
+        if args.clipboard:
+            import _pyperclip
         pub = abspath(pub)
         priv = abspath(priv)
         if pub == priv:
             priv += '_priv.pem'
 
-        if os.path.exists(priv):
-            msg = ('%s ' % lib_name +
-                   'RSA key generation.\n  %s already exists\n' % priv +
+        msg = '\n%s: RSA key-pair generation dialog\n' % lib_name
+        print(msg)
+        if os.path.exists(priv) or args.passfile and os.path.exists(pphr_out):
+            print('  > output file(s)already exist <\n'
                    '  > Clean up files and try again. Exiting. <')
-            print(msg)
             return None, None
 
-        msg = ('\n%s: ' % lib_name +
-               'RSA key-pair generation\n\nWill try to create two files:')
-        print(msg)
+        print('Will try to create files:')
         pub_msg = '  pub  = %s' % pub
         print(pub_msg)
         priv_msg = '  priv = %s' % priv
         print(priv_msg)
+        if args.passfile:
+            pphrout_msg = '  pphr = %s' % pphr_out
+            print(pphrout_msg)
         print('\nEnter a passphrase for the private key (16 or more chars)\n'
               '  or press <return> to auto-generate a passphrase')
         if interactive:
@@ -1791,37 +1810,39 @@ class GenRSA(object):
             pphr_auto = False
         else:
             print('(auto-generating a passphrase)\n')
-            pphr = _printable_pwd(128)  # or a word-based generator?
+            pphr = _printable_pwd(AUTO_PPHR_BITS)
             pphr_auto = True
         if pphr and len(pphr) < 16:
             print('  > passphrase too short; exiting <')
             return None, None
+        bits = 4096  # default
         if interactive:
-            bits = 4096  # default
             b = input23('Enter the desired RSA key length (2048, 4096, 8192): ')
             if b in ['2048', '4096', '8192']:
                 bits = int(b)
-        else:
-            bits = 2048
         bits_msg = '  using %i' % bits
         if bits > 4096:
             bits_msg += '; this will take a minute!'
         print(bits_msg)
         ent_msg = '  entropy: ' + self.check_entropy()
         print(ent_msg)
-        print('\nMove the mouse around for 5s (to help generate entropy)')
-        if interactive:
-            try:
-                time.sleep(5)
-            except KeyboardInterrupt:
-                return None, None
+
+        nap = (2, 5)[bool(interactive)]  # 5 sec sleep in interactive mode
+        print('\nMove the mouse around for %ds (to help generate entropy)' % nap)
+        try:
+            time.sleep(nap)
+        except KeyboardInterrupt:
+            return None, None
+
         msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
         print(msg)
-
         try:
             self.generate(pub, priv, pphr, bits)
         except KeyboardInterrupt:
             _cleanup('\n  > Removing temp files. Exiting. <')
+            return None, None
+        except:
+            _cleanup('\n  > exception in generate(), exiting <')
             return None, None
 
         pub_msg = 'public key:  ' + pub
@@ -1829,22 +1850,30 @@ class GenRSA(object):
         priv_msg = 'private key: ' + priv
         print(priv_msg)
         if pphr_auto:
-            pphr_msg = 'passphrase:  ' + pphr
+            if args.passfile:
+                pphr_msg = 'passphrase:  %s' % pphr_out
+                try:
+                    _set_umask()
+                    with open(pphr_out, 'wb') as fd:
+                        fd.write(pphr)
+                    _unset_umask()
+                except:
+                    _cleanup()
+                if not isfile(pphr_out) or not getsize(pphr_out) == AUTO_PPHR_BITS // 4:
+                    _cleanup(' >> failed to save passphrase file, exiting <<')
+                    return None, None
+            elif args.clipboard:
+                _pyperclip.copy(pphr)
+                pphr_msg = ('passphrase:  saved to clipboard only... paste it somewhere safe!!\n' +
+                            '      (It is exactly %d characters long, no end-of-line char)' % (AUTO_PPHR_BITS // 4))
+            else:
+                pphr_msg = 'passphrase:  ' + pphr
         else:
             pphr_msg = 'passphrase:  (entered by hand)'
         print(pphr_msg)
-        warn_msg = (' >> Keep the private key private! <<\n' +
+        warn_msg = (' >> Keep the private key private! <<\n'
                '  >> Do not lose the passphrase! <<')
         print(warn_msg)
-        if not interactive:
-            # pick up test coverage
-            _cleanup('')
-            save_pub, save_priv = pub, priv
-            pub = priv = ''
-            _cleanup('')
-            pub, priv = save_pub, save_priv
-
-        return pub, priv
 
 
 def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
@@ -3081,7 +3110,7 @@ class Tests(object):
         dropbox_path = orig_path
 
 
-def _main():
+def main():
     logging.info("%s with %s" % (lib_name, openssl_version))
     if args.filename == 'debug':
         """Run tests with verbose logging; check for memory leaks using gc.
@@ -3111,7 +3140,7 @@ def _main():
     elif args.filename == 'genrsa':
         """Walk through key generation on command line.
         """
-        GenRSA.genRsaKeys()
+        GenRSA().dialog()
     elif not isfile(args.filename):
         raise ArgumentError('Requires genrsa, debug, or a file name as an argument')
     else:
@@ -3180,7 +3209,7 @@ def _main():
             sf_fxn = sf._get_is_in_dropbox
 
         sf_fxn(**kw)  # make it happen
-        print sf.result
+        print(sf.result)
 
 
 def _parse_args():
@@ -3193,8 +3222,8 @@ def _parse_args():
     """
     parser = argparse.ArgumentParser(
         description='File-oriented privacy & integrity management library.',
-        epilog="See https://pypi.python.org/pypi/pyFileSec/")
-    parser.add_argument('filename', help='one of: path to file to process, "genrsa", or "debug"')
+        epilog="See http://pythonhosted.org/pyFileSec/")
+    parser.add_argument('filename', help='file (path), "genrsa", or "debug" (no quotes)')
     parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('--verbose', action='store_true', help='print logging info to stdout')
 
@@ -3208,28 +3237,32 @@ def _parse_args():
     group.add_argument('--destroy', action='store_true', help='secure delete')
     group.add_argument('--hardlinks', action='store_true',help='return number of hardlinks to a file', default=False)
     group.add_argument('--versioned', action='store_true',help='return True if a file is under version control', default=False)
-    group.add_argument('--permissions', action='store_true',help='return file permissoins', default=False)
+    group.add_argument('--permissions', action='store_true',help='return file permissions', default=False)
     group.add_argument('--dropbox', action='store_true',help='return True if a file is in Dropbox folder', default=False)
 
     parser.add_argument('--openssl', help='specify path of the openssl binary to use')
+
+    group2 = parser.add_mutually_exclusive_group()
+    group2.add_argument('--clipboard', action='store_true', help='genrsa: passphrase placed on clipboard (only)', default=False)
+    group2.add_argument('--passfile', action='store_true', help='save generated passphrase to a file (name matches keys)', default=False)
+
     parser.add_argument('-o', '--out', help='path name for generated (output) file')
     parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
     parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
     parser.add_argument('-p', '--pphr', help='path to file containing passphrase for private key')
-    parser.add_argument('-M', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
     parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
     parser.add_argument('-N', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
+    parser.add_argument('-M', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
-    parser.add_argument('-g', '--gc', action='store_true', help='debug will set gc.DEBUG_LEAK (garbage collection)', default=False)
+    parser.add_argument('-g', '--gc', action='store_true', help='debug: use gc.DEBUG_LEAK (garbage collection)', default=False)
 
     return parser.parse_args()
 
 
 # Basic set-up (order matters) ------------------------------------------------
 
-# set args depending on how __file__ is called:
 if __name__ == "__main__":
     args = _parse_args()
 else:
@@ -3237,11 +3270,6 @@ else:
 logging, logging_t0 = _setup_logging()
 
 set_openssl(args and args.openssl)
-
-if not user_can_link:
-    logging.warning('%s: User cannot check hardlinks' % lib_name)
-
-# set destroy tool and options to use with it:
 set_destroy()
 
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
@@ -3249,4 +3277,4 @@ default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
 codec_registry = PFSCodecRegistry(default_codec)
 
 if __name__ == '__main__':
-    _main()
+    main()
