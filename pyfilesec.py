@@ -33,22 +33,23 @@ import sys
 if sys.version < '2.6':
     raise RuntimeError('Requires python 2.6 or higher')
 
+import argparse
+from base64 import b64encode, b64decode
+import copy
+from functools import partial  # for buffered hash digest
+import getpass  # for RSA key-gen
+import hashlib
+import json
 import os
 from os.path import abspath, isfile, getsize, isdir, dirname, exists, split
-import stat
-import shutil
-import tarfile
-import re
 import random
-import json
-import time
-from tempfile import mkdtemp, NamedTemporaryFile
+import re
+import shutil
+import stat
 import subprocess
-import hashlib
-from functools import partial  # for buffered hash digest
-from base64 import b64encode, b64decode
-import getpass  # for RSA key-gen
-import argparse
+import tarfile
+from tempfile import mkdtemp, NamedTemporaryFile
+import time
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__)
@@ -195,6 +196,7 @@ class PFSCodecRegistry(object):
         """
         return fxn_name in self._functions
 
+
 def _set_umask():
     # avoid decorator
     global old_umask
@@ -238,7 +240,7 @@ def _setup_logging():
         msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
 
-    # always log like this:
+    # will always log if like this; use for dev work
     msgfmt = "%.4f  " + lib_name + ": %s"
     logging = _log2stdout()
     return logging, logging_t0
@@ -507,8 +509,9 @@ class SecFile(object):
     sf = SecFile(encrypted_file, priv, pphr)  # init + decrypt()
 
     Key rotation:
+    best (because helps manage meta-data):
       sf = SecFile(filename.enc1).rotate(priv1, pphr1, pub2, pad2)
-    same as
+    almost the same as
       sf = SecFile(filename.enc1).decrypt(priv1, pphr1).encrypt(pub2, pad2)
     same as:
       sf = SecFile(filename.enc1, pub2, pad2, priv1, pphr1) [but use kwargs]
@@ -525,9 +528,9 @@ class SecFile(object):
         self.get_priv(priv)  # string or file --> file if priv is encrypted, otherwise string
         self.get_pphr(pphr)  # string or file --> string
         if codec:
-            self.codec = codec  # use the registry we were given
+            self.codec = copy.deepcopy(codec)  # registry we were given
         else:
-            self.codec = codec_registry  # use global default codec_registry
+            self.codec = copy.deepcopy(codec_registry)  # global default reg
         self._openssl = openssl
 
         # passing value(s) at init will also trigger method calls
@@ -957,9 +960,7 @@ class SecFile(object):
             json.dump(meta, fd)
 
         # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc archive:
-        fullpath_files = [data_enc, pwd_rsa, metafile]
-        files = [os.path.split(f)[1] for f in fullpath_files]
-
+        files = [data_enc, pwd_rsa, metafile]
         archive = SecFileArchive(datafile, files, keep=False)
 
         if not keep:
@@ -974,8 +975,6 @@ class SecFile(object):
                 self.update(archive.name)  # don't lose status during update
                 logging.info(name +
                     'post-encrypt destroyed original plain-text file complete')
-                logging.debug(name + 'setting archive name as new .file name')
-                logging.debug(name + 'archive name set')
             else:
                 logging.error(name +
                     'retaining original file, encryption did not succeed')
@@ -1153,11 +1152,11 @@ class SecFile(object):
         re-encryption.
 
         Conceptually there are three separate steps: rotate, confirm that the
-        rotation worked, and destroy the old (insecure) file.
-        `rotate()` will only do the first step (rotation).
+        rotation worked, and destroy the old (insecure) file. ``rotate()` will
+        only do the first step (rotation).
 
-        ``rotate()`` will automatically preserve meta-data across encryption
-        sessions, adding to it rather than saving just the last one. (keep_meta=False
+        ``rotate()`` will preserve meta-data across encryption sessions, if
+        available, adding to it rather than saving just the last one. (keep_meta=False
         will suppress all meta_data; typically rotation events are not sensitive.)
         Handling the meta-data is the principle motivation for having a rotate
         method; otherwise sf.decrypt(old).encrypt(new) would suffice.
@@ -1169,18 +1168,22 @@ class SecFile(object):
         priv = self.get_priv(priv)
         pphr = self.get_pphr(pphr)
 
-        self.decrypt(priv, pphr=pphr, keep_meta=True)  # _require_enc_file() in dec, not twice
         try:
-            # encrypt() will destroy intermediate clear_text, but might be an exception
-            # might be an exception before getting to encrypt()
+            # do _require_enc_file() in decrypt, bad if do it twice
+            self.decrypt(priv, pphr=pphr, keep_meta=True)
+            # encrypt() will destroy intermediate clear_text, but might be
+            # an exception before getting to encrypt()
 
+            logging.debug('rotate self.meta = %s' % self.meta)
             if isfile(self.meta):
                 try:
-                    md = load_metadata(self.meta)
+                    md = self.load_metadata()
+                    logging.debug(name + ': read metadata from file')
                 except:
                     logging.error(name + ': failed to read metadata file; using None')
                     md = self._get_no_metadata()
             else:
+                logging.debug(name + ': self.meta no such file')
                 md = self._get_no_metadata()
             if pad > 0:  # can be -1
                 self.pad(pad)
@@ -1189,35 +1192,47 @@ class SecFile(object):
             self.encrypt(pub=pub, date=True, meta=md,
                      keep=False, hmac_key=hmac_key)
         except:
-            # it but there might be an exception before getting to encrypt()
+            # might be an exception before getting to encrypt()
             # so make sure we destroy the clear-text
             if isfile(file_dec):
                 self.destroy(file_dec)
             if isfile(self.meta):
-                self.destroy(self.meta)  # file
+                os.unlink(self.meta)  # file, not sensitive
                 del self.meta  # var
 
         _unset_umask()
-        return self  # new_enc
+        return self
 
-    def sign(self, filename, priv, pphr=None, out=None):
+    def load_metadata(self):
+        """Read meta-data file, return it as a dict.
+        """
+        if self.meta:
+            return json.load(open(self.meta, 'rb'))
+
+    def log_metadata(self, md, log=True):
+        """Log and return meta-data dict in human-friendly form.
+        """
+        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
+        if log:
+            logging.info(md_fmt)
+        return md_fmt
+
+    def sign(self, filename=None, priv=None, pphr=None, out=None):
         """Sign a given file with a private key, via `openssl dgst`.
 
         Get a digest of the file, sign the digest, return base64-encoded signature.
         """
         name = 'sign'
         logging.debug(name + ': start')
+        filename = self.require_file(filename)
+        priv = self.get_priv(priv)
+        pphr = self.get_pphr(pphr)  # ensures string not file
         sig_out = filename + '.sig'
-        if use_rsautl:
-            cmd_SIGN = [OPENSSL, 'dgst', '-sign', priv, '-out', sig_out]
-            if pphr:
-                if isfile(pphr):
-                    logging.warning(name + ': reading passphrase from file')
-                    pphr = open(pphr, 'rb').read()
-                cmd_SIGN += ['-passin', 'stdin']
-            cmd_SIGN += ['-keyform', 'PEM', filename]
-        else:
-            _fatal('only rsautl is supported', NotImplementedError)
+
+        cmd_SIGN = [self.openssl, 'dgst', '-sign', priv, '-out', sig_out]
+        if pphr:
+            cmd_SIGN += ['-passin', 'stdin']
+        cmd_SIGN += ['-keyform', 'PEM', filename]
         if pphr:
             _sys_call(cmd_SIGN, stdin=pphr)
         else:
@@ -1230,23 +1245,25 @@ class SecFile(object):
             return out
         return b64encode(sig)
 
-    def verify(self, filename, pub, sig):
+    def verify(self, filename=None, pub=None, sig=None):
         """Verify signature of filename using pubkey
 
         `sig` should be a base64-encoded signature, or a path to a signature file.
         """
         name = 'verify'
-        logging.debug(name + ': start, file ' + filename)
-        if use_rsautl:
-            cmd_VERIFY = [OPENSSL, 'dgst', '-verify', pub, '-keyform', 'PEM']
-        else:
-            _fatal('only rsautl is supported', NotImplementedError)
+        logging.debug(name + ': start')
+        filename = self.require_file(filename)
+        pub = self.get_pub(pub)
+        if not sig:
+            _fatal('signature required for verify(), as string or filename')
 
+        cmd_VERIFY = [self.openssl, 'dgst', '-verify', pub, '-keyform', 'PEM']
         if isfile(sig):
             sig = open(sig, 'rb').read()
         with NamedTemporaryFile(delete=False) as sig_file:
             sig_file.write(b64decode(sig))
-        result = _sys_call(cmd_VERIFY + ['-signature', sig_file.name, filename])
+        cmd_VERIFY += ['-signature', sig_file.name, filename]
+        result = _sys_call(cmd_VERIFY)
         os.unlink(sig_file.name)
 
         return result in ['Verification OK', 'Verified OK']
@@ -1539,11 +1556,9 @@ class SecFileArchive(object):
         _set_umask()
         if isinstance(paths, str):
             paths = [paths]
-        if not self.name:
-            self.name = os.path.splitext(paths[0])[0].strip(os.sep) + '.tgz'
         self.name = _uniq_file(self.name)
         tar_fd = tarfile.open(self.name, "w:gz")
-        for p in paths:
+        for p in [os.path.split(f)[1] for f in paths]:
             tar_fd.add(p, recursive=True)  # True by default, get whole directory
             if not keep:
                 try:
