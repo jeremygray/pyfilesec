@@ -501,7 +501,6 @@ class SecFile(object):
             self.encrypt(pub)
         # if add more here, also change in reset to avoid auto-trigger
 
-
     def __str__(self):
         if hasattr(self, 'filename'):
             name = self.filename
@@ -576,7 +575,7 @@ class SecFile(object):
     def update(self, infile):
         """Set the filename to use internally and set the file's permissions.
 
-        File permissions are set on disk (Mac, Linux only).
+        File permissions are set to conservative value on disk (Mac, Linux only).
         """
         name = 'update'
         if infile is None:
@@ -634,7 +633,8 @@ class SecFile(object):
         """Append null bytes to ``filename`` until it has length ``size``.
 
         The size is changed but `the fact that it was changed` is only obscured if
-        the padded file is encrypted. ``pad`` only changes the effective length.
+        the padded file is encrypted. ``pad`` only changes the effective length,
+        and the padding is easy to see (unless the padding is encrypted).
 
         Files shorter than `size` will be padded out to `size` (see details below).
         The minimum resulting file size is 128 bytes. Files that are already padded
@@ -825,27 +825,25 @@ class SecFile(object):
                 enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
         """Encrypt a file using AES-256, encrypt the password with RSA pub-key.
 
-        Returns: full path to the encrypted file (= .tgz bundle of 3 files).
-
         The idea is that you can have and share a public key, which anyone can
         use to encrypt things that only you can decrypt. Generating good keys and
         managing them is non-trivial (see `genRsaKeys()` and documentation).
 
         By default, the original plaintext is secure-deleted after encryption
-        (see parameter `keep=False`). This is time-consuming, but important.
+        (default ``keep=False``). This is time-consuming, but important.
 
         Files larger than 8G before encryption will raise an error.
 
-        To mask small file sizes, `pad()` them to a desired minimum
-        size before calling `encrypt()`.
+        To mask small file sizes, ``pad()`` them to a desired minimum
+        size before calling ``encrypt()``.
 
         :Parameters:
 
-            `pub`:
+            ``pub``:
                 The public key to use, specified as the path to a ``.pem`` file.
                 The minimum recommended key length is 2048 bits; 1024 is allowed
                 but strongly discouraged as it is not medium-term secure.
-            `meta`:
+            ``meta``:
                 If ``True`` or a dict, include the meta-data (plaintext) in the
                 archive. If given a dict, the dict will be updated with new
                 meta-data. This allows all meta-data to be retained from the
@@ -853,16 +851,16 @@ class SecFile(object):
                 If ``False``, will indicate that the meta-data were suppressed.
 
                 See ``load_metadata()`` and ``log_metadata()``.
-            `date`:
+            ``date``:
                 ``True`` : save the date in the clear-text meta-data.
                 ``False`` : suppress the date (if the date itself is sensitive)
                 File time-stamps are NOT obscured, even if ``date=False``.
-            `keep`:
+            ``keep``:
                 ``False`` = remove original (unencrypted) file
                 ``True``  = leave original file
-            `enc_method`:
+            ``enc_method``:
                 name of the function / method to use (currently only one option)
-            `hmac_key`:
+            ``hmac_key``:
                 optional key to use for a message authentication (HMAC-SHA256,
                 post-encryption); if a key is provided, the HMAC will be generated
                 and stored with the meta-data. (This is encrypt-then-MAC.)
@@ -1190,7 +1188,8 @@ class SecFile(object):
     def sign(self, filename=None, priv=None, pphr=None, out=None):
         """Sign a given file with a private key, via `openssl dgst`.
 
-        Get a digest of the file, sign the digest, return base64-encoded signature.
+        Get a digest of the file, sign the digest, return base64-encoded signature
+        or save it in file ``out``.
         """
         name = 'sign'
         logging.debug(name + ': start')
@@ -1211,15 +1210,16 @@ class SecFile(object):
 
         self.result = b64encode(sig)
         if out:
+            out = _uniq_file(out)
             with open(out, 'wb') as fd:
                 fd.write(self.result)
             self.result = out
         return self.result
 
     def verify(self, filename=None, pub=None, sig=None):
-        """Verify signature of filename using pubkey
+        """Verify signature of ``filename`` using pubkey ``pub``.
 
-        `sig` should be a base64-encoded signature, or a path to a signature file.
+        ``sig`` should be a base64-encoded signature, or a path to a signature file.
         """
         name = 'verify'
         logging.debug(name + ': start')
@@ -1245,17 +1245,17 @@ class SecFile(object):
 
         Calls an OS-specific secure-delete utility, defaulting to::
 
-            Mac:     /usr/bin/srm   -f -z --medium  filename
-            Linux:   /usr/bin/shred -f -u -n 7 filename
-            Windows: sdelete.exe    -q -p 7 filename
+            Mac:     srm -f -z --medium  filename
+            Linux:   shred -f -u -n 7 filename
+            Windows: sdelete.exe -q -p 7 filename
 
         If these are not available, ``destroy()`` will warn and fall through to trying
         to merely overwrite the data with 0's (with unknown effectiveness). Do
-        not reply on this fall-through.
+        not rely on this default behavior.
 
-        Ideally avoid the need to destroy files. Keep all sensitive data in RAM.
-        File systems that are journaled, have RAID, are mirrored, or other back-up
-        are much trickier to secure-delete.
+        Ideally avoid the need to destroy files as much as possible. Keep
+        sensitive data in RAM. File systems that are journaled, have RAID, are
+        mirrored, or other back-up are much trickier to secure-delete.
 
         ``destroy()`` may fail to remove all traces of a file if multiple hard-links
         exist for the file. For this reason, the original link count is returned.
