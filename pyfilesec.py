@@ -509,14 +509,6 @@ class SecFile(object):
         return '<pyfilesec.SecFile object, file=%s>' % (type(self), name)
 
     @property
-    def result(self):
-        """The current result (status) of the last method.
-
-        This can be a new filename, destroy status, and so on.
-        """
-        return self.result
-
-    @property
     def is_encrypted(self):
         # placeholder; will detect format regardless of name
         return isinstance(self.file, basestring) and self.file.endswith('.enc')
@@ -868,7 +860,7 @@ class SecFile(object):
         """
         _set_umask()
         name = 'encrypt: '
-        datafile = self.require_file(datafile)
+        datafile = self.require_file()
         pub = self.get_pub(pub)
         logging.debug(name + 'start')
         self.result = None

@@ -222,45 +222,46 @@ SecFile class
 ===============
 
 A SecFile instance generally has a file name that it is tracking, and methods
-to use to work with that file. The file name can change, e.g., to have a new
-extension ``.enc`` after encryption. File permissions can change.
+to use to work with that file. The file name and permissions can change, e.g., to have a new
+extension ``.enc`` after encryption.
 
-Most methods return the object. This allows flexible usage, and can make it easy to just read
-what is happening. The following lines all have the same effect: the file is encrypted
-and then the original is securely deleted from the disk.::
+Flexible usage is supported. The following sets of lines all have the same effect:
+The file is encrypted and the original is securely deleted (gone from the file
+system).
 
-    % sf = SecFile('filename.txt').encrypt('pub.pem')  # nice and clear
-    % sf = SecFile('filename.txt', pub='pub.pem')  # implicitly encrypts (because given a pub key)
-    % sf = SecFile('filename.txt'); sf.encrypt('pub.pem')
-    % sf = SecFile(); sf.update('filename.txt'); sf.encrypt('pub.pem')
+Nice, clear, and compact::
 
-The full-path to the new file is stored in ``sf.result``, and the file itself is
-is the same directory and the original file, with a new extension ``.enc``.
+    >>> sf = SecFile('filename.txt').encrypt('pub.pem')
 
-**Encryption, Decryption**
+Not quite as clear--this way will implicitly call ``encrypt()`` at init, simply by providing the public key::
 
-.. autoclass:: pyfilesec.SecFile
-    :members: encrypt, decrypt, rotate, update
+    >>> sf = SecFile('filename.txt', pub='pub.pem')
 
-**Integrity assurance**
+Separate init from encryption. Note the change of file name as well (same folder)::
 
-.. autoclass:: pyfilesec.SecFile
-    :members: sign, verify
+    >>> sf = SecFile('filename.txt')
+    >>> sf.file
+    '/Users/.../data/filename.txt'
+    >>> sf.encrypt('pub.pem')
+    >>> sf.file
+    '/Users/.../data/filename.enc'
 
-**Secure file removal**
+To decrypt using a private key from a file named ``priv.pem`` (no passphrase)::
 
-.. autoclass:: pyfilesec.SecFile
-    :members:  destroy
+    >>> sf.decrypt('priv.pem')
+    >>> sf.file
+    '/Users/.../data/filename.txt'
 
-**Obscure file length**
+The original file name is restored.
 
-.. autoclass:: pyfilesec.SecFile
-    :members: pad, unpad, ok_to_pad, pad_len,
-
-**Miscellaneous properties**
 
 .. autoclass:: pyfilesec.SecFile
-    :members: result, file, is_versioned, is_in_dropbox, hardlink_count, permissions
+    :members:
+        encrypt, decrypt, rotate, update
+        sign, verify
+        destroy
+        pad, unpad
+        file, is_versioned, is_in_dropbox, hardlink_count, permissions
 
 Codec Registry
 ===============
