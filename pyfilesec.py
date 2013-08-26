@@ -1337,26 +1337,30 @@ class SecFile(object):
         # srm will detect but not affect those links or the inode data
         # shred and fsutil will blast the inode's data, but not unlink other links
         orig_links = self.hardlink_count
-        if sys.platform != 'win32' and orig_links > 1:
-            mount_path = abspath(target_file)
-            while not os.path.ismount(mount_path):
-                mount_path = os.path.dirname(mount_path)
-            msg = name + """: '%s' (inode %d) has other hardlinks:
-                `find %s -xdev -inum %d`""".replace('    ', '')
-            file_stat = os.stat(target_file)
-            inode = file_stat[stat.ST_INO]
-            vals = (target_file, inode, mount_path, inode)
-            logging.warning(msg % vals)
+        inum = os.stat(target_file)[stat.ST_INO]
+        if orig_links > 1:
+            if sys.platform != 'win32':
+                mount_path = abspath(target_file)
+                while not os.path.ismount(mount_path):
+                    mount_path = os.path.dirname(mount_path)
+                msg = name + """: '%s' (inode %d) has other hardlinks:
+                    `find %s -xdev -inum %d`""".replace('    ', '')
+                vals = (target_file, inum, mount_path, inum)
+                logging.warning(msg % vals)
+            else:
+                mount_path = '(unknown)'
 
-        cmdList = (destroy_TOOL,) + destroy_OPTS + (target_file,)
+        cmd_Destroy = (destroy_TOOL,) + destroy_OPTS + (target_file,)
         good_sys_call = False
         try:
-            __, err = _sys_call(cmdList, stderr=True)
+            __, err = _sys_call(cmd_Destroy, stderr=True)
             good_sys_call = not err
+            # mac srm will warn about multiple links via stderr -> disp unknown
+
         except OSError as e:
             good_sys_call = False
             logging.warning(name + ': %s' % e)
-            logging.warning(name + ': %s' % ' '.join(cmdList))
+            logging.warning(name + ': %s' % ' '.join(cmd_Destroy))
         finally:
             #if got_file_object: only for NamedTemporaryFiles
             #    try:
@@ -1383,8 +1387,16 @@ class SecFile(object):
 
         duration = round(get_time() - destroy_t0, 4)
         self.reset()  # clear everything, including self.result
-        vals = destroy_code[disposition], orig_links, duration, target_file
-        keys = ('disposition', 'orig_links', 'seconds', 'target_file')
+        disp_exp = destroy_code[disposition]
+        if orig_links > 1:
+            disp_exp += ', other hardlinks exist (see inum)'
+        if err:
+            disp_exp += '; ' + err
+        vals = [disp_exp, orig_links, duration, target_file]
+        keys = ['disposition', 'orig_links', 'seconds', 'target_file']
+        if orig_links > 1 or disposition == pfs_UNKNOWN:
+            vals.extend([inum, mount_path])
+            keys.extend(['inum', 'mount_path'])
         self.result = dict(zip(keys, vals))
         if isfile(target_file):  # yikes, file still remains
             msg = name + ': %s remains after destroy() attempted' % target_file
@@ -1470,14 +1482,14 @@ class SecFile(object):
         filename = self.get_file()
         logging.debug('trying to detect version control (svn, git, hg)')
 
-        return any([self.get_svn_info(filename),
-                    self.get_git_info(filename),
-                    self.get_hg_info(filename)])
+        return any([self._get_svn_info(filename),
+                    self._get_git_info(filename),
+                    self._get_hg_info(filename)])
 
     def _get_is_versioned(self):
         self.result = self.is_versioned
 
-    def get_git_info(self, path):
+    def _get_git_info(self, path):
         """Report whether a directory or file is in a git repo (version control).
 
         Can test any generic filename, not just current file::
@@ -1502,7 +1514,7 @@ class SecFile(object):
         logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
         return is_tracked
 
-    def get_svn_info(self, path):
+    def _get_svn_info(self, path):
         """Tries to discover if a file is under svn (version control).
         """
         if not isdir(path):
@@ -1511,7 +1523,7 @@ class SecFile(object):
         logging.debug('path %s tracked in svn repo: %s' % (path, has_svn_dir))
         return has_svn_dir
 
-    def get_hg_info(self, path):
+    def _get_hg_info(self, path):
         """Tries to discover if a file is under mercurial (version control).
 
         `detailed=True` not tested recently (similar code worked before).
