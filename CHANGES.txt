@@ -1,7 +1,11 @@
-Version 0.2 (beta status)
+Version 0.2 (alpha status)
 ==========================
 
 Available in repository (github.com/jeremygray/pyfilesec):
+v0.2.03
+------------------------------------------
+* REFACTOR to provide a class SecFile; completely new API; test suite broken; command-line same, working
+
 v0.2.02
 ---------------------
 * BF win 7 interactive python was not happy with platform.python_version; use sys.version instead
@@ -20,7 +24,7 @@ v0.2.0
 * CHANGED umask no longer done via decorator
 
 
-Version 0.1 (alpha)
+Version 0.1
 ==========================
 
 v0.1.8

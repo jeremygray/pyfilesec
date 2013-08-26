@@ -212,57 +212,63 @@ generate an RSA key-pair using pyFileSec; any valid .pem format key-pair will wo
 API
 ------------------------
 
-The API describes how to call functions from within python. An understanding of
-the parameters will be useful for command-line / shell-script usage.
+The API describes how to use a SecFile and its methods from within python.
+An understanding of the parameters will be useful for command-line / shell-script usage.
 Details about command-line syntax can be obtained using the usual ``--help`` option::
 
     % python pyfilesec.py --help
 
-Encryption, Decryption
-============================
-.. autofunction:: pyfilesec.encrypt
-.. autofunction:: pyfilesec.decrypt
-.. autofunction:: pyfilesec.rotate
+SecFile class
+===============
 
-Sign, Verify
-============================
-.. autofunction:: pyfilesec.sign
-.. autofunction:: pyfilesec.verify
+A SecFile instance generally has a file name that it is tracking, and methods
+to use to work with that file. The file name can change, e.g., to have a new
+extension ``.enc`` after encryption. File permissions can change.
 
-Pad (obscure file size)
-============================
-.. autofunction:: pyfilesec.pad
-.. autofunction:: pyfilesec.ok_to_pad
-.. autofunction:: pyfilesec.pad_len
+Most methods return the object. This allows flexible usage, and can make it easy to just read
+what is happening. The following lines all have the same effect: the file is encrypted
+and then the original is securely deleted from the disk.::
 
-Secure delete
-============================
-.. autofunction:: pyfilesec.destroy
+    % sf = SecFile('filename.txt').encrypt('pub.pem')  # nice and clear
+    % sf = SecFile('filename.txt', pub='pub.pem')  # implicitly encrypts (because given a pub key)
+    % sf = SecFile('filename.txt'); sf.encrypt('pub.pem')
+    % sf = SecFile(); sf.update('filename.txt'); sf.encrypt('pub.pem')
 
-Misc helper functions
-============================
+The full-path to the new file is stored in ``sf.result``, and the file itself is
+is the same directory and the original file, with a new extension ``.enc``.
 
-To set the path to OpenSSL, you can use:
+**Encryption, Decryption**
 
-.. autofunction:: pyfilesec.set_openssl
+.. autoclass:: pyfilesec.SecFile
+    :members: encrypt, decrypt, rotate, update
 
-To generate RSA key pairs:
+**Integrity assurance**
 
-.. autofunction:: pyfilesec.genRsaKeys
+.. autoclass:: pyfilesec.SecFile
+    :members: sign, verify
 
-Other functions:
+**Secure file removal**
 
-.. autofunction:: pyfilesec.command_alias
-.. autofunction:: pyfilesec.hmac_sha256
-.. autofunction:: pyfilesec.load_metadata
-.. autofunction:: pyfilesec.log_metadata
-.. autofunction:: pyfilesec.get_dropbox_path
-.. autofunction:: pyfilesec.is_in_dropbox
+.. autoclass:: pyfilesec.SecFile
+    :members:  destroy
+
+**Obscure file length**
+
+.. autoclass:: pyfilesec.SecFile
+    :members: pad, unpad, ok_to_pad, pad_len,
+
+**Miscellaneous properties**
+
+.. autoclass:: pyfilesec.SecFile
+    :members: result, file, is_versioned, is_in_dropbox, hardlink_count, permissions
 
 Codec Registry
 ===============
 
+Currently there is only one option for a codec.
+
 .. autoclass:: pyfilesec.PFSCodecRegistry
+    :members: register, unregister, is_registered, get_function
 
 Tests and performance
 ----------------------

@@ -472,54 +472,14 @@ def _printable_pwd(nbits=256):
 
 class SecFile(object):
     """Class for working with a file as a secure object.
-
-    Example:
-      sf = SecFile(filename).encrypt(pub)
-
-    1. Will change the file on disk: encrypt, destroy, decrypt, rotate, pad
-       No change to file: sign, verify
-       self.file (= name string, not file object) changes to reflect .enc status (as does filename on disk)
-
-    2. infile is auto-detected as being cleartext, ciphertext
-        SecFile instance not supported, useless to do so
-    2a type(infile) == string & is path to plaintext
-      sf = SecFile(cleartext_file)  # init + auto-detect as non-enc
-    Encrypt
-      sf.encrypt(pub)
-    Same as:
-      sf.pub = pub
-      sf.encrypt()
-    Update with new file
-      sf.update(filename).encrypt()  # type auto-detected, keys retained
-      sf.update(filename.enc).decrypt()
-
-    sf = SecFile(cleartext_file, pub, pad=n)  # init + implicit encrypt(pub)
-    sf = SecFile(cleartext_file).encrypt(pub, pad=n)  # good
-    sf = SecFile(cleartext_file).pad(n).encrypt(pub)  # best
-    sf.filename  # same, new extention .enc
-    sf.decrypt(priv, pphr)
-    sf.destroy()
-    sf.status
-
-    2b. type(infile) == string & is path to encrypted (.enc)
-    sf = SecFile(encrypted_file)  # init + auto-detect as .enc
-    sf = SecFile(encrypted_file, priv, pphr)  # init + decrypt()
-
-    Key rotation:
-    best (because helps manage meta-data):
-      sf = SecFile(filename.enc1).rotate(priv1, pphr1, pub2, pad2)
-    almost the same as
-      sf = SecFile(filename.enc1).decrypt(priv1, pphr1).encrypt(pub2, pad2)
-    same as:
-      sf = SecFile(filename.enc1, pub2, pad2, priv1, pphr1) [but use kwargs]
-
-    2c. type(infile) == SecFile ==> complex / error prone and pointless
-
-    3. interesting but too complicated for now: should a SecFile "claim" a disk
-    file in some way, to avoid conflict with other SecFile instances?
     """
     def __init__(self, infile=None, pub=None, pad=None, priv=None, pphr=None,
                  codec=None, openssl=None):
+        """:Parameters:
+            ``infile`` : the target file to work on
+            ``pub`` : public key, .pem format
+            ``priv`` : private key, .pem format
+        """
         self.update(infile)
         self.get_pub(pub)
         self.get_priv(priv)  # string or file --> file if priv is encrypted, otherwise string
@@ -548,6 +508,14 @@ class SecFile(object):
         else:
             name = 'None'
         return '<pyfilesec.SecFile object, file=%s>' % (type(self), name)
+
+    @property
+    def result(self):
+        """The current result (status) of the last method.
+
+        This can be a new filename, destroy status, and so on.
+        """
+        return self.result
 
     @property
     def is_encrypted(self):
@@ -606,9 +574,9 @@ class SecFile(object):
         self.result = 'reset'
 
     def update(self, infile):
-        """Set the filename to use internally; set that file's permissions.
+        """Set the filename to use internally and set the file's permissions.
 
-        status is not changed.
+        File permissions are set on disk (Mac, Linux only).
         """
         name = 'update'
         if infile is None:
@@ -873,10 +841,6 @@ class SecFile(object):
 
         :Parameters:
 
-            `datafile`:
-                The path (name) of the original plaintext file to be encrypted.
-                NB: To encrypt a whole directory, first convert it to a single
-                file (using `archive`), then encrypt the archive file.
             `pub`:
                 The public key to use, specified as the path to a ``.pem`` file.
                 The minimum recommended key length is 2048 bits; 1024 is allowed
@@ -906,7 +870,7 @@ class SecFile(object):
         """
         _set_umask()
         name = 'encrypt: '
-        datafile = self.require_file()
+        datafile = self.require_file(datafile)
         pub = self.get_pub(pub)
         logging.debug(name + 'start')
         self.result = None
@@ -934,6 +898,7 @@ class SecFile(object):
 
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = self.codec.get_function(enc_method)
+        _set_umask()  # redundant
         data_enc, pwd_rsa = ENCRYPT_FXN(datafile, pub,
                                         openssl=self.openssl)
         ok_encrypt = (isfile(data_enc) and
@@ -1030,18 +995,16 @@ class SecFile(object):
 
         To get the data back, need two files: ``data.enc`` and ``privkey.pem``.
         If the private key has a passphrase, you'll need to provide that too.
-        `pphr` should be the passphrase itself (a string), not a file name.
+        `pphr` can be the passphrase itself (a string), or a file name.
 
-        Works on a copy of data.enc, tries to decrypt, clean-up only those files.
-        The original data.enc is not used (except to make a copy).
+        Works on a copy of ``data.enc``, tries to decrypt it, and will clean-up only those files.
+        The original ``data.enc`` is not used (except to make a copy).
 
         Tries to detect whether the decrypted file would end up inside a Dropbox
         folder; if so, refuse to proceed.
 
         :Parameters:
 
-            `data_enc` :
-                an encrypted file, file name typically ends with ``.enc``
             `priv` :
                 path to the private key that is paired with the ``pub`` key used at
                 encryption; in ``.pem`` format
@@ -1093,6 +1056,7 @@ class SecFile(object):
 
             # Decrypt (into same new tmp dir):
             DECRYPT_FXN = self.codec.get_function(dec_method)
+            _set_umask()  # redundant
             data_dec = DECRYPT_FXN(data_aes, pwd_file, priv, pphr,
                                    openssl=self.openssl)
 
@@ -1304,11 +1268,11 @@ class SecFile(object):
 
         API note:
 
-            ``destroy`` returns (disposition, original link count, time taken)
-            as an exit code. (This is different from most other SecFile methods, which return ``self``.)
-            The dispostion is one of pfs_DESTROYED, pfs_UNLINKED, and
-            pfs_UNKNOWN. Time taken is reported in seconds to help confirm whether
-            it was a secure removal (slow) or an ordinary unlink (very fast).
+            ``destroy`` returns a dict of (disposition, original link count,
+            time taken) and other information as an exit code. (This differs
+            from most other SecFile methods, which return ``self``.) Time taken
+            is reported in seconds to help confirm whether it was a secure
+            removal (slow) or an ordinary unlink (very fast).
 
         """
 
@@ -1334,8 +1298,6 @@ class SecFile(object):
         destroy_t0 = get_time()
 
         # Try to detect & inform about hardlinks:
-        # srm will detect but not affect those links or the inode data
-        # shred and fsutil will blast the inode's data, but not unlink other links
         orig_links = self.hardlink_count
         inum = os.stat(target_file)[stat.ST_INO]
         if orig_links > 1:
@@ -1356,7 +1318,6 @@ class SecFile(object):
             __, err = _sys_call(cmd_Destroy, stderr=True)
             good_sys_call = not err
             # mac srm will warn about multiple links via stderr -> disp unknown
-
         except OSError as e:
             good_sys_call = False
             logging.warning(name + ': %s' % e)
@@ -1380,7 +1341,7 @@ class SecFile(object):
         else:
             disposition = pfs_UNKNOWN
             # there is a file still, or something
-            logging.error(name + ': falling through to trying 1 pass of zeros; unknown effectiveness')
+            logging.error(name + ': falling through to trying 1 pass of zeros')
             with open(target_file, 'wb') as fd:
                 fd.write(chr(0) * getsize(target_file))
             shutil.rmtree(target_file, ignore_errors=True)
@@ -1399,7 +1360,7 @@ class SecFile(object):
             keys.extend(['inum', 'mount_path'])
         self.result = dict(zip(keys, vals))
         if isfile(target_file):  # yikes, file still remains
-            msg = name + ': %s remains after destroy() attempted' % target_file
+            msg = name + ': %s remains after destroy(), %d bytes' % (target_file, getsize(target_file))
             _fatal(msg, DestroyError)
 
         return self.result
@@ -1891,9 +1852,8 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
 
     Path to openssl must always be given explicitly.
 
-    This function is intended to be entirely self-contained.
+    This function is intended to be free of global vars (but needs functions).
     """
-    _set_umask()
     name = '_encrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
     if not openssl or not isfile(openssl):
@@ -1934,7 +1894,6 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
         if 'pwd' in locals():
             del pwd  # might as well try
 
-    _unset_umask()
     return _abspath(data_enc), _abspath(pwd_rsa)
 
 
@@ -1945,9 +1904,8 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     Path to openssl must always be given explicitly.
     pwd_rsa is the AES password that has been encrypted with an RSA pub key.
 
-    This function is intended to be entirely self-contained.
+    This function is intended to be free of global vars (but needs functions).
     """
-    _set_umask()
     name = '_decrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
     if not openssl or not isfile(openssl):
@@ -2001,8 +1959,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
         else:
             _fatal('%s: Bad decrypt (AES) %s' % (name, se_AES), DecryptError)
 
-    _unset_umask()
-    return abspath(data_dec)
+    return _abspath(data_dec)
 
 
 def permissions_str(filename):

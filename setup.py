@@ -5,12 +5,12 @@ from distutils.core import setup
 
 setup(
     name='PyFileSec',
-    version='0.2.01',
+    version='0.2.03 (alpha)',
     author='Jeremy R. Gray',
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
     py_modules=['pyfilesec'],
-    classifiers=['Development Status :: 4 - Beta',
+    classifiers=['Development Status :: 3 - Alpha',
                  'Programming Language :: Python :: 2.6',
                  'Programming Language :: Python :: 2.7',
                  'Programming Language :: Python :: 3',
