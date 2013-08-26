@@ -1138,11 +1138,13 @@ class SecFile(object):
         _unset_umask()
         if not keep_enc:
             os.unlink(data_enc)
+        if keep_meta:
+            self.meta = newMeta
         self.update(clear_text)
         return self
 
     def rotate(self, data_enc=None, pub=None, priv=None, pphr=None,  # priv pphr = old, pub = new
-               hmac=None, pad=None, keep_meta=True):
+               hmac_key=None, pad=None, keep_meta=True):
         """Swap old encryption (priv) for new (pub), i.e., decrypt-then-re-encrypt.
 
         Returns the path to the "same" underlying file (i.e., same contents, new
@@ -1163,35 +1165,37 @@ class SecFile(object):
         _set_umask()
         name = 'rotate'
         logging.debug(name + ': start (decrypt old, [pad new,] encrypt new)')
-        data_enc = self._require_enc_file(data_enc)
         pub = self.get_pub(pub)
         priv = self.get_priv(priv)
         pphr = self.get_pphr(pphr)
 
-        self.decrypt(priv, pphr=pphr, keep_meta=True)
-        file_dec = self.file  # track file names so can destroy if needed
+        self.decrypt(priv, pphr=pphr, keep_meta=True)  # _require_enc_file() in dec, not twice
         try:
-            old_meta = file_dec + META_EXT
-            # Always store the date of the rotation
-            if isfile(old_meta):
+            # encrypt() will destroy intermediate clear_text, but might be an exception
+            # might be an exception before getting to encrypt()
+
+            if isfile(self.meta):
                 try:
-                    md = load_metadata(old_meta)
+                    md = load_metadata(self.meta)
                 except:
                     logging.error(name + ': failed to read metadata file; using None')
                     md = self._get_no_metadata()
             else:
                 md = self._get_no_metadata()
             if pad > 0:  # can be -1
-                self.pad(file_dec, pad)
-            new_enc = encrypt(file_dec, pub, date=True, meta=md,
-                                 keep=False, hmac_key=hmac)
-        finally:
-            # Never want the intermediate clear-text; encrypt() will destroy
+                self.pad(pad)
+            file_dec = self.file  # track file names so can destroy if needed
+
+            self.encrypt(pub=pub, date=True, meta=md,
+                     keep=False, hmac_key=hmac_key)
+        except:
             # it but there might be an exception before getting to encrypt()
+            # so make sure we destroy the clear-text
             if isfile(file_dec):
-                destroy(file_dec)
-            if isfile(old_meta):
-                destroy(old_meta)
+                self.destroy(file_dec)
+            if isfile(self.meta):
+                self.destroy(self.meta)  # file
+                del self.meta  # var
 
         _unset_umask()
         return self  # new_enc
@@ -1583,6 +1587,7 @@ class SecFileArchive(object):
         name = 'unpack'
         logging.debug(name + ': start')
         self._check()
+        logging.debug(name + ': _check OK')
         data_enc = self.name
 
         # Extract:
@@ -1592,21 +1597,20 @@ class SecFileArchive(object):
         tar.close()
 
         fileList = os.listdir(tmp_dir)
-        data_aes = pwdFileRsa = meta_file = None
+        self.data_aes, self.pwd_rsa, self.meta = None, None, None
         for fname in fileList:
             if fname.endswith(AES_EXT):
-                data_aes = os.path.join(tmp_dir, fname)
+                self.data_aes = os.path.join(tmp_dir, fname)
             elif fname.endswith(RSA_EXT):
-                pwdFileRsa = os.path.join(tmp_dir, fname)
+                self.pwd_rsa = os.path.join(tmp_dir, fname)
             elif fname.endswith(META_EXT):
-                meta_file = os.path.join(tmp_dir, fname)
+                self.meta = os.path.join(tmp_dir, fname)
             else:
                 _fatal(name + ': unexpected file in archive', SecFileArchiveFormatError)
 
         _unset_umask()
-        self.meta_file = meta_file
 
-        return data_aes, pwdFileRsa, meta_file
+        return self.data_aes, self.pwd_rsa, self.meta
 
     def get_dec_method(self, codec):
         """Return a valid decryption method from meta-data or default.
@@ -1614,7 +1618,7 @@ class SecFileArchive(object):
         Cross-validate requested dec_method against meta-data, warn if mismatch.
         """
         enc_method = 'unknown'
-        meta_file = self.meta_file
+        meta_file = self.meta
 
         if meta_file:
             md = self.load_metadata()
@@ -1651,7 +1655,7 @@ class SecFileArchive(object):
     def load_metadata(self):
         """Read meta-data file, return it as a dict.
         """
-        return json.load(open(self.meta_file, 'rb'))
+        return json.load(open(self.meta, 'rb'))
 
     def log_metadata(self, md, log=True):
         """Log and return meta-data dict in human-friendly form.
@@ -1838,12 +1842,14 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
     """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
 
     Path to openssl must always be given explicitly.
+
+    This function is intended to be entirely self-contained.
     """
     _set_umask()
     name = '_encrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
     if not openssl or not isfile(openssl):
-        _fatal(name + ': require path to openssl executable')
+        _fatal(name + ': require path to openssl executable', RuntimeError)
 
     # Define file paths:
     data_enc = _uniq_file(abspath(datafile + AES_EXT))
@@ -1887,14 +1893,17 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
 def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     """Decrypt a file that was encoded by _encrypt_rsa_aes256cbc()
 
-    If present, pphr must be the actual password, not a filename.
+    If present, pphr must be the actual passphrase, not a filename.
     Path to openssl must always be given explicitly.
+    pwd_rsa is the AES password that has been encrypted with an RSA pub key.
+
+    This function is intended to be entirely self-contained.
     """
     _set_umask()
     name = '_decrypt_rsa_aes256cbc'
     logging.debug('%s: start' % name)
     if not openssl or not isfile(openssl):
-        _fatal(name + ': require path to openssl executable')
+        _fatal(name + ': require path to openssl executable', RuntimeError)
 
     # set the name for decrypted file:
     data_dec = os.path.splitext(abspath(data_enc))[0]
