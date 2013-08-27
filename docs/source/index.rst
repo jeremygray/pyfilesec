@@ -6,46 +6,49 @@
 
 ==================================================================
 
-File security in python
-------------------------
+File-oriented security in python
+---------------------------------
 
-**Security goals:** Protect computer files from casual inspection or accidental
-disclosure. Robustness, privacy assurance, ease of use, and API stability are
-much more important than the speed of code execution. Integrity assurance is
-useful but not a top priority.
+pyFileSec provides a class ``SecFile`` and helper functions. These are intended
+to make it easier to work with computer files while protecting them from casual
+inspection or accidental disclosure. The intended audience is small workgroups
+and research teams looking. By design, privacy assurance, ease-of-use, and a
+stable, cross-platform API are important security goals. Integrity
+assurance is useful but not a top priority. The speed of code execution is
+relatively unimportant. Truly sensitive information should be protected through
+multiple means, including procedural, physical, and legal methods. pyFileSec is
+only concerned with file-oriented aspects of information security (e.g., not
+network security, side-channel attackes on cryptography, or other issues).
 
-pyFileSec is less about encryption (which it does handily, as do many other
-excellent packages), and more about managing other issues that arise
-when working with files. Anyone needing file management with compatible
-security goals could potentially benefit. The target audience is people
-who need to do system administration tasks in a research lab (without being IT
-professionals), and users and developers of software presentation programs for
-human subjects research.
+pyFileSec is less about encryption (which it does handily, as do many excellent
+packages), and more about managing the immediate security issues that arise
+when working with files. Anyone doing system administration tasks in a
+research lab might find it useful, possibly including edvanced users and
+developers of software presentation programs for human subjects research. Anyone
+needing file management with compatible security goals could potentially benefit.
 
-**Example use-case:** A research team might wish to collect data on illegal drug-use,
-or other HIPAA-covered information. A research team will typically consist of
-multiple individuals, some more technically savvy than others. Participant
-confidentiality should be protected through multiple means, including procedural,
-physical, and legal methods; cryptography has a role as well, but is inadequate
-in isolation. Sensitive information is best protected as early as possible in the
-data stream -- ideally from within the data collection program itself -- to keep
-the window of accidental disclosure as small as possible. It is also desirable to
-be able to encrypt it without needing to be able to decrypt on the same computer,
-or store a decryption password where it might be copied, disclosed, or exposed to
-key-loggers (any of which would make the encryption irrelevant). Its typically
-useful to secure-delete the original file(s) to avoid leaving sensitive information
-on the disk. And it can be desirable to obscure file sizes, e.g., so that a longer
-file cannot indirectly indicate greater drug use.
+**Example use-case:** A research team might wish to collect data on illegal
+drug-use (or other HIPAA-covered information). To keep the window of accidental
+disclosure as small as possible, such sensitive information is best protected
+as early as possible in the data stream -- ideally from within the data collection
+program. It is also desirable to be able to encrypt it without needing to be able
+to decrypt on the same computer, and without needing to store a password for
+decryption where the password might be copied, disclosed, or exposed to
+key-loggers (any of which could make encryption irrelevant). Being able to
+secure-delete the original file(s) to avoid leaving sensitive information
+on the disk is useful. And at times it can be desirable to obscure file sizes,
+e.g., so that a larger file cannot indicate a more extensive history of drug use.
 
 Despite excellent tools for encryption being widely available, security is hard
 to achieve. Even good and trustworthy people can make mistakes that compromise
 security. Tools to help manage file security can reduce the chances of mistakes
 and help people be more confident and more productive.
 
-When used correctly, pyFileSec is intended to be adequate for the purpose of
-securing data files within a typical research lab. Even so, the
+pyFileSec is intended to be adequate for the purpose of securing data files
+within a typical research lab. Even so, the
 effective security will be higher if the data have low economic value (which is
-typically the case in psychology and neuroscience labs), and will be much higher
+typically the case in psychology and neuroscience labs). The effective security
+will be much higher
 if the lab has reasonable physical and network security, with only trained,
 trusted people working there (also typically the case).
 
@@ -78,8 +81,10 @@ Principles and Approach
 ------------------------
 
 Using public-key encryption allows a non-secret "password" (the public key) to
-be distributed and used for encryption. This separates encryption from decryption,
-allowing their physical separation, which gives considerable flexibility (and security).
+be distributed and used for encryption, with no need for the non-shared private key
+to be involved in the encryption process. This logically separates encryption from
+decryption, which in turn allows their physical separation. This separability
+gives considerable flexibility (and security).
 The idea is that anyone anywhere can encrypt information that only a trusted process
 (i.e., with access to the private key) can decrypt. For example, multiple testing-room
 computers could have the public key, and use it to encrypt the data from each subject
@@ -99,8 +104,9 @@ front door is irrelevant if you make a habit of leaving the key under the doorma
 
 Some considerations:
 
-- A test-suite is included as part of the library. The aim is to provide complete
-  coverage (we're not there yet). See Performance and tests, below.
+- A test-suite is included as part of the library. The aim is to provide very high
+  or complete coverage--it was over 90% coverage at one point but most tests need to be rewritten
+  for the ``SecFile`` class).
 - OpenSSL is not distributed as part of the library (see Installation).
 - By design, the computer used for encryption can be different from the computer used
   for decryption; it can be a different device, operating system, and version of OpenSSL.
@@ -120,23 +126,20 @@ Design goals:
   OpenSSL and the basic approach (RSA + AES 256) are well-understood and recommended
   (e.g., by Ferguson, Schneier, & Kohno (2010) `Cryptography engineering.` Indianapolis,
   Indiana: Wiley).
-- The implementation should allow for the relatively easy adoption of another
+- Allow for the relatively easy adoption of another
   encryption cipher suite, in the event that a change is necessary for cryptographic
   reasons.
 - For clarity, use and return full paths to files, not relative paths.
-- Avoid obfuscation and so-called "security through obscurity". Obfuscation does
+- Avoid obfuscation. It does
   not enchance security, yet can make data recovery more difficult or expensive.
   So transparency is preferred. For this reason, meta-data are generated by
   default to make things less obscure; meta-data can be suppressed if desired.
-- Encryption should refuse to proceed if the OpenSSL version is lower than 0.9.8.
-- Encryption must not proceed if the public key < 1024 bits; you should only use
-  2048 or higher.
+- Require OpenSSL version is 0.9.8 or higher.
+- Require a public key >= 1024 bits; you should only use 2048 or higher.
 - For the AES encryption, a random 256-bit session key (AES password) is
   generated for each encryption event.
-- For ease of archiving and handling, everything is bundled as a single ``tar``
-  file (with ``gzip`` compression), with ``.enc`` as the extension. It can be
-  unbundled using ``tar`` (the archive contents remain encrypted).
-- pyFileSec does not try to manage RSA keys. Its up to you (the user) to do so.
+- Use standard formats as much as possible.
+- Managing the RSA keys is up to the user to do.
 
 
 Installation
@@ -150,39 +153,47 @@ Install things in the usual way for a python package::
     % pip install pyFileSec
 
 pyFileSec does not come with a copy of OpenSSL or a secure file-removal tool,
-which you'll need. These are typically already present on Mac and linux.
+which you'll need. Both are typically present on Mac and linux; if so,
+installation is complete.
 
-OpenSSL
+Mac and Linux
 =================
 
-On Mac and Linux, its very likely that you have OpenSSL already. To check, type
-``which openssl`` in a terminal window, and it will probably say ``/usr/bin/openssl``.
-It is also possible to install a different version of OpenSSL (e.g., compile a
-development release, or use a homebrew version). You then need to specify the
-non-default version to use; see command-line option ``--openssl`` or the API function
-``set_openssl``.
+On a Mac, if you get this all is well::
 
-On Windows, generally you'll need to download and install OpenSSL (free).
-Get the latest version from http://slproweb.com/products/Win32OpenSSL.html; a
-"Light" version should be fine. There's a good chance that you will first need
-to install the "Visual C++ 2008 Redistributables" (free download from the same
-page), and then install OpenSSL. OpenSSL will install to ``C:\OpenSSL-Win32`` by default.
-pyFileSec should now be able to detect and use OpenSSL.
+    % which openssl
+    /usr/bin/openssl
+    % which srm
+    /usr/bin/srm
 
-Secure file-removal
-========================
+On Linux, its typically very similar (``shred``)::
 
-On Mac and Linux, a secure file-removal utility should already be present. To confirm
-this, on a Mac type ``which srm`` in a terminal. On Linux, type ``which shred``.
+    % which openssl
+    /usr/bin/openssl
+    % which shred
+    /usr/bin/shred
 
-On Windows, download a program called ``sdelete`` (free, from Microsoft)
-http://technet.microsoft.com/en-us/sysinternals/bb897443.aspx
-and install. pyFileSec should now be able to detect and use ``sdelete.exe``.
+It is also possible to use a non-default (e.g., compiled) version of OpenSSL.
+You can specify the path with the ``--openssl=path`` option (command-line use),
+or using ``set_openssl(path)`` (API use).
 
-On Windows, the command ``cipher`` has an option to securely erase files that
-have already been deleted. However, this can take a long time (20-30 minutes)
-and is not suited for file-oriented secure deletion.
+Windows
+========
 
+On Windows, its also free but not as easy.
+
+1. Download and install OpenSSL from http://slproweb.com/products/Win32OpenSSL.html.
+First install the "Visual C++ 2008 Redistributables" (from the same page).
+Then install OpenSSL (Light is fine) and run through the installer pages.
+It should install to ``C:\OpenSSL-Win32`` by default. pyFileSec should now be
+able to detect and use OpenSSL.
+
+2. Download and install ``sdelete`` (free, from Microsoft)
+http://technet.microsoft.com/en-us/sysinternals/bb897443.aspx. pyFileSec should
+be able to detect ``sdelete.exe``.
+
+You may need to run these once manually and accept the terms before being able to
+use them.
 
 Getting started
 ----------------
@@ -221,38 +232,52 @@ Details about command-line syntax can be obtained using the usual ``--help`` opt
 SecFile class
 ===============
 
-A SecFile instance generally has a file name that it is tracking, and methods
-to use to work with that file. The file name and permissions can change, e.g., to have a new
-extension ``.enc`` after encryption.
+A SecFile instance tracks a specific file, and regards it as being "the same"
+object despite differences to the underlying stuff on the actual file system.
+The underlying file name can change, for example.
 
-Flexible usage is supported. The following sets of lines all have the same effect:
-The file is encrypted and the original is securely deleted (gone from the file
-system).
+Flexible usage is supported.
+
+**Examples**
+
+The following sets of lines all have the same effect: A file that was originally
+named "The Larch.txt" (with a space in it) becomes encrypted and renamed, and
+the original file is securely deleted.
 
 Nice, clear, and compact::
 
-    >>> sf = SecFile('filename.txt').encrypt('pub.pem')
-
-Not quite as clear--this way will implicitly call ``encrypt()`` at init, simply by providing the public key::
-
-    >>> sf = SecFile('filename.txt', pub='pub.pem')
-
-Separate init from encryption. Note the change of file name as well (same folder)::
-
-    >>> sf = SecFile('filename.txt')
+    >>> sf = SecFile('The Larch.txt').encrypt('pub.pem')
     >>> sf.file
-    '/Users/.../data/filename.txt'
+    '/Users/.../data/The Larch.enc'
+
+Simply providing a public key will implicitly call ``encrypt()`` as part of init.
+This is a bit sneakier, and not as clear, but does the same thing::
+
+    >>> sf = SecFile('The Larch.txt', pub='pub.pem')
+
+Its fine to encrypt well after init. Here also note the change of file name and
+size (and that the new file is in same folder)::
+
+    >>> sf = SecFile('The Larch.txt')
+    >>> sf.file
+    '/Users/.../data/The Larch.txt'
+    >>> sf.size
+    16384L
+
     >>> sf.encrypt('pub.pem')
     >>> sf.file
-    '/Users/.../data/filename.enc'
+    '/Users/.../data/The Larch.enc'
+    >>> sf.size
+    18036L
 
-To decrypt using a private key from a file named ``priv.pem`` (no passphrase)::
+To decrypt using a private key from a file named ``priv.pem`` with a passphrase
+in a file named ``passphrase.txt``::
 
-    >>> sf.decrypt('priv.pem')
+    >>> sf.decrypt('priv.pem', 'passphrase.txt')
     >>> sf.file
-    '/Users/.../data/filename.txt'
+    '/Users/.../data/The Larch.txt'
 
-The original file name is restored.
+The original file name is restored (only the file name, not the path).
 
 
 .. autoclass:: pyfilesec.SecFile
@@ -331,12 +356,15 @@ X (10.8), 3 linux distributions, and Windows 7::
     OpenSSL 1.0.1e                 same Windows
 
 Encryption is basically linear in time and disk space (file size; times
-will vary with CPU, disk speed, etc)::
+will vary with CPU, disk speed, etc). Example values from a laptop::
 
-    1K takes < 1s
-    1M takes ~10s to encrypt, ~5s decrypt
-    1G takes ~90s to encrypt, ~60s decrypt
+    1K takes ~0.2s to encrypt, ~0.1s decrypt
+    1M takes ~10s to encrypt,  ~5s decrypt
+    1G takes ~90s to encrypt,  ~60s decrypt
     8G takes ~13m to encrypt
+
+If backup software is running, that can greatly reduce a SecFile object's
+apparent speed. Presumably, other concurrent and intensive disk usage would also do this.
 
 Large files are fine (max tested is 8G). File-size inflation is consistently 3%::
 
@@ -345,13 +373,19 @@ Large files are fine (max tested is 8G). File-size inflation is consistently 3%:
     8G:  8589934592 plain text --> 8849744181 encrypted
 
 A fair amount of disk space is used for intermediate files during encryption.
-An 8G plaintext file will temporarily require ~28G disk space (total)::
+An 8G plaintext file will *temporarily* require up tp 28G disk space (total)::
 
       -rw-------  1 jgray     4357464064 8gig.enc         # grows to 8849744181
       -rw-------  1 jgray     8589934592 8gig.zeros
       -rw-------  1 jgray    11632203140 8gig.zeros.aes256            # deleted
       -rw-------  1 jgray            512 8gig.zeros.aes256pwd.rsa
       -rw-------  1 jgray            667 8gig.zeros.meta
+
+Currently the original file is only deleted after all the other steps have
+been carried out, the idea being to allow a more complete check that everything
+went as expected. Presumably--and with a slightly higher risk of losing data, in
+theory--one could delete the original file after the AES encryption and before
+archiving it. Only the encrypted (.aes256) file goes in the archive, not the original.
 
 The larger .aes256 files get removed, leaving::
 

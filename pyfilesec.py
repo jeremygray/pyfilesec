@@ -53,20 +53,12 @@ import time
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__)
+if isfile(lib_path.strip('co')):
+    lib_path = lib_path.strip('co')
 lib_dir = os.path.split(lib_path)[0]
 
 # python 3 compatibility:
 input23 = (input, raw_input)[sys.version < '3.']
-
-if sys.platform == 'win32':
-    get_time = time.clock
-    from win32com.shell import shell
-    user_can_admin = shell.IsUserAnAdmin()
-    user_can_link = user_can_admin  # for fsutil hardlink
-else:
-    get_time = time.time
-    user_can_admin = False  # not known; not needed
-    user_can_link = True
 
 
 class PyFileSecError(Exception):
@@ -218,7 +210,7 @@ def _unset_umask():
     return new_umask
 
 
-def _setup_logging():
+def setup_logging():
     class _log2stdout(object):
         """Print all logging messages, regardless of log level.
         """
@@ -243,6 +235,7 @@ def _setup_logging():
         msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
 
+    return logging, logging_t0
     return logging, logging_t0
 
 
@@ -271,8 +264,6 @@ def _sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
 def set_openssl(path=None):
     """Find, check, set, and report info about the OpenSSL binary to be used.
     """
-    global OPENSSL, openssl_version
-
     if path:  # command-line arg or parameter
         OPENSSL = path
         logging.info('Requested openssl executable: ' + OPENSSL)
@@ -335,8 +326,6 @@ def set_openssl(path=None):
 def set_destroy():
     """Find, set, and report info about secure file removal tool to be used.
     """
-    global destroy_TOOL, destroy_OPTS
-
     if sys.platform in ['darwin']:
         destroy_TOOL = _sys_call(['which', 'srm'])
         destroy_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
@@ -1058,7 +1047,8 @@ class SecFile(object):
             except OSError:
                 # if /tmp is on another partition
                 shutil.copy(data_dec, clear_text)
-                if not destroy(data_dec)[0] == pfs_DESTROYED:
+                self.destroy(data_dec)
+                if self.result['disposition'] != destroy_code[pfs_DESTROYED]:
                     msg = name + 'destroy tmp clear txt failed: %s' % data_dec
                     _fatal(msg, DestroyError)
             perm_str = permissions_str(clear_text)
@@ -1070,7 +1060,8 @@ class SecFile(object):
                 except OSError:
                     # if /tmp is on another partition
                     shutil.copy(meta_file, newMeta)
-                    if not destroy(meta_file)[0] == pfs_DESTROYED:
+                    self.destroy(meta_file)
+                    if self.result['disposition'] != destroy_code[pfs_DESTROYED]:
                         msg = name + 'destroy tmp meta-data failed: %s' % meta_file
                         _fatal(msg, DestroyError)
                 perm_str = permissions_str(newMeta)
@@ -2002,12 +1993,6 @@ def _uniq_file(filename):
         count += 1
         filename = base + '_' + str(count) + filext
     return filename
-
-
-def get_version():
-    """Return __version__ as a tuple of integers.
-    """
-    return tuple(map(int, __version__.strip('beta').split('.')))
 
 
 def _abspath(filename):
@@ -3112,7 +3097,7 @@ def main():
         import pytest
 
         dbg_dir = 'debug_' + lib_name
-        shutil.rmtree(dbg_dir)
+        shutil.rmtree(dbg_dir, ignore_errors=True)
         os.mkdir(dbg_dir)
         os.chdir(dbg_dir)  # intermediate files get left inside
         if args.gc:
@@ -3134,7 +3119,7 @@ def main():
         """
         GenRSA().dialog()
     elif not isfile(args.filename):
-        raise ArgumentError('Requires genrsa, debug, or a file name as an argument')
+        raise ArgumentError('no such file (requires genrsa, debug, or a file)')
     else:
         """Call requested function with arguments, return result (to stdout)
 
@@ -3236,9 +3221,9 @@ def _parse_args():
 
     group2 = parser.add_mutually_exclusive_group()
     group2.add_argument('--clipboard', action='store_true', help='genrsa: passphrase placed on clipboard (only)', default=False)
-    group2.add_argument('--passfile', action='store_true', help='save generated passphrase to a file (name matches keys)', default=False)
+    group2.add_argument('--passfile', action='store_true', help='genrsa: save passphrase to file, name matches keys', default=False)
 
-    parser.add_argument('-o', '--out', help='path name for generated (output) file')
+    parser.add_argument('-o', '--out', help='sign: path name for the generated sig')
     parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
     parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
     parser.add_argument('-p', '--pphr', help='path to file containing passphrase for private key')
@@ -3255,17 +3240,26 @@ def _parse_args():
 
 # Basic set-up (order matters) ------------------------------------------------
 
+if sys.platform == 'win32':
+    get_time = time.clock
+    from win32com.shell import shell
+    user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
+else:
+    get_time = time.time
+    user_can_link = True
+
 if __name__ == "__main__":
     args = _parse_args()
 else:
     args = None
-logging, logging_t0 = _setup_logging()
 
-set_openssl(args and args.openssl)
-set_destroy()
+logging, logging_t0 = setup_logging()
+path_wanted = args and args.openssl
+OPENSSL, openssl_version = set_openssl(path_wanted)
+destroy_TOOL, destroy_OPTS = set_destroy()
 
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
-                     '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
+                 '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
 codec_registry = PFSCodecRegistry(default_codec)
 
 if __name__ == '__main__':
