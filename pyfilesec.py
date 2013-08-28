@@ -471,6 +471,31 @@ class SecFile(PyFileSecClass):
         _get_priv(priv)
         _get_pphr(pphr)
 
+    @property
+    def is_in_writeable_dir(self):
+        # True if permissions allow writing to the file's current directory
+        # don't call _require_*file
+        # TO-DO: explore os.access using a try-except approach
+        # that is safer than if test-then-read, see os.access docs
+        # (still might want to be able to check writeability as a property)
+        if not self._file:
+            return False
+        directory, filename = os.path.split(self._file)
+        writeable = True
+        try:
+            test_name = os.path.join(directory, printable_pwd(32))
+            open(test_name, 'wb')
+        except IOError as e:
+            if e.errno == os.errno.EACCES:
+                writeable = False
+            raise
+        finally:
+            try:
+                os.unlink(test_name)
+            except:
+                pass
+        return writeable
+
     def pad(self, size=DEFAULT_PAD_SIZE):
         """Append null bytes to ``filename`` until it has length ``size``.
 
@@ -667,7 +692,7 @@ class SecFile(PyFileSecClass):
         set_umask()
         name = 'encrypt'
         self.result = {'method': name, 'status': 'started'}
-        self._require_file()  # enc file ok, allow but warn about it
+        self._require_file(self.is_in_writeable_dir)  # enc file ok, allow but warn about it
         self._require_keys(pub=pub)
         if not self.pub:
             fatal(name + ': requires a public key', EncryptError)
@@ -741,7 +766,7 @@ class SecFile(PyFileSecClass):
                     ': retaining original file, encryption did not succeed')
 
         unset_umask()
-        self.set_file(arch_enc.name)
+        self.set_file(arch_enc.name)  # likely off in some situations
         self.result.update({'archive': self.file, 'meta': meta})
         return self
 
@@ -816,7 +841,7 @@ class SecFile(PyFileSecClass):
         set_umask()
         name = 'decrypt'
         self.result = {'method': name, 'status': 'started'}
-        arch_enc = self._require_enc_file(self.is_not_in_dropbox)
+        arch_enc = self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
         self._require_keys(priv=priv, pphr=pphr)
         if not self.priv:
             fatal(name + ': requires a private key', DecryptError)
@@ -926,7 +951,7 @@ class SecFile(PyFileSecClass):
         name = 'rotate'
         logging.debug(name + ': start (decrypt old, [pad new,] encrypt new)')
         self.result = {'method': name, 'status': 'started'}
-        self._require_enc_file(self.is_not_in_dropbox)
+        self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
         self._require_keys(pub=pub, priv=priv, pphr=pphr)
 
         file_dec = None
@@ -956,12 +981,14 @@ class SecFile(PyFileSecClass):
             self.encrypt(pub=pub, date=True, meta=md,
                      keep=False, hmac_key=hmac_key)
         except FileNotEncryptedError:
-            logging.error(name + ': not given an encrypted file')
-            raise FileNotEncryptedError
+            fatal(name + ': not given an encrypted file', FileNotEncryptedError)
         finally:
-            # if exception, make sure we destroy any clear-text
+            # generally rotate must not leave any decrypted stuff. exception:
+            #   decrypt, destroy orig.enc, *then* get exception --> now what?
+            # unlikely situation: require_keys(pub) before starting, if dec
+            #   goes through then directory write permissions are ok
             if file_dec and isfile(file_dec):
-                self.destroy(file_dec)
+                SecFile(file_dec).destroy()
             if hasattr(self, 'meta') and isfile(self.meta):
                 os.unlink(self.meta)  # not sensitive
 
