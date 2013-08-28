@@ -229,6 +229,10 @@ Details about command-line syntax can be obtained using the usual ``--help`` opt
 
     % python pyfilesec.py --help
 
+Note: Any references to 'clear text' or 'plain text' simply means an unencrypted
+file. It could be a binary file, or even an already-encrypted file. There is no
+requirement that it be text.
+
 SecFile class
 ===============
 

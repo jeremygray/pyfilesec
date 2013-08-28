@@ -4,7 +4,7 @@
 
 pyFileSec provides robust yet easy-to-use tools for working with files that may
 contain sensitive information. The aim is to achieve an "industry standard"
-level of privacy (AES256), capable of protecting confidential information from
+level of strong privacy, capable of protecting confidential information from
 inspection or accidental disclosure. Integrity assurance may be useful in
 archival and provenance applications.
 
