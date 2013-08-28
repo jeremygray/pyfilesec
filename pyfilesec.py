@@ -1258,7 +1258,7 @@ class SecFile(PyFileSecClass):
     @property
     def is_encrypted(self):
         # TO-DO: detect format regardless of file name
-        # maybe just need the check the type == SecFileArchive
+        #return type(self) == SecFileArchive  # fails, its a SecFile
         return self.file and self.file.endswith(ENC_EXT)
 
     @property
@@ -1281,14 +1281,14 @@ class SecFile(PyFileSecClass):
                     self._get_hg_info(self.file)])
 
     def _get_git_info(self, path):
-        """Report whether a directory or file is in a git repo (version control).
+        """Report whether a directory or file is tracked in a git repo.
 
         Can test any generic filename, not just current file::
 
             >>> from pyfilesec import SecFile
-            >>> SecFile().get_git_info(path)
+            >>> SecFile()._get_git_info(path)
 
-        Files can be in the repo directory but not actually tracked by git.
+        Accurate if a file is the repo directory but not actually tracked.
         Assumes path is not versioned by git if git is not call-able.
         """
         if not path or not exists(path):
@@ -1299,14 +1299,13 @@ class SecFile(PyFileSecClass):
             # no git, not call-able
             return False
         cmd = ['git', 'ls-files', abspath(path)]
-        reported = sys_call(cmd)
-        is_tracked = bool(reported)
+        is_tracked = bool(sys_call(cmd))
 
         logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
         return is_tracked
 
     def _get_svn_info(self, path):
-        """Tries to discover if a file is under svn (version control).
+        """Tries to discover if a file is tracked under svn.
         """
         if not isdir(path):
             path = dirname(path)
@@ -1315,20 +1314,13 @@ class SecFile(PyFileSecClass):
         return has_svn_dir
 
     def _get_hg_info(self, path):
-        """Tries to discover if a file is under mercurial (version control).
-
-        `detailed=True` not tested recently (similar code worked before).
+        """Tries to discover if a file is tracked under mercurial.
         """
         if not isdir(path):
             path = dirname(path)
         has_hg_dir = isdir(os.path.join(path, '.hg'))
         logging.debug('path %s tracked in hg repo: %s' % (path, has_hg_dir))
         return has_hg_dir
-
-    # short-cuts for interactive use:
-    enc = encrypt
-    dec = decrypt
-    rot = rotate
 
 
 class SecFileArchive(PyFileSecClass):
