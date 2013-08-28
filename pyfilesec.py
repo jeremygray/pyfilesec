@@ -159,7 +159,11 @@ if True:
         '''Error to indicate that a required status check failed.'''
 
 
-class PFSCodecRegistry(object):
+class PyFileSecClass(object):
+    pass
+
+
+class PFSCodecRegistry(PyFileSecClass):
     """Class to explicitly manage the encrypt & decrypt functions.
 
     Motivation:
@@ -263,227 +267,7 @@ class PFSCodecRegistry(object):
         return fxn_name in self._functions
 
 
-def set_umask(new_umask=UMASK):
-    # decorator to (set-umask, do-fxn, unset-umask) worked but ate the doc-strs
-    global _old_umask
-    _old_umask = os.umask(new_umask)
-    return _old_umask
-
-
-def unset_umask():
-    global _old_umask
-    if _old_umask is None:
-        _old_umask = os.umask(UMASK)  # get current, and change
-        os.umask(_old_umask)  # set it back
-        return
-    reverted_umask = os.umask(_old_umask)
-    _old_umask = None
-    return reverted_umask
-
-
-def set_logging():
-    class _log2stdout(object):
-        """Print all logging messages, regardless of log level.
-        """
-        @staticmethod
-        def debug(msg):
-            m = msgfmt % (get_time() - logging_t0, msg)
-            print(m)
-        # flatten log levels:
-        error = warning = exp = data = info = debug
-
-    class _no_logging(object):
-        @staticmethod
-        def debug(msg):
-            pass
-        error = warning = exp = data = info = debug
-
-    logging_t0 = get_time()
-    verbose = args and bool(args.verbose or args.filename == 'debug')
-    if not verbose:
-        logging = _no_logging()
-    else:
-        msgfmt = "%.4f  " + lib_name + ": %s"
-        logging = _log2stdout()
-
-    return logging, logging_t0
-    return logging, logging_t0
-
-
-def sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
-    """Run a system command via subprocess, return stdout [, stderr].
-
-    stdin is optional string to pipe in. Will always log a non-empty stderr.
-    (stderr is sent to logging.INFO if ignore_error=True).
-    """
-    msg = ('', ' (ignore_error=True)')[ignore_error]
-    log = (logging.error, logging.info)[ignore_error]
-    logging.debug('sys_call%s: %s' % (msg, (' '.join(cmdList))))
-
-    proc = subprocess.Popen(cmdList, stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    so, se = proc.communicate(stdin)
-    so, se = so.strip(), se.strip()
-    if se:
-        log('stderr%s: %s' % (msg, se))
-    if stderr:
-        return so.strip(), se
-    else:
-        return so
-
-
-def set_openssl(path=None):
-    """Find, check, set, and report info about the OpenSSL binary to be used.
-    """
-    if path:  # command-line arg or parameter
-        OPENSSL = path
-        logging.info('Requested openssl executable: ' + OPENSSL)
-    elif sys.platform not in ['win32']:
-        OPENSSL = sys_call(['which', 'openssl'])
-        if OPENSSL not in ['/usr/bin/openssl']:
-            msg = 'unexpected location for openssl binary: %s' % OPENSSL
-            logging.warning(msg)
-    else:
-        # use a bat file for openssl.cfg; create .bat if not found or broken
-        bat_name = '_openssl.bat'
-        sys_app_data = os.environ['APPDATA']
-        if not isdir(sys_app_data):
-            os.mkdir(sys_app_data)
-        app_lib_dir = os.path.join(sys_app_data, split(lib_dir)[-1])
-        if not isdir(app_lib_dir):
-            os.mkdir(app_lib_dir)
-        OPENSSL = os.path.join(app_lib_dir, bat_name)
-        if not exists(OPENSSL):
-            logging.info('no working %s file; trying to recreate' % bat_name)
-            openssl_expr = 'XX-OPENSSL_PATH-XX'
-            bat_template = """@echo off
-                REM  """ + bat_identifier + """ for using openssl.exe
-
-                set PATH=""" + openssl_expr + """;%PATH%
-                set OPENSSL_CONF=""" + openssl_expr + """\\openssl.cfg
-                START "" /b /wait openssl.exe %*""".replace('    ', '')
-            default = 'C:\\OpenSSL-Win32\\bin'
-            bat = bat_template.replace(openssl_expr, default)
-            with open(OPENSSL, 'wb') as fd:
-                fd.write(bat)
-            test = sys_call([OPENSSL, 'version'])
-            if not test.startswith('OpenSSL'):
-                # locate and cache result, takes 5-6 seconds:
-                cmd = ['where', '/r', 'C:\\', 'openssl.exe']
-                where_out = sys_call(cmd)
-                if not where_out.strip().endswith('openssl.exe'):
-                    fatal('Failed to find OpenSSL.exe.\n' +
-                           'Please install under C:\ and try again.')
-                guess = where_out.splitlines()[0]  # take first match
-                guess_path = guess.replace(os.sep + 'openssl.exe', '')
-                where_bat = bat_template.replace(openssl_expr, guess_path)
-                with open(OPENSSL, 'wb') as fd:
-                    fd.write(where_bat)
-        logging.info('will use .bat file for OpenSSL: %s' % OPENSSL)
-
-    if not isfile(OPENSSL):
-        msg = 'Could not find openssl executable, tried: %s' % OPENSSL
-        fatal(msg, RuntimeError)
-
-    openssl_version = sys_call([OPENSSL, 'version'])
-    if openssl_version.split()[1] < '0.9.8':
-        fatal('OpenSSL too old (%s)' % openssl_version, RuntimeError)
-    logging.info('OpenSSL binary  = %s' % OPENSSL)
-    logging.info('OpenSSL version = %s' % openssl_version)
-
-    return OPENSSL, openssl_version
-
-
-def set_destroy():
-    """Find, set, and report info about secure file removal tool to be used.
-    """
-    if sys.platform in ['darwin']:
-        destroy_TOOL = sys_call(['which', 'srm'])
-        destroy_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
-    elif sys.platform.startswith('linux'):
-        destroy_TOOL = sys_call(['which', 'shred'])
-        destroy_OPTS = ('-f', '-u', '-n', '7')
-    elif sys.platform in ['win32']:
-        app_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
-        default = os.path.join(app_lib_dir, '_sdelete.bat')
-        if not isfile(default):
-            guess = sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
-            if not guess.strip().endswith('sdelete.exe'):
-                fatal('Failed to find sdelete.exe. Please install ' +
-                       'under C:\\, run it manually to accept the terms.')
-            bat_template = """@echo off
-                REM  """ + bat_identifier + """ for using sdelete.exe
-
-                START "" /b /wait XSDELETEX %*""".replace('    ', '')
-            bat = bat_template.replace('XSDELETEX', guess)
-            with open(default, 'wb') as fd:
-                fd.write(bat)
-        destroy_TOOL = default
-        sd_version = sys_call([destroy_TOOL]).splitlines()[0]
-        logging.info('Found ' + sd_version)
-        destroy_OPTS = ('-q', '-p', '7')
-    if not isfile(destroy_TOOL):
-        raise NotImplementedError("Can't find a secure file-removal tool")
-
-    logging.info('set destroy init: use %s %s' % (destroy_TOOL, ' '.join(destroy_OPTS)))
-
-    return destroy_TOOL, destroy_OPTS
-
-
-def fatal(msg, err=ValueError):
-    """log then raise err(msg).
-    """
-    logging.error(msg)
-    raise err(msg)
-
-
-def sha256_(filename):
-    """Return sha256 hex-digest of a file, buffered for large files.
-    """
-    # from stackoverflow:
-    dgst = hashlib.sha256()
-    with open(filename, mode='rb') as fd:
-        for buf in iter(partial(fd.read, 2048), b''):  # null byte sentinel
-            dgst.update(buf)
-    return dgst.hexdigest()
-
-
-def hmac_sha256(key, filename):
-    """Return a hash-based message authentication code (HMAC), using SHA256.
-
-    The key is a string value.
-    """
-    if not key:
-        return None
-    if getsize(filename) > MAX_FILE_SIZE:
-        fatal('hmac_sha256: file too large (> max file size)')
-    cmd_HMAC = [OPENSSL, 'dgst', '-sha256', '-hmac', key, filename]
-    hmac_openssl = sys_call(cmd_HMAC)
-
-    return hmac_openssl
-
-
-def get_key_length(pubkey):
-    """Return the number of bits in a RSA public key.
-    """
-    name = 'get_key_length'
-    cmdGETMOD = [OPENSSL, 'rsa', '-modulus', '-in', pubkey, '-pubin', '-noout']
-    modulus = sys_call(cmdGETMOD).replace('Modulus=', '')
-    if not modulus:
-        fatal(name + ': no RSA modulus in pub "%s" (bad .pem file?)' % pubkey)
-    if not hexdigits_re.match(modulus):
-        fatal(name + ': expected hex digits in pubkey RSA modulus')
-    return len(modulus) * 4
-
-
-def printable_pwd(nbits=256):
-    """Return a string of hex digits with n random bits, zero-padded.
-    """
-    pwd = hex(random.SystemRandom().getrandbits(nbits))
-    return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
-
-
-class SecFile(object):
+class SecFile(PyFileSecClass):
     """Class for working with a file as a more-secure object.
     """
     def __init__(self, infile=None, pub=None, pad=None, priv=None, pphr=None,
@@ -1519,7 +1303,7 @@ class SecFile(object):
     rot = rotate
 
 
-class SecFileArchive(object):
+class SecFileArchive(PyFileSecClass):
     """Class for working with an archive file (= *.enc).
 
     Provide a name to create an empty archive, or infer a name from paths.
@@ -1693,7 +1477,7 @@ class SecFileArchive(object):
         return md_fmt
 
 
-class GenRSA(object):
+class GenRSA(PyFileSecClass):
     def __init__(self):
         pass
 
@@ -1911,58 +1695,20 @@ class GenRSA(object):
             return pub, priv, pphr_out
 
 
-def genrsa():
-    GenRSA().dialog()
-
-
-def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
-    """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
-
-    Path to openssl must always be given explicitly.
-
-    This function is intended to be free of global vars (but needs functions).
+def _abspath(filename):
+    """Returns the absolute path (norm-pathed), Capitalize first char (win32)
     """
-    name = '_encrypt_rsa_aes256cbc'
-    logging.debug('%s: start' % name)
-    if not openssl or not isfile(openssl):
-        fatal(name + ': require path to openssl executable', RuntimeError)
+    f = os.path.abspath(filename)  # implicitly does normpath too
+    return f[0].capitalize() + f[1:]
 
-    # Define file paths:
-    data_enc = _uniq_file(abspath(datafile + AES_EXT))
-    pwd_rsa = data_enc + RSA_EXT  # path to RSA-encrypted session key
 
-    # Generate a password (digital envelope "session" key):
-    # want printable because its sent to openssl via stdin
-    pwd = printable_pwd(nbits=256)
-    assert not whitespace_re.search(pwd)
-    assert len(pwd) == 64  # hex characters
-
-    # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
-    cmd_RSA = [openssl, 'rsautl',
-          '-out', pwd_rsa,
-          '-inkey', pub,
-          '-keyform', 'PEM',
-          '-pubin',
-          RSA_PADDING, '-encrypt']
-
-    # Define command to AES-256-CBC encrypt datafile using the password:
-    cmd_AES = [openssl, 'enc', '-aes-256-cbc',
-              '-a', '-salt',
-              '-in', datafile,
-              '-out', data_enc,
-              '-pass', 'stdin']
-
-    try:
-        # encrypt the password:
-        sys_call(cmd_RSA, stdin=pwd)
-        # encrypt the file, using password; takes a long time for large file:
-        sys_call(cmd_AES, stdin=pwd)
-        # better to return immediately, del(pwd); using stdin blocks return
-    finally:
-        if 'pwd' in locals():
-            del pwd  # might as well try
-
-    return _abspath(data_enc), _abspath(pwd_rsa)
+def command_alias():
+    """Print aliases that can be used for command-line usage.
+    """
+    aliases = ('bash:  alias pfs="python %s"\n' % lib_path +
+               '*csh:  alias pfs "python %s"\n' % lib_path +
+               'DOS :  doskey pfs=python %s $*' % lib_path)
+    print(aliases)
 
 
 def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
@@ -2030,32 +1776,67 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     return _abspath(data_dec)
 
 
-def permissions_str(filename):
-    if sys.platform in ['win32']:
-        return 'win32-not-implemented'
-    else:
-        perm = int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
-        return '0o' + oct(perm)[1:]
+def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
+    """Encrypt a datafile using openssl to do rsa pub-key + aes256cbc.
 
+    Path to openssl must always be given explicitly.
 
-def _uniq_file(filename):
-    """Avoid file name collisions by appending a count before extension.
-
-    Special case: file.enc.enc --> file.enc_2 rather than file_2.enc
+    This function is intended to be free of global vars (but needs functions).
     """
-    count = 0
-    base, filext = os.path.splitext(filename)
-    while isfile(filename) or os.path.isdir(filename):
-        count += 1
-        filename = base + '_' + str(count) + filext
-    return filename
+    name = '_encrypt_rsa_aes256cbc'
+    logging.debug('%s: start' % name)
+    if not openssl or not isfile(openssl):
+        fatal(name + ': require path to openssl executable', RuntimeError)
+
+    # Define file paths:
+    data_enc = _uniq_file(abspath(datafile + AES_EXT))
+    pwd_rsa = data_enc + RSA_EXT  # path to RSA-encrypted session key
+
+    # Generate a password (digital envelope "session" key):
+    # want printable because its sent to openssl via stdin
+    pwd = printable_pwd(nbits=256)
+    assert not whitespace_re.search(pwd)
+    assert len(pwd) == 64  # hex characters
+
+    # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
+    cmd_RSA = [openssl, 'rsautl',
+          '-out', pwd_rsa,
+          '-inkey', pub,
+          '-keyform', 'PEM',
+          '-pubin',
+          RSA_PADDING, '-encrypt']
+
+    # Define command to AES-256-CBC encrypt datafile using the password:
+    cmd_AES = [openssl, 'enc', '-aes-256-cbc',
+              '-a', '-salt',
+              '-in', datafile,
+              '-out', data_enc,
+              '-pass', 'stdin']
+
+    try:
+        # encrypt the password:
+        sys_call(cmd_RSA, stdin=pwd)
+        # encrypt the file, using password; takes a long time for large file:
+        sys_call(cmd_AES, stdin=pwd)
+        # better to return immediately, del(pwd); using stdin blocks return
+    finally:
+        if 'pwd' in locals():
+            del pwd  # might as well try
+
+    return _abspath(data_enc), _abspath(pwd_rsa)
 
 
-def _abspath(filename):
-    """Returns the absolute path (norm-pathed), Capitalize first char (win32)
+def fatal(msg, err=ValueError):
+    """log then raise err(msg).
     """
-    f = os.path.abspath(filename)  # implicitly does normpath too
-    return f[0].capitalize() + f[1:]
+    logging.error(msg)
+    raise err(msg)
+
+
+def genrsa():
+    """Launch RSA key-generation dialog.
+    """
+    GenRSA().dialog()
 
 
 def get_dropbox_path():
@@ -2081,13 +1862,238 @@ def get_dropbox_path():
     return dropbox_path
 
 
-def command_alias():
-    """Print aliases that can be used for command-line usage.
+def get_key_length(pubkey):
+    """Return the number of bits in a RSA public key.
     """
-    aliases = ('bash:  alias pfs="python %s"\n' % lib_path +
-               '*csh:  alias pfs "python %s"\n' % lib_path +
-               'DOS :  doskey pfs=python %s $*' % lib_path)
-    print(aliases)
+    name = 'get_key_length'
+    cmdGETMOD = [OPENSSL, 'rsa', '-modulus', '-in', pubkey, '-pubin', '-noout']
+    modulus = sys_call(cmdGETMOD).replace('Modulus=', '')
+    if not modulus:
+        fatal(name + ': no RSA modulus in pub "%s" (bad .pem file?)' % pubkey)
+    if not hexdigits_re.match(modulus):
+        fatal(name + ': expected hex digits in pubkey RSA modulus')
+    return len(modulus) * 4
+
+
+def hmac_sha256(key, filename):
+    """Return a hash-based message authentication code (HMAC), using SHA256.
+
+    The key is a string value.
+    """
+    if not key:
+        return None
+    if getsize(filename) > MAX_FILE_SIZE:
+        fatal('hmac_sha256: file too large (> max file size)')
+    cmd_HMAC = [OPENSSL, 'dgst', '-sha256', '-hmac', key, filename]
+    hmac_openssl = sys_call(cmd_HMAC)
+
+    return hmac_openssl
+
+
+def printable_pwd(nbits=256):
+    """Return a string of hex digits with n random bits, zero-padded.
+    """
+    pwd = hex(random.SystemRandom().getrandbits(nbits))
+    return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
+
+
+def permissions_str(filename):
+    if sys.platform in ['win32']:
+        return 'win32-not-implemented'
+    else:
+        perm = int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+        return '0o' + oct(perm)[1:]
+
+
+def set_umask(new_umask=UMASK):
+    # decorator to (set-umask, do-fxn, unset-umask) worked but ate the doc-strs
+    global _old_umask
+    _old_umask = os.umask(new_umask)
+    return _old_umask
+
+
+def set_destroy():
+    """Find, set, and report info about secure file removal tool to be used.
+    """
+    if sys.platform in ['darwin']:
+        destroy_TOOL = sys_call(['which', 'srm'])
+        destroy_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
+    elif sys.platform.startswith('linux'):
+        destroy_TOOL = sys_call(['which', 'shred'])
+        destroy_OPTS = ('-f', '-u', '-n', '7')
+    elif sys.platform in ['win32']:
+        app_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
+        default = os.path.join(app_lib_dir, '_sdelete.bat')
+        if not isfile(default):
+            guess = sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
+            if not guess.strip().endswith('sdelete.exe'):
+                fatal('Failed to find sdelete.exe. Please install ' +
+                       'under C:\\, run it manually to accept the terms.')
+            bat_template = """@echo off
+                REM  """ + bat_identifier + """ for using sdelete.exe
+
+                START "" /b /wait XSDELETEX %*""".replace('    ', '')
+            bat = bat_template.replace('XSDELETEX', guess)
+            with open(default, 'wb') as fd:
+                fd.write(bat)
+        destroy_TOOL = default
+        sd_version = sys_call([destroy_TOOL]).splitlines()[0]
+        logging.info('Found ' + sd_version)
+        destroy_OPTS = ('-q', '-p', '7')
+    if not isfile(destroy_TOOL):
+        raise NotImplementedError("Can't find a secure file-removal tool")
+
+    logging.info('set destroy init: use %s %s' % (destroy_TOOL, ' '.join(destroy_OPTS)))
+
+    return destroy_TOOL, destroy_OPTS
+
+
+def set_logging():
+    class _log2stdout(object):
+        """Print all logging messages, regardless of log level.
+        """
+        @staticmethod
+        def debug(msg):
+            m = msgfmt % (get_time() - logging_t0, msg)
+            print(m)
+        # flatten log levels:
+        error = warning = exp = data = info = debug
+
+    class _no_logging(object):
+        @staticmethod
+        def debug(msg):
+            pass
+        error = warning = exp = data = info = debug
+
+    logging_t0 = get_time()
+    verbose = args and bool(args.verbose or args.filename == 'debug')
+    if not verbose:
+        logging = _no_logging()
+    else:
+        msgfmt = "%.4f  " + lib_name + ": %s"
+        logging = _log2stdout()
+
+    return logging, logging_t0
+    return logging, logging_t0
+
+
+def set_openssl(path=None):
+    """Find, check, set, and report info about the OpenSSL binary to be used.
+    """
+    if path:  # command-line arg or parameter
+        OPENSSL = path
+        logging.info('Requested openssl executable: ' + OPENSSL)
+    elif sys.platform not in ['win32']:
+        OPENSSL = sys_call(['which', 'openssl'])
+        if OPENSSL not in ['/usr/bin/openssl']:
+            msg = 'unexpected location for openssl binary: %s' % OPENSSL
+            logging.warning(msg)
+    else:
+        # use a bat file for openssl.cfg; create .bat if not found or broken
+        bat_name = '_openssl.bat'
+        sys_app_data = os.environ['APPDATA']
+        if not isdir(sys_app_data):
+            os.mkdir(sys_app_data)
+        app_lib_dir = os.path.join(sys_app_data, split(lib_dir)[-1])
+        if not isdir(app_lib_dir):
+            os.mkdir(app_lib_dir)
+        OPENSSL = os.path.join(app_lib_dir, bat_name)
+        if not exists(OPENSSL):
+            logging.info('no working %s file; trying to recreate' % bat_name)
+            openssl_expr = 'XX-OPENSSL_PATH-XX'
+            bat_template = """@echo off
+                REM  """ + bat_identifier + """ for using openssl.exe
+
+                set PATH=""" + openssl_expr + """;%PATH%
+                set OPENSSL_CONF=""" + openssl_expr + """\\openssl.cfg
+                START "" /b /wait openssl.exe %*""".replace('    ', '')
+            default = 'C:\\OpenSSL-Win32\\bin'
+            bat = bat_template.replace(openssl_expr, default)
+            with open(OPENSSL, 'wb') as fd:
+                fd.write(bat)
+            test = sys_call([OPENSSL, 'version'])
+            if not test.startswith('OpenSSL'):
+                # locate and cache result, takes 5-6 seconds:
+                cmd = ['where', '/r', 'C:\\', 'openssl.exe']
+                where_out = sys_call(cmd)
+                if not where_out.strip().endswith('openssl.exe'):
+                    fatal('Failed to find OpenSSL.exe.\n' +
+                           'Please install under C:\ and try again.')
+                guess = where_out.splitlines()[0]  # take first match
+                guess_path = guess.replace(os.sep + 'openssl.exe', '')
+                where_bat = bat_template.replace(openssl_expr, guess_path)
+                with open(OPENSSL, 'wb') as fd:
+                    fd.write(where_bat)
+        logging.info('will use .bat file for OpenSSL: %s' % OPENSSL)
+
+    if not isfile(OPENSSL):
+        msg = 'Could not find openssl executable, tried: %s' % OPENSSL
+        fatal(msg, RuntimeError)
+
+    openssl_version = sys_call([OPENSSL, 'version'])
+    if openssl_version.split()[1] < '0.9.8':
+        fatal('OpenSSL too old (%s)' % openssl_version, RuntimeError)
+    logging.info('OpenSSL binary  = %s' % OPENSSL)
+    logging.info('OpenSSL version = %s' % openssl_version)
+
+    return OPENSSL, openssl_version
+
+
+def sha256_(filename):
+    """Return sha256 hex-digest of a file, buffered for large files.
+    """
+    # from stackoverflow:
+    dgst = hashlib.sha256()
+    with open(filename, mode='rb') as fd:
+        for buf in iter(partial(fd.read, 2048), b''):  # null byte sentinel
+            dgst.update(buf)
+    return dgst.hexdigest()
+
+
+def sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
+    """Run a system command via subprocess, return stdout [, stderr].
+
+    stdin is optional string to pipe in. Will always log a non-empty stderr.
+    (stderr is sent to logging.INFO if ignore_error=True).
+    """
+    msg = ('', ' (ignore_error=True)')[ignore_error]
+    log = (logging.error, logging.info)[ignore_error]
+    logging.debug('sys_call%s: %s' % (msg, (' '.join(cmdList))))
+
+    proc = subprocess.Popen(cmdList, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    so, se = proc.communicate(stdin)
+    so, se = so.strip(), se.strip()
+    if se:
+        log('stderr%s: %s' % (msg, se))
+    if stderr:
+        return so.strip(), se
+    else:
+        return so
+
+
+def _uniq_file(filename):
+    """Avoid file name collisions by appending a count before extension.
+
+    Special case: file.enc.enc --> file.enc_2 rather than file_2.enc
+    """
+    count = 0
+    base, filext = os.path.splitext(filename)
+    while isfile(filename) or os.path.isdir(filename):
+        count += 1
+        filename = base + '_' + str(count) + filext
+    return filename
+
+
+def unset_umask():
+    global _old_umask
+    if _old_umask is None:
+        _old_umask = os.umask(UMASK)  # get current, and change
+        os.umask(_old_umask)  # set it back
+        return
+    reverted_umask = os.umask(_old_umask)
+    _old_umask = None
+    return reverted_umask
 
 
 class Tests(object):
