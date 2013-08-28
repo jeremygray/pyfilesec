@@ -692,7 +692,7 @@ class SecFile(PyFileSecClass):
         if bits < 2048:
             logging.error(name + ': public key < 2048 bits, no real security')
         if not keep in [True, False]:
-            fatal(name + "bad value for 'keep' parameter")
+            fatal(name + ": bad value for 'keep' parameter")
 
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = self.codec.get_function(enc_method)
@@ -726,21 +726,22 @@ class SecFile(PyFileSecClass):
             # secure-delete unencrypted original, unless encrypt failed:
             ok_to_destroy = (ok_encrypt and isfile(arch_enc.name) and
                              bool(os.stat(arch_enc.name)[stat.ST_SIZE]))
-            logging.info(name + 'ok_to_destroy %s' % ok_to_destroy)
+            logging.info(name + ': ok_to_destroy %s' % ok_to_destroy)
 
             if ok_to_destroy:
-                self.destroy()
-                # destroy does .reset(), then sets and returns destroy_status
+                # destroy using another SecFile obj to preserve self.result
+                demolish = SecFile(self.file).destroy().result
+                if demolish['disposition'] != destroy_code[pfs_DESTROYED]:
+                    fatal('destroy orig. failed within encrypt', EncryptError)
                 self.set_file(arch_enc.name)  # don't lose status during set_file
                 logging.info(name +
-                    'post-encrypt destroyed original plain-text file complete')
+                    ': post-encrypt destroyed orig. file complete')
             else:
                 logging.error(name +
-                    'retaining original file, encryption did not succeed')
+                    ': retaining original file, encryption did not succeed')
 
         unset_umask()
         self.set_file(arch_enc.name)
-        self.result = {'method': name, 'status': 'started'}  # destroy overwrites it
         self.result.update({'archive': self.file, 'meta': meta})
         return self
 
@@ -815,7 +816,7 @@ class SecFile(PyFileSecClass):
         set_umask()
         name = 'decrypt'
         self.result = {'method': name, 'status': 'started'}
-        enc = self._require_enc_file(self.is_not_in_dropbox)
+        arch_enc = self._require_enc_file(self.is_not_in_dropbox)
         self._require_keys(priv=priv, pphr=pphr)
         if not self.priv:
             fatal(name + ': requires a private key', DecryptError)
@@ -830,18 +831,18 @@ class SecFile(PyFileSecClass):
         # avoid name collisions, decrypt:
         try:
             # Unpack from archive into the dest_dir = same dir as the .enc file:
-            dest_dir = os.path.split(enc.name)[0]
+            dest_dir = os.path.split(arch_enc.name)[0]
             logging.info(name + ': decrypting into %s' % dest_dir)
 
-            data_aes, pwd_file, meta_file = enc.unpack()
+            data_aes, pwd_file, meta_file = arch_enc.unpack()
             if not all([data_aes, pwd_file, meta_file]):
-                logging.warn(name + ': did not find 3 files in archive %s' % enc.name)
+                logging.warn(name + ': did not find 3 files in archive %s' % arch_enc.name)
             tmp_dir = os.path.split(data_aes)[0]
 
             # Get a valid decrypt method, from meta-data or argument:
             clear_text = None  # file name; set in case _get_dec_method raise()es
             if not dec_method:
-                dec_method = enc.get_dec_method(self.codec)  # from .meta, or default
+                dec_method = arch_enc.get_dec_method(self.codec)  # from .meta, or default
                 #fatal(name + ': Could not get a valid decryption method', DecryptError)
 
             # Decrypt (into same new tmp dir):
@@ -858,8 +859,8 @@ class SecFile(PyFileSecClass):
             except OSError:
                 # if /tmp is on another partition
                 shutil.copy(data_dec, clear_text)
-                self.destroy(data_dec)
-                if self.result['disposition'] != destroy_code[pfs_DESTROYED]:
+                demolish = SecFile(data_dec).destroy().result
+                if demolish['disposition'] != destroy_code[pfs_DESTROYED]:
                     msg = name + ': destroy tmp clear txt failed: %s' % data_dec
                     fatal(msg, DestroyError)
             perm_str = permissions_str(clear_text)
@@ -869,10 +870,10 @@ class SecFile(PyFileSecClass):
                 try:
                     os.rename(meta_file, newMeta)
                 except OSError:
-                    # if /tmp is on another partition
+                    # if /tmp is on another partition can't rename it
                     shutil.copy(meta_file, newMeta)
-                    self.destroy(meta_file)
-                    if self.result['disposition'] != destroy_code[pfs_DESTROYED]:
+                    demolish = SecFile(meta_file).destroy().result
+                    if demolish['disposition'] != destroy_code[pfs_DESTROYED]:
                         msg = name + ': destroy tmp meta-data failed: %s' % meta_file
                         fatal(msg, DestroyError)
                 perm_str = permissions_str(newMeta)
@@ -892,7 +893,7 @@ class SecFile(PyFileSecClass):
 
         unset_umask()
         if not keep_enc:
-            os.unlink(enc.name)
+            os.unlink(arch_enc.name)
         self.set_file(clear_text)  # set file
         self.result = {'method': name, 'status': 'started'}  # destroy overwrites
         self.result.update({'clear_text': clear_text, 'status': 'good'})
