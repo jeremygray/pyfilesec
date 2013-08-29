@@ -34,25 +34,26 @@ if sys.version < '2.6':
     raise RuntimeError('Requires python 2.6 or higher')
 
 import argparse
-from base64 import b64encode, b64decode
+from   base64 import b64encode, b64decode
 import copy
-from functools import partial  # for buffered hash digest
+from   functools import partial  # for buffered hash digest
 import getpass  # for RSA key-gen
 import hashlib
 import json
 import os
-from os.path import abspath, isfile, getsize, isdir, dirname, exists, split
+from   os.path import abspath, isfile, getsize, isdir, dirname, exists, split
 import random
 import re
 import shutil
 import stat
 import subprocess
 import tarfile
-from tempfile import mkdtemp, NamedTemporaryFile
+from   tempfile import mkdtemp, NamedTemporaryFile
 import time
 
 # other imports:
-# GenRSA will import _pyperclip if use --clipboard option
+# GenRSA.dialog will import _pyperclip if use --clipboard commandline option
+# from win32com.shell import shell for getting is user an admin (to link)
 
 # CONSTANTS and INITS ------------ (with code folding) --------------------
 if True:
@@ -160,11 +161,7 @@ if True:
         '''Error to indicate that a require_file status check failed.'''
 
 
-class PyFileSecClass(object):
-    pass
-
-
-class PFSCodecRegistry(PyFileSecClass):
+class PFSCodecRegistry(object):
     """Class to explicitly manage the codec (encrypt & decrypt functions).
 
     The main motivation for providing a codec-manager class is to provide a
@@ -304,65 +301,10 @@ class PFSCodecRegistry(PyFileSecClass):
         return fxn_name in self._functions
 
 
-class SecFile(PyFileSecClass):
-    """Class for working with a file as a more-secure object.
-    """
-    def __init__(self, infile=None, pub=None, pad=None, priv=None, pphr=None,
-                 codec=None, openssl=None):
-        """:Parameters:
-            ``infile`` : the target file to work on
-            ``pub`` : public key, .pem format
-            ``pad`` : padding, if any, to be applied to the file (before encryption)
-            ``priv`` : private key, .pem format
-            ``pphr`` : passphrase, as a file name or the passphrase itself
-            ``codec`` : the pyFileSec codec to use
-            ``openssl`` : path to the version of OpenSSL to use
-        """
-        '''API guide:
-            self.file can be set explicitly or implicitly by user
-                explicitly = at init, or through set_file; no other way (property).
-                implicitly = change name due to a change of state
-                    such as destroy --> None; encrypt --> .enc
-                good: sf = SecFile(filename).encrypt(pub)
-                      sf = SecFile().set_file(filename).decrypt(priv, pphr)
-                       r = SecFile(filename).destroy().result
-            methods that return self must also populate a self.result dict:
-                method : name (encrypt, decrypt, rotate, ...)
-                status: started, good, bad
-                * seconds, orig_links, disposition, old_file, [inum]
-                * meta : actual metadata dict (enc, dec, rot)
-                * sig : actual sig
-                * sig_out : name of file containing sig
-                * verified : bool
-                ...
-                query .results right after a call; not guaranteed accurate beyond that
-            properties cannot rely on self.result values, can be stale
-            require_X methods must only use the default / already set file
-            some methods call others (decrypt can call destroy), nested .results need work
-        '''
-        # strategy: methods build up .results, so make another SecFile instance if a method
-        # needs to call other methods that would overwrite current .results in progress
-
-        self.set_file(infile)
-        self._require_keys(pub=pub, priv=priv, pphr=pphr)
-        if not codec:
-            codec = codec_registry  # default codec
-        self.codec = copy.deepcopy(codec)
-        self._openssl = openssl
-
-        # passing infile AND value(s) at init can trigger some methods
-        # the order of code below was chosen to enable implicit rotation but
-        # you might lose metadata that way; use rotate()
-        # here need to ensure that there is a file before calling anything
-        if self.is_encrypted and priv:
-            self.decrypt(priv, pphr)
-        if self.is_not_encrypted:  # not elif
-            pad and self.pad(pad)
-            pub and self.encrypt(pub)
-        # reset() should never auto-triggering because infile=None
-
-    def __str__(self):
-        return '<pyfilesec.SecFile object, file=%s>' % repr(self.file)
+class _SecFileBaseClass(object):
+    def __init__(self):
+        pass
+    # move misc properties and helper functions here
 
     def _get_openssl(self):
         if not self._openssl:
@@ -512,7 +454,7 @@ class SecFile(PyFileSecClass):
             return self.pphr
 
         _get_pub(pub)  # get, or set-then-get
-        _get_priv(priv)  #... if its encrypted, require a plausible pphr
+        _get_priv(priv)  # ... if its encrypted, require a plausible pphr
         _get_pphr(pphr)
 
     @property
@@ -539,6 +481,216 @@ class SecFile(PyFileSecClass):
             except:
                 pass
         return writeable
+
+    def load_metadata(self):
+        """Read meta-data file, return it as a dict.
+        """
+        if self.meta:
+            return json.load(open(self.meta, 'rb'))
+
+    def log_metadata(self, md, log=True):
+        """Log and return meta-data dict in human-friendly form.
+        """
+        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
+        if log:
+            logging.info(md_fmt)
+        return md_fmt
+
+    def _get_permissions(self):
+        name = '_get_permissions'
+        self._require_file()
+        if sys.platform in ['win32']:
+            perm = -1  # 'win32-not-implemented'
+        else:
+            perm = int(oct(os.stat(self.file)[stat.ST_MODE])[-3:], 8)
+        logging.debug(name + ': %s %d base10' % (self.file, perm))
+        if args:
+            self.result = permissions_str(self.file)
+        return perm
+
+    def _set_permissions(self, mode):
+        name = '_set_permissions'
+        self._require_file()
+        if sys.platform not in ['win32']:
+            os.chmod(self.file, mode)
+        else:
+            pass
+            # import win32security  # looks interesting
+            # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
+            #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
+            # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
+            # win32security.GetFileSecurity(filename, info)
+            # win32security.SetFileSecurity
+        logging.info(name + ': %s %s' % (self.file, permissions_str(self.file)))
+
+    permissions = property(_get_permissions, _set_permissions, None,
+        "mac/nix:  Returns POSIX ugo permissions\nwin32  :  not implemented, returns -1")
+
+    @property
+    def hardlinks(self):
+        if not self.file:
+            return 0
+        filename = self._require_file()
+        if sys.platform == 'win32':
+            if user_can_link:
+                cmd = ('fsutil', 'hardlink', 'list', filename)
+                links = sys_call(cmd)
+                count = len([f for f in links.splitlines() if f.strip()])
+            else:
+                logging.warning('need to be an admin to use fsutil.exe (hardlink)')
+                count = -1
+        else:
+            count = os.stat(filename)[stat.ST_NLINK]
+        return count
+
+    @property
+    def is_in_dropbox(self):
+        """True if the file is within a Dropbox folder; False if no file.
+        """
+        if not self.file:
+            return False
+        db_path = get_dropbox_path()
+        if not db_path:
+            inside = False
+        else:
+            inside = (self.file.startswith(db_path + os.sep) or
+                  self.file == db_path)
+        not_or_blank = (' not', '')[inside]
+        logging.info('%s is%s inside Dropbox' % (self.file, not_or_blank))
+
+        return inside
+
+    @property
+    def is_not_in_dropbox(self):
+        return self.file and not self.is_in_dropbox
+
+    @property
+    def is_encrypted(self):
+        # TO-DO: detect format regardless of file name
+        #return type(self) == SecFileArchive  # fails, its a SecFile
+        return self.file and self.file.endswith(ENC_EXT)
+
+    @property
+    def is_not_encrypted(self):
+        return self.file and not self.is_encrypted
+
+    @property
+    def is_tracked(self):
+        """Try to detect if this file is under version control (svn, git, hg).
+
+        Returns a boolean.
+        Only approximate: the directory might be versioned, but not this file;
+        or versioned with git but git is not call-able.
+        """
+        self._require_file()
+        logging.debug('trying to detect version control (svn, git, hg)')
+
+        return any([self._get_svn_info(self.file),
+                    self._get_git_info(self.file),
+                    self._get_hg_info(self.file)])
+
+    def _get_git_info(self, path):
+        """Report whether a directory or file is tracked in a git repo.
+
+        Can test any generic filename, not just current file::
+
+            >>> from pyfilesec import SecFile
+            >>> SecFile()._get_git_info(path)
+
+        Accurate if a file is the repo directory but not actually tracked.
+        Assumes path is not versioned by git if git is not call-able.
+        """
+        if not path or not exists(path):
+            return False
+        try:
+            sys_call(['git'])
+        except OSError:
+            # no git, not call-able
+            return False
+        cmd = ['git', 'ls-files', abspath(path)]
+        is_tracked = bool(sys_call(cmd))
+
+        logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
+        return is_tracked
+
+    def _get_svn_info(self, path):
+        """Tries to discover if a file is tracked under svn.
+        """
+        if not isdir(path):
+            path = dirname(path)
+        has_svn_dir = isdir(os.path.join(path, '.svn'))
+        logging.debug('path %s tracked in svn repo: %s' % (path, has_svn_dir))
+        return has_svn_dir
+
+    def _get_hg_info(self, path):
+        """Tries to discover if a file is tracked under mercurial.
+        """
+        if not isdir(path):
+            path = dirname(path)
+        has_hg_dir = isdir(os.path.join(path, '.hg'))
+        logging.debug('path %s tracked in hg repo: %s' % (path, has_hg_dir))
+        return has_hg_dir
+
+
+class SecFile(_SecFileBaseClass):
+    """Class for working with a file as a more-secure object.
+    """
+    def __init__(self, infile=None, pub=None, pad=None, priv=None, pphr=None,
+                 codec=None, openssl=None):
+        """:Parameters:
+            ``infile`` : the target file to work on
+            ``pub`` : public key, .pem format
+            ``pad`` : padding, if any, to be applied to the file (before encryption)
+            ``priv`` : private key, .pem format
+            ``pphr`` : passphrase, as a file name or the passphrase itself
+            ``codec`` : the pyFileSec codec to use
+            ``openssl`` : path to the version of OpenSSL to use
+        """
+        '''API guide:
+            self.file can be set explicitly or implicitly by user
+                explicitly = at init, or through set_file; no other way (property).
+                implicitly = change name due to a change of state
+                    such as destroy --> None; encrypt --> .enc
+                good: sf = SecFile(filename).encrypt(pub)
+                      sf = SecFile().set_file(filename).decrypt(priv, pphr)
+                       r = SecFile(filename).destroy().result
+            methods that return self must also populate a self.result dict:
+                method : name (encrypt, decrypt, rotate, ...)
+                status: started, good, bad
+                * seconds, orig_links, disposition, old_file, [inum]
+                * meta : actual metadata dict (enc, dec, rot)
+                * sig : actual sig
+                * sig_out : name of file containing sig
+                * verified : bool
+                ...
+                query .results right after a call; not guaranteed accurate beyond that
+            properties cannot rely on self.result values, can be stale
+            require_X methods must only use the default / already set file
+            some methods call others (decrypt can call destroy), nested .results need work
+        '''
+        # strategy: methods build up .results, so make another SecFile instance if a method
+        # needs to call other methods that would overwrite current .results in progress
+
+        self.set_file(infile)
+        self._require_keys(pub=pub, priv=priv, pphr=pphr)
+        if not codec:
+            codec = codec_registry  # default codec
+        self.codec = copy.deepcopy(codec)
+        self._openssl = openssl
+
+        # passing infile AND value(s) at init can trigger some methods
+        # the order of code below was chosen to enable implicit rotation but
+        # you might lose metadata that way; use rotate()
+        # here need to ensure that there is a file before calling anything
+        if self.is_encrypted and priv:
+            self.decrypt(priv, pphr)
+        if self.is_not_encrypted:  # not elif
+            pad and self.pad(pad)
+            pub and self.encrypt(pub)
+        # reset() should never auto-triggering because infile=None
+
+    def __str__(self):
+        return '<pyfilesec.SecFile object, file=%s>' % repr(self.file)
 
     def pad(self, size=DEFAULT_PAD_SIZE):
         """Append null bytes to ``filename`` until it has length ``size``.
@@ -1044,20 +1196,6 @@ class SecFile(PyFileSecClass):
                        'new': os.path.split(pub)[1]})
         return self
 
-    def load_metadata(self):
-        """Read meta-data file, return it as a dict.
-        """
-        if self.meta:
-            return json.load(open(self.meta, 'rb'))
-
-    def log_metadata(self, md, log=True):
-        """Log and return meta-data dict in human-friendly form.
-        """
-        md_fmt = json.dumps(md, indent=2, sort_keys=True, separators=(',', ': '))
-        if log:
-            logging.info(md_fmt)
-        return md_fmt
-
     def sign(self, priv=None, pphr=None, out=None):
         """Sign a given file with a private key, via `openssl dgst`.
 
@@ -1111,7 +1249,7 @@ class SecFile(PyFileSecClass):
         os.unlink(sig_file.name)  # b/c delete=False
 
         self.result = {'verified': result in ['Verification OK', 'Verified OK'],
-                       'file' : self.file}
+                       'file': self.file}
         return self.result['verified']
 
     def destroy(self):
@@ -1231,143 +1369,8 @@ class SecFile(PyFileSecClass):
 
         return self
 
-    def _get_permissions(self):
-        name = '_get_permissions'
-        self._require_file()
-        if sys.platform in ['win32']:
-            perm = -1  #  'win32-not-implemented'
-        else:
-            perm = int(oct(os.stat(self.file)[stat.ST_MODE])[-3:], 8)
-        logging.debug(name + ': %s %d base10' % (self.file, perm))
-        if args:
-            self.result = permissions_str(self.file)
-        return perm
 
-    def _set_permissions(self, mode):
-        name = '_set_permissions'
-        self._require_file()
-        if sys.platform not in ['win32']:
-            os.chmod(self.file, mode)
-        else:
-            pass
-            # import win32security  # looks interesting
-            # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
-            #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
-            # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
-            # win32security.GetFileSecurity(filename, info)
-            # win32security.SetFileSecurity
-        logging.info(name + ': %s %s' % (self.file, permissions_str(self.file)))
-
-    permissions = property(_get_permissions, _set_permissions, None,
-        "mac/nix:  Returns POSIX ugo permissions\nwin32  :  not implemented, returns -1")
-
-    @property
-    def hardlinks(self):
-        if not self.file:
-            return 0
-        filename = self._require_file()
-        if sys.platform == 'win32':
-            if user_can_link:
-                cmd = ('fsutil', 'hardlink', 'list', filename)
-                links = sys_call(cmd)
-                count = len([f for f in links.splitlines() if f.strip()])
-            else:
-                logging.warning('need to be an admin to use fsutil.exe (hardlink)')
-                count = -1
-        else:
-            count = os.stat(filename)[stat.ST_NLINK]
-        return count
-
-    @property
-    def is_in_dropbox(self):
-        """True if the file is within a Dropbox folder; False if no file.
-        """
-        if not self.file:
-            return False
-        db_path = get_dropbox_path()
-        if not db_path:
-            inside = False
-        else:
-            inside = (self.file.startswith(db_path + os.sep) or
-                  self.file == db_path)
-        not_or_blank = (' not', '')[inside]
-        logging.info('%s is%s inside Dropbox' % (self.file, not_or_blank))
-
-        return inside
-
-    @property
-    def is_not_in_dropbox(self):
-        return self.file and not self.is_in_dropbox
-
-    @property
-    def is_encrypted(self):
-        # TO-DO: detect format regardless of file name
-        #return type(self) == SecFileArchive  # fails, its a SecFile
-        return self.file and self.file.endswith(ENC_EXT)
-
-    @property
-    def is_not_encrypted(self):
-        return self.file and not self.is_encrypted
-
-    @property
-    def is_tracked(self):
-        """Try to detect if this file is under version control (svn, git, hg).
-
-        Returns a boolean.
-        Only approximate: the directory might be versioned, but not this file;
-        or versioned with git but git is not call-able.
-        """
-        self._require_file()
-        logging.debug('trying to detect version control (svn, git, hg)')
-
-        return any([self._get_svn_info(self.file),
-                    self._get_git_info(self.file),
-                    self._get_hg_info(self.file)])
-
-    def _get_git_info(self, path):
-        """Report whether a directory or file is tracked in a git repo.
-
-        Can test any generic filename, not just current file::
-
-            >>> from pyfilesec import SecFile
-            >>> SecFile()._get_git_info(path)
-
-        Accurate if a file is the repo directory but not actually tracked.
-        Assumes path is not versioned by git if git is not call-able.
-        """
-        if not path or not exists(path):
-            return False
-        try:
-            sys_call(['git'])
-        except OSError:
-            # no git, not call-able
-            return False
-        cmd = ['git', 'ls-files', abspath(path)]
-        is_tracked = bool(sys_call(cmd))
-
-        logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
-        return is_tracked
-
-    def _get_svn_info(self, path):
-        """Tries to discover if a file is tracked under svn.
-        """
-        if not isdir(path):
-            path = dirname(path)
-        has_svn_dir = isdir(os.path.join(path, '.svn'))
-        logging.debug('path %s tracked in svn repo: %s' % (path, has_svn_dir))
-        return has_svn_dir
-
-    def _get_hg_info(self, path):
-        """Tries to discover if a file is tracked under mercurial.
-        """
-        if not isdir(path):
-            path = dirname(path)
-        has_hg_dir = isdir(os.path.join(path, '.hg'))
-        logging.debug('path %s tracked in hg repo: %s' % (path, has_hg_dir))
-        return has_hg_dir
-
-
-class SecFileArchive(PyFileSecClass):
+class SecFileArchive(_SecFileBaseClass):
     """Class for working with an archive file (= *.enc).
 
     Provide a name to create an empty archive, or infer a name from paths.
@@ -1541,7 +1544,7 @@ class SecFileArchive(PyFileSecClass):
         return md_fmt
 
 
-class GenRSA(PyFileSecClass):
+class GenRSA(object):
     def __init__(self):
         pass
 
@@ -3207,7 +3210,7 @@ class Tests(object):
 
         fake_dropbox_path = _abspath('.')
         dropbox_path = fake_dropbox_path  # set global var
-        assert get_dropbox_path() == fake_dropbox_path  #  get_dropbox_path() returns dropbox_path
+        assert get_dropbox_path() == fake_dropbox_path  # get_dropbox_path() returns dropbox_path
 
         test_path = os.path.join(dropbox_path, 'test.txt')
         with open(test_path, 'wb') as fd:
@@ -3404,8 +3407,8 @@ else:
     args = None
 
 logging, logging_t0 = set_logging()
-path_wanted = args and args.openssl
-OPENSSL, openssl_version = set_openssl(path_wanted)
+openssl_path_wanted = args and args.openssl
+OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
 destroy_TOOL, destroy_OPTS = set_destroy()
 
 
