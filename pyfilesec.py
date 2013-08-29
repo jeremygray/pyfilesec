@@ -187,7 +187,7 @@ class PFSCodecRegistry(object):
     # need a newEncMethod param. c) will need a way to give arguments to the
     # new_enc() and new_dec() methods, should be possible with `*args **kwargs`.
 
-    def __init__(self, defaults={}, enc_kwargs=None, dec_kwargs=None):
+    def __init__(self, defaults={}):
         """The class is designed around the default functions, and is intended to be
         easily extensible. To register a new function, the
         idea is to be able to do::
@@ -211,12 +211,12 @@ class PFSCodecRegistry(object):
         """
         self.name = 'PFSCodecRegistry'
         self._functions = {}
-        self.register(defaults, enc_kwargs=enc_kwargs, dec_kwargs=dec_kwargs)
+        self.register(defaults)
 
     def keys(self):
         return list(self._functions.keys())
 
-    def register(self, new_functions, enc_kwargs=None, dec_kwargs=None):
+    def register(self, new_functions):
         """Validate and add a codec to the registry.
 
         Typically one adds and encrypt and decrypt pair. Decrypt-only is accepted
@@ -250,25 +250,6 @@ class PFSCodecRegistry(object):
             dec_twin = key.replace('_enc', '_dec', 1)
             if not dec_twin in list(self._functions.keys()):
                 fatal('method "%s" bad codec: _enc without a _dec' % key)
-
-        # try a sample encrypt().decrypt(), using provided keys
-        if enc_kwargs or dec_kwargs:
-            logging.info(self.name + ': start self-test sf.enc().dec()')
-            test_co_reg = PFSCodecRegistry()
-            test_co_reg._functions = new_functions  # assign and test
-            test_file = _abspath('tmp.codec_test')
-            test_stuff = str(get_time())
-            with open(test_file, 'wb') as fd:
-                fd.write(test_stuff)
-            sf = SecFile(test_file, codec=test_co_reg)
-            sf.encrypt(**enc_kwargs)
-            sf.decrypt(**dec_kwargs)
-            dec_enc_stuff = open(sf.file).read()
-            os.unlink(test_file)
-            if test_stuff != dec_enc_stuff:  # codec failed .enc.dec
-                fatal(self.name + ': FAILED registration self-test: SecFile().enc().dec()',
-                      CodecRegistryError)
-            logging.info(self.name + ': codec registration passes: SecFile().enc().dec()')
 
     def unregister(self, function_list):
         """Remove codec pairs from the registry based on keys.
@@ -634,12 +615,11 @@ class _SecFileBaseClass(object):
 class SecFile(_SecFileBaseClass):
     """Class for working with a file as a more-secure object.
     """
-    def __init__(self, infile=None, pub=None, pad=None, priv=None, pphr=None,
+    def __init__(self, infile=None, pub=None, priv=None, pphr=None,
                  codec=None, openssl=None):
         """:Parameters:
             ``infile`` : the target file to work on
             ``pub`` : public key, .pem format
-            ``pad`` : padding, if any, to be applied to the file (before encryption)
             ``priv`` : private key, .pem format
             ``pphr`` : passphrase, as a file name or the passphrase itself
             ``codec`` : the pyFileSec codec to use
@@ -654,6 +634,8 @@ class SecFile(_SecFileBaseClass):
                       sf = SecFile().set_file(filename).decrypt(priv, pphr)
                        r = SecFile(filename).destroy().result
             methods that return self must also populate a self.result dict:
+                self.result must never contain anything sensitive:
+                    pphr, file size unpadded
                 method : name (encrypt, decrypt, rotate, ...)
                 status: started, good, bad
                 * seconds, orig_links, disposition, old_file, [inum]
@@ -665,7 +647,6 @@ class SecFile(_SecFileBaseClass):
                 query .results right after a call; not guaranteed accurate beyond that
             properties cannot rely on self.result values, can be stale
             require_X methods must only use the default / already set file
-            some methods call others (decrypt can call destroy), nested .results need work
         '''
         # strategy: methods build up .results, so make another SecFile instance if a method
         # needs to call other methods that would overwrite current .results in progress
@@ -760,7 +741,7 @@ class SecFile(_SecFileBaseClass):
             fd.write(extrabytes + pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE)
             logging.info(name + ': append bytes to get to %d bytes' % size)
 
-        self.result.update({'padding': needed + PAD_LEN, 'status': 'good'})
+        self.result.update({'size': self.size, 'status': 'good'})
         return self
 
     def _ok_to_pad(self, size):
@@ -1142,12 +1123,12 @@ class SecFile(_SecFileBaseClass):
 
         file_dec = None
         try:
-            # do _require_enc_file() in decrypt, bad if do it twice
-            self.decrypt(self.priv, pphr=self.pphr, keep_meta=True)
-            # decrypt can raise FileNotEncryptedError if not .enc file
-
             # encrypt() will destroy intermediate clear_text, but might be
             # an exception before getting to encrypt(), so wrap in try except
+
+            sf = SecFile(self.file).decrypt(self.priv, pphr=self.pphr, keep_meta=True)
+            self.meta = sf.meta
+            self.set_file(sf.file)  # decrypted file name
 
             logging.debug('rotate self.meta = %s' % self.meta)
             if isfile(self.meta):
@@ -1160,26 +1141,27 @@ class SecFile(_SecFileBaseClass):
             else:
                 logging.debug(name + ': self.meta no such file')
                 md = self.NO_META_DATA
-            if pad > 0:  # can be -1
-                self.pad(pad)
+            pad = min(0, pad)  # disallow -1, don't want errors mid-rotate
+            if pad is not None and pad > -1:
+                SecFile(self.file).pad(pad)
             file_dec = self.file  # track file names so can destroy if needed
 
-            self.encrypt(pub=self.pub, date=True, meta=md,
+            sf = SecFile(self.file).encrypt(pub=self.pub, date=True, meta=md,
                      keep=False, hmac_key=hmac_key)
+            self.set_file(sf.file)  # newly encrypted file name
         except FileNotEncryptedError:
             fatal(name + ': not given an encrypted file', FileNotEncryptedError)
         finally:
             # generally rotate must not leave any decrypted stuff. exception:
             #   decrypt, destroy orig.enc, *then* get exception --> now what?
             # unlikely situation: require_keys(pub) before starting, if dec
-            #   goes through then directory write permissions are ok
+            #   works then directory write permissions are ok
             if file_dec and isfile(file_dec):
                 SecFile(file_dec).destroy()
             if hasattr(self, 'meta') and isfile(self.meta):
                 os.unlink(self.meta)  # not sensitive
 
         unset_umask()
-        self.result = {'method': name, 'status': 'started'}
         self.result.update({'file': self.file,
                        'status': 'good',
                        'old': os.path.split(priv)[1],
@@ -1306,7 +1288,7 @@ class SecFile(_SecFileBaseClass):
             else:
                 mount_path = '(unknown)'
 
-        cmd_Destroy = (destroy_TOOL,) + destroy_OPTS + (target_file,)
+        cmd_Destroy = (DESTROY_EXE,) + DESTROY_OPTS + (target_file,)
         good_sys_call = False
         try:
             __, err = sys_call(cmd_Destroy, stderr=True)
@@ -1979,11 +1961,11 @@ def set_destroy():
     """Find, set, and report info about secure file removal tool to be used.
     """
     if sys.platform in ['darwin']:
-        destroy_TOOL = sys_call(['which', 'srm'])
-        destroy_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
+        DESTROY_EXE = sys_call(['which', 'srm'])
+        DESTROY_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
     elif sys.platform.startswith('linux'):
-        destroy_TOOL = sys_call(['which', 'shred'])
-        destroy_OPTS = ('-f', '-u', '-n', '7')
+        DESTROY_EXE = sys_call(['which', 'shred'])
+        DESTROY_OPTS = ('-f', '-u', '-n', '7')
     elif sys.platform in ['win32']:
         app_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
         default = os.path.join(app_lib_dir, '_sdelete.bat')
@@ -1999,16 +1981,16 @@ def set_destroy():
             bat = bat_template.replace('XSDELETEX', guess)
             with open(default, 'wb') as fd:
                 fd.write(bat)
-        destroy_TOOL = default
-        sd_version = sys_call([destroy_TOOL]).splitlines()[0]
+        DESTROY_EXE = default
+        sd_version = sys_call([DESTROY_EXE]).splitlines()[0]
         logging.info('Found ' + sd_version)
-        destroy_OPTS = ('-q', '-p', '7')
-    if not isfile(destroy_TOOL):
+        DESTROY_OPTS = ('-q', '-p', '7')
+    if not isfile(DESTROY_EXE):
         raise NotImplementedError("Can't find a secure file-removal tool")
 
-    logging.info('set destroy init: use %s %s' % (destroy_TOOL, ' '.join(destroy_OPTS)))
+    logging.info('set destroy init: use %s %s' % (DESTROY_EXE, ' '.join(DESTROY_OPTS)))
 
-    return destroy_TOOL, destroy_OPTS
+    return DESTROY_EXE, DESTROY_OPTS
 
 
 def set_logging():
@@ -2265,9 +2247,9 @@ class Tests(object):
             if OPENSSL.endswith('.bat'):
                 if bat_identifier in open(OPENSSL, 'rb').read():
                     os.unlink(OPENSSL)
-            if destroy_TOOL.endswith('.bat'):
-                if bat_identifier in open(destroy_TOOL, 'rb').read():
-                    os.unlink(destroy_TOOL)
+            if DESTROY_EXE.endswith('.bat'):
+                if bat_identifier in open(DESTROY_EXE, 'rb').read():
+                    os.unlink(DESTROY_EXE)
         set_openssl()
         set_destroy()
 
@@ -2725,7 +2707,7 @@ class Tests(object):
         sf = SecFile(datafile).encrypt(pub1, keep=True)
         with pytest.raises(PrivateKeyError):
             sf.decrypt(priv1, pphr2_w_spaces)
-        with pytest.raises(DecryptError):
+        with pytest.raises(PrivateKeyError):
             sf.decrypt(priv1)
 
         # a correct-format but wrong priv key should fail:
@@ -2950,10 +2932,10 @@ class Tests(object):
         orig_size = getsize(datafile)
         cmdLinePad = [sys.executable, pathToSelf, datafile, '--pad']
         outp = sys_call(cmdLinePad)
-        assert 'padding' in outp
+        assert "'method': 'pad'" in outp
+        assert "'size': %d" % DEFAULT_PAD_SIZE in outp
         out = eval(outp)
         assert getsize(datafile) == DEFAULT_PAD_SIZE
-        assert out['padding'] == DEFAULT_PAD_SIZE - orig_size
 
         cmdLineUnpad = [sys.executable, pathToSelf, datafile, '--pad',
                         '-z', '0']
@@ -2971,9 +2953,9 @@ class Tests(object):
 
     def test_destroy(self):
         # see if it takes at least 50x longer to destroy() than unlink a file
-        # if so, destroy_TOOL is doing something, hopefully its a secure delete
+        # if so, DESTROY_EXE is doing something, hopefully its a secure delete
 
-        if sys.platform == 'win32' and not destroy_TOOL:
+        if sys.platform == 'win32' and not DESTROY_EXE:
             pytest.skip()
 
         tw_path = 'tmp_test_destroy no unicode'
@@ -3399,16 +3381,11 @@ else:
 logging, logging_t0 = set_logging()
 openssl_path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
-destroy_TOOL, destroy_OPTS = set_destroy()
+DESTROY_EXE, DESTROY_OPTS = set_destroy()
 
-
-codec_registry = PFSCodecRegistry()
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
-u, v, p = Tests()._known_values()[:3]  # provide keys to auto-self-test
-codec_registry.register(default_codec,
-                        enc_kwargs={'pub': u},
-                        dec_kwargs={'priv': v, 'pphr': p})
+codec_registry = PFSCodecRegistry(default_codec)
 
 if __name__ == '__main__':
     result = main()
