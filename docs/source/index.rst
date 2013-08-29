@@ -27,6 +27,10 @@ research lab might find it useful, possibly including edvanced users and
 developers of software presentation programs for human subjects research. Anyone
 needing file management with compatible security goals could potentially benefit.
 
+From a security perspective, the goal is to better protect files in the local
+environment, and reduce the chances of their accidental disclosure. The goal is
+not to defends against all possible adversarial attacks.
+
 **Example use-case:** A research team might wish to collect data on illegal
 drug-use (or other HIPAA-covered information). To keep the window of accidental
 disclosure as small as possible, such sensitive information is best protected

@@ -139,6 +139,7 @@ if True:
 
     class SecFileArchiveFormatError(PyFileSecError):
         '''Error to indicate bad format or file name inside archive file.'''
+    SecFileFormatError = SecFileArchiveFormatError
 
     class PaddingError(PyFileSecError):
         '''Error to indicate bad file padding.'''
@@ -156,7 +157,7 @@ if True:
         '''Error to indicate that an encrypted file is required (not provided).'''
 
     class FileStatusError(PyFileSecError):
-        '''Error to indicate that a required status check failed.'''
+        '''Error to indicate that a require_file status check failed.'''
 
 
 class PyFileSecClass(object):
@@ -164,58 +165,75 @@ class PyFileSecClass(object):
 
 
 class PFSCodecRegistry(PyFileSecClass):
-    """Class to explicitly manage the encrypt & decrypt functions.
+    """Class to explicitly manage the codec (encrypt & decrypt functions).
 
-    Motivation:
+    The main motivation for providing a codec-manager class is to provide a
+    controlled way to access to the functions that is capable of assuring a
+    standard format (including meta-data generation) even in the event that a
+    change in underlying cryptographic protocol is necessitated. It is meant to
+    provide an escape hatch, rather than very general flexibility.
 
-    1) Want extensible structure so that other encryption tools can drop in,
-       while retaining the file-bundling and meta-data generation.
+    It is useful to be able to document the method used for encryption with a
+    high level of confidence (for archival uses), especially if there should be
+    more than one codec available.
 
-    2) Want the method used for encryption to be documentable in meta-data,
-       esp. useful if there are several alternative methods available.
+    It is also desirable to be able to support a "read only" mode, i.e., to
+    access and use all decryption methods, while preventing encryption with that
+    same codec.
 
-    3) Retain the ability to access all decryption methods, even if the
-       related encryption method is no longer supported.
-
-    Currently works for the default functions. To register a new function, the
-    idea is to be able to do::
-
-        codec = PFSCodecRegistry()
-        new = {'_encrypt_xyz': _encrypt_xyz,
-               '_decrypt_xyz': _decrypt_xyz}
-        codec.register(new)
-
-    and then `encrypt(method='_encrypt_xyz')` will work. Keys ('_encrypt_xyz')
-    must be ascii-compatible (not unicode).
-
-    But its not this simple yet: a) will need to update file extensions AES_EXT
-    and so on for files generated (currently are constants). b) `rotate()` will
-    need a newEncMethod param. c) will need a way to give arguments to the
-    new_enc() and new_dec() methods, should be possible with `*args **kwargs`.
+    The check are designed to protect against archival ambiguity and accidental
+    errors, and not against adversarial manipulation of the registry.
     """
 
-    def __init__(self, defaults={}):
+    # However, its not this simple yet: a) will need to update file extensions AES_EXT
+    # and so on for files generated (currently are constants). b) `rotate()` will
+    # need a newEncMethod param. c) will need a way to give arguments to the
+    # new_enc() and new_dec() methods, should be possible with `*args **kwargs`.
+
+    def __init__(self, defaults={}, enc_kwargs=None, dec_kwargs=None):
+        """The class is designed around the default functions, and is intended to be
+        easily extensible. To register a new function, the
+        idea is to be able to do::
+
+            codec = PFSCodecRegistry()
+            ...
+            new = {'_encrypt_xyz': _encrypt_xyz,
+                   '_decrypt_xyz': _decrypt_xyz}
+            codec.register(new)
+
+        and then `encrypt(method='_encrypt_xyz')` will work.
+
+        If ``enc_kwargs`` and ``dec_kargs`` are given (as kwarg dicts), the codec
+        will be tested on a sample file. Registration will only succeed if the
+        new decryption method can recover a snippet of text that was encrypted
+        by the new encryption function.
+
+        The codec keys (e.g., '_encrypt_xyz' in the above example) should match the
+        function names (for clarity), and for this reason should be ascii-compatible
+        (because names in python 2 cannot be unicode).
+        """
         self.name = 'PFSCodecRegistry'
         self._functions = {}
-        self.register(defaults)
+        self.register(defaults, enc_kwargs=enc_kwargs, dec_kwargs=dec_kwargs)
 
     def keys(self):
         return list(self._functions.keys())
 
-    def register(self, new_functions):
+    def register(self, new_functions, enc_kwargs=None, dec_kwargs=None):
         """Validate and add a codec to the registry.
 
-        Typically one adds {_enc:e, _dec:d}. However, _dec:d only is accepted
-        to support "read only" use of a codec, but _enc only is not.
+        Typically one adds and encrypt and decrypt pair. Decrypt-only is accepted
+        to support "read only" (decrypt) use of a codec.
+
+        See the class descript for ``enc_keys`` and ``dec_keys``.
         """
-        for key in list(new_functions.keys()):
+        for key, fxn in list(new_functions.items()):
             try:
                 key = str(key)  # not unicode
             except:
                 fatal('keys restricted to str (not unicode)')
-            fxn = new_functions[key]
             if not len(key) > 3 or key[:4] not in ['_enc', '_dec']:
-                msg = ': failed to register "%s": need _enc/_dec...' % key
+                msg = ': failed to register "%s": need _enc..., _dec...' % key
                 fatal(self.name + msg)
             if not key in globals() or not hasattr(fxn, '__call__'):
                 msg = ': failed to register "%s", not callable' % key
@@ -223,7 +241,8 @@ class PFSCodecRegistry(PyFileSecClass):
             if key in list(self.keys()):
                 fatal(self.name + ': function "%s" already registered' % key)
             self._functions.update({key: fxn})
-            fxn_info = '%s(): fxn id=%d' % (key, id(fxn))
+            fxn_info = '%s(): fxn hash=%d' % (key, hash(fxn))
+            # could requires functions be in external files, get a sha256 of the file, ...
             logging.info(self.name + ': registered %s' % fxn_info)
 
         # allow _dec without _enc, but not vice-verse:
@@ -234,8 +253,25 @@ class PFSCodecRegistry(PyFileSecClass):
             dec_twin = key.replace('_enc', '_dec', 1)
             if not dec_twin in list(self._functions.keys()):
                 fatal('method "%s" bad codec: _enc without a _dec' % key)
-            # ideally also check dec(enc(secret.txt, pub), priv, pphr)
-            # but this won't easily just work for rot13, gpg, etc
+
+        # try a sample encrypt().decrypt(), using provided keys
+        if enc_kwargs or dec_kwargs:
+            logging.info(self.name + ': start self-test sf.enc().dec()')
+            test_co_reg = PFSCodecRegistry()
+            test_co_reg._functions = new_functions  # assign and test
+            test_file = _abspath('tmp.codec_test')
+            test_stuff = str(get_time())
+            with open(test_file, 'wb') as fd:
+                fd.write(test_stuff)
+            sf = SecFile(test_file, codec=test_co_reg)
+            sf.encrypt(**enc_kwargs)
+            sf.decrypt(**dec_kwargs)
+            dec_enc_stuff = open(sf.file).read()
+            os.unlink(test_file)
+            if test_stuff != dec_enc_stuff:  # codec failed .enc.dec
+                fatal(self.name + ': FAILED registration self-test: SecFile().enc().dec()',
+                      CodecRegistryError)
+            logging.info(self.name + ': codec registration passes: SecFile().enc().dec()')
 
     def unregister(self, function_list):
         """Remove codec pairs from the registry based on keys.
@@ -251,7 +287,7 @@ class PFSCodecRegistry(PyFileSecClass):
                 del self._functions[key]
                 logging.info('removed %s from registry' % key)
             else:
-                msg = 'failed to remove %s from registry, not found' % key
+                msg = 'not found in registry: %s' % key
                 logging.warning(msg)
 
     def get_function(self, fxn_name):
@@ -259,7 +295,8 @@ class PFSCodecRegistry(PyFileSecClass):
         """
         if self.is_registered(fxn_name):
             return self._functions[fxn_name]
-        raise CodecRegistryError('function %s not in registry' % fxn_name)
+        fatal('function %s not in registry' % fxn_name,
+              CodecRegistryError)
 
     def is_registered(self, fxn_name):
         """Returns True if `fxn_name` is registered; validated at registration.
@@ -303,6 +340,9 @@ class SecFile(PyFileSecClass):
             require_X methods must only use the default / already set file
             some methods call others (decrypt can call destroy), nested .results need work
         '''
+        # strategy: methods build up .results, so make another SecFile instance if a method
+        # needs to call other methods that would overwrite current .results in progress
+
         self.set_file(infile)
         self._require_keys(pub=pub, priv=priv, pphr=pphr)
         if not codec:
@@ -370,8 +410,12 @@ class SecFile(PyFileSecClass):
             self._file = None
             logging.info('set_file: received filename: None')
             return
-        if not isinstance(infile, basestring):
+        if not isinstance_basestring23(infile):
             fatal('set_file: infile expected as a string', AttributeError)
+        f = os.path.split(infile)[1]
+        if f and f[0] in ['.', '/']:
+            fatal('set_file: infile name starts with bad character (./)',
+                  SecFileArchiveFormatError)
         self._file = _abspath(infile)
         if exists(self._file):
             self.permissions = 0o600  # changes permissions on disk
@@ -418,7 +462,7 @@ class SecFile(PyFileSecClass):
             """Get pub from self or from param, set as needed
             """
             # TO DO: screen for small RSA modulus
-            if isinstance(pub, basestring):
+            if isinstance_basestring23(pub):
                 if exists(pub) and 'PUBLIC KEY' in open(pub, 'rb').read():
                     self.pub = _abspath(pub)
                 else:
@@ -439,7 +483,7 @@ class SecFile(PyFileSecClass):
             """Get pub from self or from param, set as needed
             """
             # TO DO: screen for small RSA modulus
-            if isinstance(priv, basestring):
+            if isinstance_basestring23(priv):
                 if exists(priv) and 'PRIVATE KEY' in open(priv, 'rb').read():
                     # got a file
                     self.priv = _abspath(priv)
@@ -447,7 +491,7 @@ class SecFile(PyFileSecClass):
                     # got actual key
                     self.priv = priv
                 else:
-                    logging.error('bad pub key %s' % priv)
+                    logging.error('bad private key %s' % priv)
             if not hasattr(self, 'priv'):
                 self.priv = None
             return self.priv
@@ -458,7 +502,7 @@ class SecFile(PyFileSecClass):
             Load from file if give a file
             """
             # TO DO: screen for weak passphrase
-            if isinstance(pphr, basestring):
+            if isinstance_basestring23(pphr):
                 if exists(pphr):
                     self.pphr = open(pphr, 'rb').read()
                 else:
@@ -468,7 +512,7 @@ class SecFile(PyFileSecClass):
             return self.pphr
 
         _get_pub(pub)  # get, or set-then-get
-        _get_priv(priv)
+        _get_priv(priv)  #... if its encrypted, require a plausible pphr
         _get_pphr(pphr)
 
     @property
@@ -557,7 +601,7 @@ class SecFile(PyFileSecClass):
             return self
 
         if pad_count:
-            self.unpad()
+            SecFile(self.file).pad(0)
         needed = self._ok_to_pad(size)
         if needed == 0:
             msg = name + ': file length not obscured (length >= requested size)'
@@ -1180,7 +1224,7 @@ class SecFile(PyFileSecClass):
         if orig_links > 1 or disposition == pfs_UNKNOWN:
             vals.extend([inum, mount_path])
             keys.extend(['inum', 'mount_path'])
-        self.result = dict(zip(keys, vals))
+        self.result =  dict(list(zip(keys, vals)))
         if isfile(target_file):  # yikes, file still remains
             msg = name + ': %s remains after destroy(), %d bytes' % (target_file, getsize(target_file))
             fatal(msg, DestroyError)
@@ -1334,7 +1378,7 @@ class SecFileArchive(PyFileSecClass):
         """
         """
         # init must not create any temp files if paths=None
-        if paths and isinstance(paths, basestring):
+        if paths and isinstance_basestring23(paths):
             paths = tuple(paths)
         if name and isfile(name) and name.endswith(ENC_EXT):
             # given a name, and it is a valid archive file
@@ -1392,7 +1436,7 @@ class SecFileArchive(PyFileSecClass):
         if not data_enc or not isfile(data_enc):
             fatal("could not find <file>%s '%s'" % (ENC_EXT, str(data_enc)))
         if not tarfile.is_tarfile(data_enc):
-            fatal(name + ': %s not expected format (.tgz)' % data_enc,
+            fatal('%s not expected format (.tgz)' % data_enc,
                    SecFileArchiveFormatError)
 
         # Check for bad internal paths:
@@ -1402,7 +1446,7 @@ class SecFileArchive(PyFileSecClass):
                     if f.name[0] in ['.', os.sep] or f.name[1:3] == ':\\']
         tar.close()
         if badNames:
-            fatal(name + ': bad/dubious internal file names' % os.sep,
+            fatal('bad/dubious internal file names',
                    SecFileArchiveFormatError)
         return True
 
@@ -1662,7 +1706,8 @@ class GenRSA(PyFileSecClass):
         print(ent_msg)
 
         nap = (2, 5)[bool(interactive)]  # 5 sec sleep in interactive mode
-        print('\nMove the mouse around for %ds (to help generate entropy)' % nap)
+        msg = '\nMove the mouse around for %ds (to help generate entropy)' % nap
+        print(msg)
         sys.stdout.flush()
         try:
             time.sleep(nap)
@@ -1908,6 +1953,11 @@ def hmac_sha256(key, filename):
     hmac_openssl = sys_call(cmd_HMAC)
 
     return hmac_openssl
+
+
+def isinstance_basestring23(duck):
+    # placeholder for 2to3
+    return isinstance(duck, basestring)
 
 
 def printable_pwd(nbits=256):
@@ -2227,6 +2277,12 @@ class Tests(object):
                     os.unlink(destroy_TOOL)
         set_openssl()
         set_destroy()
+
+    def test_SecFile_basics(self):
+        with pytest.raises(SecFileFormatError):
+            SecFile('.dot_file')
+        #with pytest.raises(SecFileArchiveFormatError):
+        #    SecFile('/slashfile')
 
     def test_SecFileArchive(self):
         # test getting a name
@@ -2725,7 +2781,6 @@ class Tests(object):
 
         # Meta-data from key rotation:
         sf = SecFile(datafile).encrypt(pub1)
-        print sf.file
         md = sf.load_metadata()
         log_metadata(md)  # for debug
         dates = list(md.keys())
@@ -2776,7 +2831,6 @@ class Tests(object):
         assert getsize(pwd_rsa) == int(testBits) // 8
 
         # Non-existent decMethod should fail:
-        print sf.file
         with pytest.raises(CodecRegistryError):
             SecFile(sf.file).decrypt(priv1, pphr1,
                           dec_method='_decrypt_what_the_what')
@@ -2854,7 +2908,6 @@ class Tests(object):
             fd.write(secretText)
         pub1, priv1, pphr1 = self._known_values()[:3]
         pathToSelf = lib_path
-        print __file__, lib_path
         datafile = _abspath(datafile)
 
         # Encrypt:
@@ -3355,9 +3408,15 @@ path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(path_wanted)
 destroy_TOOL, destroy_OPTS = set_destroy()
 
+
+codec_registry = PFSCodecRegistry()
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
-codec_registry = PFSCodecRegistry(default_codec)
+u, v, p = Tests()._known_values()[:3]  # provide keys to auto-self-test
+codec_registry.register(default_codec,
+                        enc_kwargs={'pub': u},
+                        dec_kwargs={'priv': v, 'pphr': p})
 
 if __name__ == '__main__':
-    print(main())
+    result = main()
+    print(result)
