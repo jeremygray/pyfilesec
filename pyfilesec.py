@@ -338,7 +338,6 @@ class _SecFileBaseClass(object):
         """
         name = 'reset'
         logging.info(name + ' start')
-        # params here will not trigger because infile=None:
         self.__init__(infile=None, pub=self.pub, priv=self.priv, pphr=self.pphr,
                  codec=self.codec, openssl=self._openssl)
 
@@ -424,7 +423,7 @@ class _SecFileBaseClass(object):
         def _get_priv(priv=None):
             """Get pub from self or from param, set as needed
             """
-            # TO DO: screen for small RSA modulus
+            # TO DO: screen for small RSA modulus, ENCRYPTED
             if isinstance_basestring23(priv):
                 if exists(priv) and 'PRIVATE KEY' in open(priv, 'rb').read():
                     # got a file
@@ -454,7 +453,7 @@ class _SecFileBaseClass(object):
             return self.pphr
 
         _get_pub(pub)  # get, or set-then-get
-        _get_priv(priv)  # ... if its encrypted, require a plausible pphr
+        _get_priv(priv)  # if its encrypted, require a plausible pphr, if not del(self.pphr)
         _get_pphr(pphr)
 
     @property
@@ -678,16 +677,7 @@ class SecFile(_SecFileBaseClass):
         self.codec = copy.deepcopy(codec)
         self._openssl = openssl
 
-        # passing infile AND value(s) at init can trigger some methods
-        # the order of code below was chosen to enable implicit rotation but
-        # you might lose metadata that way; use rotate()
-        # here need to ensure that there is a file before calling anything
-        if self.is_encrypted and priv:
-            self.decrypt(priv, pphr)
-        if self.is_not_encrypted:  # not elif
-            pad and self.pad(pad)
-            pub and self.encrypt(pub)
-        # reset() should never auto-triggering because infile=None
+        # only register things at init, must call methods explicitly
 
     def __str__(self):
         return '<pyfilesec.SecFile object, file=%s>' % repr(self.file)
@@ -906,19 +896,19 @@ class SecFile(_SecFileBaseClass):
             fatal(name + ": file too large (max size %d bytes)" % MAX_FILE_SIZE)
 
         # Refuse to proceed without a pub key of sufficient bits:
-        bits = get_key_length(pub)
-        logging.info(name + ': pubkey length %d' % bits)
-        if bits < 1024:
-            fatal("public key < 1024 bits; too short!", PublicKeyTooShortError)
-        if bits < 2048:
-            logging.error(name + ': public key < 2048 bits, no real security')
+        #bits = get_key_length(pub)
+        #logging.info(name + ': pubkey length %d' % bits)
+        #if bits < 1024:
+        #    fatal("public key < 1024 bits; too short!", PublicKeyTooShortError)
+        #if bits < 2048:
+        #    logging.error(name + ': public key < 2048 bits, no real security')
         if not keep in [True, False]:
             fatal(name + ": bad value for 'keep' parameter")
 
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = self.codec.get_function(enc_method)
         set_umask()  # redundant
-        data_enc, pwd_rsa = ENCRYPT_FXN(self.file, pub, openssl=self.openssl)
+        data_enc, pwd_rsa = ENCRYPT_FXN(self.file, self.pub, openssl=self.openssl)
         ok_encrypt = (isfile(data_enc) and
                         os.stat(data_enc)[stat.ST_SIZE] and
                         isfile(pwd_rsa) and
@@ -933,7 +923,7 @@ class SecFile(_SecFileBaseClass):
         else:  # True or exising md
             if meta is True:
                 meta = {}
-            md = self._make_metadata(self.file, data_enc, pub,
+            md = self._make_metadata(self.file, data_enc, self.pub,
                                      enc_method, date, hmac_key)
             meta.update(md)
         with open(metafile, 'wb') as fd:
@@ -1004,7 +994,7 @@ class SecFile(_SecFileBaseClass):
 
         return {'meta-data %s' % now: md}
 
-    def decrypt(self, priv=None, pphr='', keep_meta=False, keep_enc=False,
+    def decrypt(self, priv=None, pphr=None, keep_meta=False, keep_enc=False,
                 dec_method=None):
         """Decrypt a file that was encoded using ``encrypt()``.
 
@@ -1039,13 +1029,13 @@ class SecFile(_SecFileBaseClass):
         self.result = {'method': name, 'status': 'started'}
         arch_enc = self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
         self._require_keys(priv=priv, pphr=pphr)
-        if not self.priv:
-            fatal(name + ': requires a private key', DecryptError)
+        #if not self.priv:
+        #    fatal(name + ': requires a private key', DecryptError)
         logging.debug(name + 'start')
 
         if self.is_tracked:
             logging.warning(name + ': file exposed to version control')
-        if not self.pphr and 'ENCRYPTED' in open(priv, 'r').read().upper():
+        if not self.pphr and 'ENCRYPTED' in open(self.priv, 'r').read().upper():
             fatal(name + ': missing passphrase (for encrypted privkey)', DecryptError)
 
         # Extract files from the archive (dataFileEnc) into the same directory,
@@ -1153,7 +1143,7 @@ class SecFile(_SecFileBaseClass):
         file_dec = None
         try:
             # do _require_enc_file() in decrypt, bad if do it twice
-            self.decrypt(priv, pphr=pphr, keep_meta=True)
+            self.decrypt(self.priv, pphr=self.pphr, keep_meta=True)
             # decrypt can raise FileNotEncryptedError if not .enc file
 
             # encrypt() will destroy intermediate clear_text, but might be
@@ -1174,7 +1164,7 @@ class SecFile(_SecFileBaseClass):
                 self.pad(pad)
             file_dec = self.file  # track file names so can destroy if needed
 
-            self.encrypt(pub=pub, date=True, meta=md,
+            self.encrypt(pub=self.pub, date=True, meta=md,
                      keep=False, hmac_key=hmac_key)
         except FileNotEncryptedError:
             fatal(name + ': not given an encrypted file', FileNotEncryptedError)
@@ -1208,7 +1198,7 @@ class SecFile(_SecFileBaseClass):
         self._require_keys(priv=priv, pphr=pphr)
         sig_out = self.file + '.sig'
 
-        cmd_SIGN = [self.openssl, 'dgst', '-sign', priv, '-out', sig_out]
+        cmd_SIGN = [self.openssl, 'dgst', '-sign', self.priv, '-out', sig_out]
         if self.pphr:
             cmd_SIGN += ['-passin', 'stdin']
         cmd_SIGN += ['-keyform', 'PEM', self.file]
@@ -1239,7 +1229,7 @@ class SecFile(_SecFileBaseClass):
         if not sig:
             fatal('signature required for verify(), as string or filename')
 
-        cmd_VERIFY = [self.openssl, 'dgst', '-verify', pub, '-keyform', 'PEM']
+        cmd_VERIFY = [self.openssl, 'dgst', '-verify', self.pub, '-keyform', 'PEM']
         if isfile(sig):
             sig = open(sig, 'rb').read()
         with NamedTemporaryFile(delete=False) as sig_file:
