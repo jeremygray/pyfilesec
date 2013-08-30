@@ -9,16 +9,13 @@
 File-oriented security in python
 ---------------------------------
 
-pyFileSec provides a class ``SecFile`` and helper functions. These are intended
-to make it easier to work with computer files while protecting them from casual
-inspection or accidental disclosure. The intended audience is small workgroups
-and research teams looking. By design, privacy assurance, ease-of-use, and a
+pyFileSec provides a class ``SecFile`` that is intended
+to make it easier to protect computer files from casual
+inspection or accidental disclosure. By design, privacy assurance, ease-of-use, and a
 stable, cross-platform API are important security goals. Integrity
 assurance is useful but not a top priority. The speed of code execution is
 relatively unimportant. Truly sensitive information should be protected through
-multiple means, including procedural, physical, and legal methods. pyFileSec is
-only concerned with file-oriented aspects of information security (e.g., not
-network security, side-channel attackes on cryptography, or other issues).
+multiple means, including procedural, physical, and legal methods.
 
 pyFileSec is less about encryption (which it does handily, as do many excellent
 packages), and more about managing the immediate security issues that arise
@@ -28,8 +25,9 @@ developers of software presentation programs for human subjects research. Anyone
 needing file management with compatible security goals could potentially benefit.
 
 From a security perspective, the goal is to better protect files in the local
-environment, and reduce the chances of their accidental disclosure. The goal is
-not to defends against all possible adversarial attacks.
+environment, and reduce the chances of their accidental disclosure. It is beyond
+pyFileSec's scope to try to defend against all possible adversarial attacks.
+pyFileSec is only concerned with file-oriented aspects of information security.
 
 **Example use-case:** A research team might wish to collect data on illegal
 drug-use (or other HIPAA-covered information). To keep the window of accidental
@@ -237,33 +235,40 @@ Note: Any references to 'clear text' or 'plain text' simply means an unencrypted
 file. It could be a binary file, or even an already-encrypted file. There is no
 requirement that it be text.
 
-SecFile class
-===============
+class SecFile()
+================
 
 A SecFile instance tracks a specific file, and regards it as being "the same"
-object despite differences to the underlying stuff on the actual file system.
-The underlying file name can change, for example.
+object despite differences to the underlying file on the disk file system.
 
 Flexible usage is supported.
 
 **Examples**
 
-The following sets of lines all have the same effect: A file that was originally
-named "The Larch.txt" (with a space in it) becomes encrypted and renamed, and
-the original file is securely deleted.
+The notation required to encrypt a file is pretty minimal::
 
-Nice, clear, and compact::
+    >>> SecFile('The Larch.txt').encrypt('pub.pem')
+
+The file that was originally named "The Larch.txt" (with a space in it) has been
+encrypted using the public key, and renamed with extension ``.enc``. The original
+file is securely deleted.
+
+Its often useful to retain a reference to the SecFile object. For example::
 
     >>> sf = SecFile('The Larch.txt').encrypt('pub.pem')
     >>> sf.file
     '/Users/.../data/The Larch.enc'
 
-Simply providing a public key will implicitly call ``encrypt()`` as part of init.
-This is a bit sneakier, and not as clear, but does the same thing::
+Providing a public key at init will set the key to use in subsequent calls to ``encrypt()``.
+These statements do the same thing as above::
 
     >>> sf = SecFile('The Larch.txt', pub='pub.pem')
+    >>> sf.encrypt()
+    >>> sf.file
+    '/Users/.../data/The Larch.enc'
 
-Its fine to encrypt well after init. Here also note the change of file name and
+Its fine to encrypt well after init, and the public key need not be specified until
+the call to encrypt. Here also note the change of file name and
 size (and that the new file is in same folder)::
 
     >>> sf = SecFile('The Larch.txt')
@@ -271,12 +276,16 @@ size (and that the new file is in same folder)::
     '/Users/.../data/The Larch.txt'
     >>> sf.size
     16384L
+    >>> sf.is_encrypted
+    False
 
     >>> sf.encrypt('pub.pem')
     >>> sf.file
     '/Users/.../data/The Larch.enc'
     >>> sf.size
     18036L
+    >>> sf.is_encrypted
+    True
 
 To decrypt using a private key from a file named ``priv.pem`` with a passphrase
 in a file named ``passphrase.txt``::
@@ -287,14 +296,54 @@ in a file named ``passphrase.txt``::
 
 The original file name is restored (only the file name, not the path).
 
-
 .. autoclass:: pyfilesec.SecFile
-    :members:
-        encrypt, decrypt, rotate, update
-        sign, verify
-        destroy
-        pad, unpad
-        file, is_versioned, is_in_dropbox, hardlink_count, permissions
+    :members: encrypt, decrypt, rotate, sign, verify, destroy, pad, unpad
+
+Other available methods include:
+
+    ``set_file`` : change the file to work with, and set the ``.file`` property.
+
+        .. note:: Calling ``set_file`` does not rename the existing file on the file system.
+        It just tells the sf object to work with a different file.
+        To change the underlying file name: ``os.rename(sf.file, new_file); sf.set_file(new_file)``.
+
+
+SecFile objects have properties that can be accessed with the usual dot
+notation (i.e., as ``sf.property`` where ``sf`` is a SecFile object). Most cannot be set (exceptions
+noted).
+
+    ``file`` : the full path to the underlying file on the file system
+        cannot be assigned, see ``set_file``.
+
+    ``size`` : (long int)
+        size in bytes on the disk as reported by ``os.path.getsize()``.
+
+    ``is_encrypted`` : (boolean)
+        i.e.: ``True`` if encrypted by ``pyFileSec.SecFile.encrypt()``; does not detect any-encryption-in-general.
+
+    ``is_in_dropbox`` : (boolean)
+        ``True`` if inside the user's Dropbox folder
+
+    ``is_in_writeable_dir`` : (boolean)
+        ``True`` if the user has write permission to the file's directory
+
+    ``is_tracked`` : by version control (boolean)
+        only git, svn, and mercurial (hg) are detected.
+
+    ``permissions`` : POSIX-style file permissions (int; -1 on Windows)
+        if ``sf.permissions`` is 384 (int), then ``oct(sf.permissions)`` will be '0600'.
+
+        .. note:: Can be assigned.
+
+    ``openssl`` : path to the OpenSSL executable file to use for cryptography
+
+        .. note:: Can be assigned.
+
+    ``openssl_version`` : (string)
+        version of ``sf.openssl``.
+
+    ``hardlinks`` : count of all hardlinks to the file (int)
+        the count includes ``sf.file`` as one link. requires Admin priviledges on Windows.
 
 Codec Registry
 ===============

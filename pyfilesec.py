@@ -282,7 +282,7 @@ class PFSCodecRegistry(object):
         return fxn_name in self._functions
 
 
-class _SecFileBaseClass(object):
+class _SecFileBase(object):
     def __init__(self):
         pass
     # move misc properties and helper functions here
@@ -483,9 +483,9 @@ class _SecFileBaseClass(object):
             perm = -1  # 'win32-not-implemented'
         else:
             perm = int(oct(os.stat(self.file)[stat.ST_MODE])[-3:], 8)
-        logging.debug(name + ': %s %d base10' % (self.file, perm))
+        logging.debug(name + ': %s %s octal' % (self.file, oct(perm)))
         if args:
-            self.result = permissions_str(self.file)
+            self.result = oct(perm)
         return perm
 
     def _set_permissions(self, mode):
@@ -612,7 +612,7 @@ class _SecFileBaseClass(object):
         return has_hg_dir
 
 
-class SecFile(_SecFileBaseClass):
+class SecFile(_SecFileBase):
     """Class for working with a file as a more-secure object.
     """
     def __init__(self, infile=None, pub=None, priv=None, pphr=None,
@@ -1141,7 +1141,7 @@ class SecFile(_SecFileBaseClass):
             else:
                 logging.debug(name + ': self.meta no such file')
                 md = self.NO_META_DATA
-            pad = min(0, pad)  # disallow -1, don't want errors mid-rotate
+            pad = max(0, pad)  # disallow -1, don't want errors mid-rotate
             if pad is not None and pad > -1:
                 SecFile(self.file).pad(pad)
             file_dec = self.file  # track file names so can destroy if needed
@@ -1254,18 +1254,10 @@ class SecFile(_SecFileBaseClass):
         attribute contains the details. If ``destroy()`` fails, ``.result` is not reset.
         """
 
-        #If a NamedTemporaryFile object is given instead of a filename, destroy()
-        #will try to secure-delete the contents and close the file. Other open
-        #file-objects will raise a DestroyError, because the file is not removed.
-
         name = 'destroy'
         logging.debug(name + ': start')
         self.result = None
         target_file = self._require_file()
-        #got_file_object = hasattr(filename, 'close')
-        #if got_file_object:
-        #    filename, file_object = filename.name, filename
-        #    file_object.seek(0)
 
         if self.is_in_dropbox:
             logging.error(name + ': in dropbox; no secure delete of remote files')
@@ -1298,15 +1290,6 @@ class SecFile(_SecFileBaseClass):
             good_sys_call = False
             logging.warning(name + ': %s' % e)
             logging.warning(name + ': %s' % ' '.join(cmd_Destroy))
-        finally:
-            #if got_file_object: only for NamedTemporaryFiles
-            #    try:
-            #        file_object.close()
-            #        file_object.unlink()
-            #        del(file_object.name)
-            #    except:
-            #        pass  # gives an OSError but has done something
-            pass
 
         if not isfile(target_file):
             # there's no longer a file
@@ -1342,42 +1325,42 @@ class SecFile(_SecFileBaseClass):
         return self
 
 
-class SecFileArchive(_SecFileBaseClass):
+class SecFileArchive(_SecFileBase):
     """Class for working with an archive file (= *.enc).
 
     Provide a name to create an empty archive, or infer a name from paths.
 
     Currently an archive is a .tar.gz file.
     """
-    def __init__(self, name='', paths=None, keep=True):
+    def __init__(self, name='', files=None, keep=True):
         """
         """
         # init must not create any temp files if paths=None
-        if paths and isinstance_basestring23(paths):
-            paths = tuple(paths)
+        if files and isinstance_basestring23(files):
+            files = tuple(files)
         if name and isfile(name) and name.endswith(ENC_EXT):
             # given a name, and it is a valid archive file
             self.name = name
         elif name:
             # got a name, but its not (yet) a valid archive file
             self.name = name + ENC_EXT
-        elif paths:
+        elif files:
             # no name, infer a name from paths, prefer .meta file as a base
-            for p in paths:
+            for p in files:
                 path, ext = os.path.splitext(p)
                 if not ext in [AES_EXT, RSA_EXT]:
                     self.name = path + ENC_EXT
                     break
             else:
-                path, ext = os.path.splitext(paths[0])
+                path, ext = os.path.splitext(files[0])
                 self.name = path + ENC_EXT
         else:
             self.name = _uniq_file('secFileArchive' + ENC_EXT)
         logging.debug('SecFileArchive.__init__ %s' % self.name)
-        if paths:
-            self.pack(paths, keep=keep)
+        if files:
+            self.pack(files, keep=keep)
 
-    def pack(self, paths, keep=True):
+    def pack(self, files, keep=True):
         """Make a tgz file from a list of paths, set permissions.
 
         Directories ok currently (might change and only allow a file).
@@ -1389,11 +1372,11 @@ class SecFileArchive(_SecFileBaseClass):
         """
 
         set_umask()
-        if isinstance(paths, str):
-            paths = [paths]
+        if isinstance_basestring23(files):
+            files = [files]
         self.name = _uniq_file(self.name)
         tar_fd = tarfile.open(self.name, "w:gz")
-        for p in [os.path.split(f)[1] for f in paths]:
+        for p in [os.path.split(f)[1] for f in files]:
             tar_fd.add(p, recursive=True)  # True by default, get whole directory
             if not keep:
                 try:
@@ -2256,18 +2239,16 @@ class Tests(object):
     def test_SecFile_basics(self):
         with pytest.raises(SecFileFormatError):
             SecFile('.dot_file')
-        #with pytest.raises(SecFileArchiveFormatError):
-        #    SecFile('/slashfile')
 
     def test_SecFileArchive(self):
         # test getting a name
-        SecFileArchive(paths=None)
+        SecFileArchive(files=None)
         # default get a name from one of the files in paths:
         with open('abc' + AES_EXT, 'wb') as fd:
             fd.write('abc')
         with open('abc' + RSA_EXT, 'wb') as fd:
             fd.write('abc')
-        SecFileArchive(paths=['abc' + RSA_EXT, 'abc' + AES_EXT])
+        SecFileArchive(files=['abc' + RSA_EXT, 'abc' + AES_EXT])
 
         '''
         # test fall-through decryption method:
@@ -2547,6 +2528,13 @@ class Tests(object):
         with pytest.raises(PaddingError):
             sf1.pad(-1)  # should be a byte mismatch at this point
 
+        # pad a null file should work:
+        with open(tmp2, 'wb') as fd:
+            fd.write('')
+        assert getsize(tmp2) == 0
+        sf = SecFile(tmp2).pad()
+        assert sf.size == DEFAULT_PAD_SIZE
+
     def test_signatures(self):
         # sign a known file with a known key. can we get known signature?
         __, kwnPriv, kwnPphr, datum, kwnSigs = self._known_values()
@@ -2645,83 +2633,84 @@ class Tests(object):
         sys.argv = real_args
 
     def test_encrypt_decrypt(self):
-        # Lots of tests here (just to avoid re-generating keys a lot)
-        secretText = 'secret snippet %.6f' % get_time()
-        datafile = 'cleartext no unicode.txt'
-        with open(datafile, 'wb') as fd:
-            fd.write(secretText)
+        # test with null-length file, and some content
+        for secretText in ['', 'secret snippet %d' % int(get_time())]:
+            datafile = 'cleartext no unicode.txt'
+            with open(datafile, 'wb') as fd:
+                fd.write(secretText)
+            assert getsize(datafile) in [0, 25]
 
-        testBits = 2048  # fine to test with 1024 and 4096
-        pubTmp1 = 'pubkey1 no unicode.pem'
-        prvTmp1 = 'prvkey1 no unicode.pem'
-        pphr1 = printable_pwd(180)
-        pub1, priv1 = GenRSA().generate(pubTmp1, prvTmp1, pphr1, testBits)
+            testBits = 2048  # fine to test with 1024 and 4096
+            pubTmp1 = 'pubkey1 no unicode.pem'
+            prvTmp1 = 'prvkey1 no unicode.pem'
+            pphr1 = printable_pwd(180)
+            pub1, priv1 = GenRSA().generate(pubTmp1, prvTmp1, pphr1, testBits)
 
-        pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
-        prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
-        pphr2_w_spaces = '  ' + printable_pwd(180) + '   '  # spaces in pphr
-        pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr2_w_spaces, testBits)
+            pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
+            prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
+            pphr2_w_spaces = '  ' + printable_pwd(180) + '   '  # spaces in pphr
+            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr2_w_spaces, testBits)
 
-        # test decrypt with GOOD passphrase, trailing whitespace:
-        sf = SecFile(datafile).encrypt(pub2)  # not keep=True
-        sf.decrypt(priv2, pphr=pphr2_w_spaces)
-        recoveredText = open(sf.file).read()
-        # file contents match:
-        assert recoveredText == secretText
-        # file name match: can FAIL due to utf-8 encoding issues
-        assert os.path.split(sf.file)[-1] == datafile
+            # test decrypt with GOOD passphrase, trailing whitespace:
+            sf = SecFile(datafile).encrypt(pub2)  # not keep=True
+            sf.decrypt(priv2, pphr=pphr2_w_spaces)
+            recoveredText = open(sf.file).read()
+            # file contents match:
+            assert recoveredText == secretText
+            # file name match: can FAIL due to utf-8 encoding issues
+            assert os.path.split(sf.file)[-1] == datafile
 
-        # send some bad parameters:
-        with pytest.raises(ValueError):
-            SecFile(datafile).encrypt(pub2, enc_method='abc')
-        with pytest.raises(EncryptError):
-            SecFile(datafile).encrypt(pub=None)
-        with pytest.raises(OSError):
-            SecFile(datafile + ' oops').encrypt(pub2)
-        with pytest.raises(ValueError):
-            SecFile().encrypt(pub2)
-        with pytest.raises(ValueError):
-            SecFile(datafile).encrypt(pub2, keep=17)
+            # send some bad parameters:
+            with pytest.raises(ValueError):
+                SecFile(datafile).encrypt(pub2, enc_method='abc')
+            with pytest.raises(EncryptError):
+                SecFile(datafile).encrypt(pub=None)
+            with pytest.raises(OSError):
+                SecFile(datafile + ' oops').encrypt(pub2)
+            with pytest.raises(ValueError):
+                SecFile().encrypt(pub2)
+            with pytest.raises(ValueError):
+                SecFile(datafile).encrypt(pub2, keep=17)
 
-        # test decrypt with GOOD passphrase as STRING:
-        assert exists(datafile)
-        sf = SecFile(datafile).encrypt(pub1)
-        sf.decrypt(priv1, pphr1)
-        recoveredText = open(sf.file).read()
-        # file contents match:
-        assert recoveredText == secretText
-        # file name match: can FAIL due to utf-8 encoding issues
-        assert os.path.split(sf.file)[-1] == datafile
+            # test decrypt with GOOD passphrase as STRING:
+            assert exists(datafile)
+            sf = SecFile(datafile).encrypt(pub1)
+            sf.decrypt(priv1, pphr1)
+            recoveredText = open(sf.file).read()
+            # file contents match:
+            assert recoveredText == secretText
+            # file name match: can FAIL due to utf-8 encoding issues
+            assert os.path.split(sf.file)[-1] == datafile
 
-        # test decrypt with GOOD passphrase in a FILE:
-        sf = SecFile(datafile).encrypt(pub1, keep=True)
-        pphr1_file = prvTmp1 + '.pphr'
-        with open(pphr1_file, 'wb') as fd:
-            fd.write(pphr1)
-        sf.decrypt(priv1, pphr1_file)
-        recoveredText = open(sf.file).read()
-        # file contents match:
-        assert recoveredText == secretText
+            # test decrypt with GOOD passphrase in a FILE:
+            sf = SecFile(datafile).encrypt(pub1, keep=True)
+            pphr1_file = prvTmp1 + '.pphr'
+            with open(pphr1_file, 'wb') as fd:
+                fd.write(pphr1)
+            sf.decrypt(priv1, pphr1_file)
+            recoveredText = open(sf.file).read()
+            # file contents match:
+            assert recoveredText == secretText
 
-        # a BAD or MISSING passphrase should fail:
-        sf = SecFile(datafile).encrypt(pub1, keep=True)
-        with pytest.raises(PrivateKeyError):
-            sf.decrypt(priv1, pphr2_w_spaces)
-        with pytest.raises(PrivateKeyError):
-            sf.decrypt(priv1)
+            # a BAD or MISSING passphrase should fail:
+            sf = SecFile(datafile).encrypt(pub1, keep=True)
+            with pytest.raises(PrivateKeyError):
+                sf.decrypt(priv1, pphr2_w_spaces)
+            with pytest.raises(PrivateKeyError):
+                sf.decrypt(priv1)
 
-        # a correct-format but wrong priv key should fail:
-        sf = SecFile(datafile).encrypt(pub1, keep=True)
-        pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr1, testBits)
-        with pytest.raises(DecryptError):
-            sf.decrypt(priv2, pphr1)
+            # a correct-format but wrong priv key should fail:
+            sf = SecFile(datafile).encrypt(pub1, keep=True)
+            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr1, testBits)
+            with pytest.raises(DecryptError):
+                sf.decrypt(priv2, pphr1)
 
-        # should refuse-to-encrypt if pub key is too short:
-        pub256, __ = GenRSA().generate('pub256.pem', 'priv256.pem', bits=256)
-        assert get_key_length(pub256) == 256  # need a short key to use in test
-        sf = SecFile(datafile).encrypt(pub1, keep=True)
-        with pytest.raises(PublicKeyTooShortError):
-            sf.encrypt(pub256)
+            # should refuse-to-encrypt if pub key is too short:
+            pub256, __ = GenRSA().generate('pub256.pem', 'priv256.pem', bits=256)
+            assert get_key_length(pub256) == 256  # need a short key to use in test
+            sf = SecFile(datafile).encrypt(pub1, keep=True)
+            with pytest.raises(PublicKeyTooShortError):
+                sf.encrypt(pub256)
 
     def test_rotate(self):
         # Set-up:
@@ -2744,7 +2733,7 @@ class Tests(object):
         sf.rotate(pub=pub1, priv=priv2, pphr=pphr2, pad=16384, hmac_key='key')
         third_enc_size = sf.size
         # padding affects .enc file size, values vary a little from run to run
-        assert first_enc_size < third_enc_size
+        assert first_enc_size < second_enc_size < third_enc_size
 
         sf.decrypt(priv1, pphr=pphr1)
         assert not open(sf.file).read() == secretText  # dec but still padded
@@ -2827,7 +2816,7 @@ class Tests(object):
         assert pad2len == sf.size
 
         # add some compression
-        arc = SecFileArchive(paths=[datafile])
+        arc = SecFileArchive(files=[datafile])
         size_tgz = getsize(arc.name)
         assert 150 < size_tgz < 200 < pad2len // 8  # pass if much smaller
         sf.encrypt(self._known_values()[0])
@@ -2980,19 +2969,6 @@ class Tests(object):
 
         assert min(destroy_times) > 10 * max(unlink_times)
         assert avg_destroy > 50 * avg_unlink
-
-        global dropbox_path
-        orig = dropbox_path
-
-        '''
-        # NamedTempFile is ok by design:
-        with NamedTemporaryFile() as fd:
-            dropbox_path = split(abspath(fd.name))[0]  # trigger Dropbox warn
-            assert hasattr(fd, 'close')
-            fd.write('a')
-            destroy(fd, cmdList=('-f', '-s'))
-        dropbox_path = orig  # restore real path
-        '''
 
     def test_destroy_links(self):
         # Test detection of multiple links to a file when destroy()ing it:
@@ -3175,32 +3151,38 @@ class Tests(object):
         assert recoveredText == secretText
 
     def test_dropbox_stuff(self):
-        # assumes that is_in_dropbox works correctly (returns Dropbox folder)
-        # this test assesses whether decrypt will refuse to proceed
+        # assume that is_in_dropbox returns actual Dropbox folder, or False
+        # test whether decrypt() will refuse to proceed inside it
+
+        # use real Dropbox path if this test machine has it, otherwise fake it
+        real_dropbox_path = get_dropbox_path()  # sets dropbox_path global
         global dropbox_path
         orig_path = dropbox_path
 
-        fake_dropbox_path = _abspath('.')
-        dropbox_path = fake_dropbox_path  # set global var
-        assert get_dropbox_path() == fake_dropbox_path  # get_dropbox_path() returns dropbox_path
-
+        # set up a path and a file
+        if real_dropbox_path == False:
+            fake_dropbox_path = _abspath('.')
+            dropbox_path = fake_dropbox_path  # set global var
+            assert get_dropbox_path() == fake_dropbox_path
         test_path = os.path.join(dropbox_path, 'test.txt')
         with open(test_path, 'wb') as fd:
             fd.write('test db file contents')
         assert isfile(test_path)
 
-        # raise if try to decrypt in Dropbox folder
+        # raise FileStatusError if try to decrypt in Dropbox folder
         pub, priv, pphr = self._known_values()[:3]
         sf = SecFile(test_path)
         sf.encrypt(pub)
-        assert sf.is_in_dropbox  # fake dropbox
+        assert sf.is_in_dropbox  # whether real or fake
         with pytest.raises(FileStatusError):
             sf.decrypt(priv, pphr)
 
+        # partial test of get_dropbox_path()
         dropbox_path = None
-        if sys.platform != 'win32':
+        if real_dropbox_path and sys.platform != 'win32':
             host_db = os.path.expanduser('~/.dropbox/host.db')
-            # moves your actual dropbox locator; auto-rebuilt by DB if lost
+            # temporarily moves your actual dropbox locator file
+            # safe enough: seems to get auto-rebuilt by Dropbox if the file is lost
             if exists(host_db):
                 try:
                     os.rename(host_db, host_db + '.orig')
@@ -3210,6 +3192,7 @@ class Tests(object):
                     os.rename(host_db + '.orig', host_db)
                 assert dropbox_path == False
 
+        os.unlink(test_path)
         dropbox_path = orig_path
 
 
