@@ -178,7 +178,7 @@ class PFSCodecRegistry(object):
     access and use all decryption methods, while preventing encryption with that
     same codec.
 
-    The check are designed to protect against archival ambiguity and accidental
+    The checks are designed to protect against archival ambiguity and accidental
     errors, and not against adversarial manipulation of the registry.
     """
 
@@ -187,7 +187,7 @@ class PFSCodecRegistry(object):
     # need a newEncMethod param. c) will need a way to give arguments to the
     # new_enc() and new_dec() methods, should be possible with `*args **kwargs`.
 
-    def __init__(self, defaults={}):
+    def __init__(self, defaults={}, test_keys=None):
         """The class is designed around the default functions, and is intended to be
         easily extensible. To register a new function, the
         idea is to be able to do::
@@ -211,19 +211,58 @@ class PFSCodecRegistry(object):
         """
         self.name = 'PFSCodecRegistry'
         self._functions = {}
-        self.register(defaults)
+        self.register(defaults, test_keys)
 
     def keys(self):
         return list(self._functions.keys())
 
-    def register(self, new_functions):
+    def register(self, new_functions, test_keys=None):
         """Validate and add a codec to the registry.
 
-        Typically one adds and encrypt and decrypt pair. Decrypt-only is accepted
-        to support "read only" (decrypt) use of a codec.
+        Typically one adds and encrypt and decrypt pair. Decrypt-only
+        supports "read only" (decrypt) use of a codec.
 
         See the class descript for ``enc_keys`` and ``dec_keys``.
+
+        If ``test_keys`` is given as a tuple of (enc_kwargs, dec_kwargs), test
+        encrypt-decrypt and fail registration if can't recover known text.
         """
+        if test_keys:
+            enc_kwargs, dec_kwargs = test_keys
+            test_co = PFSCodecRegistry({})
+            test_co._functions = new_functions  # splice in, bypass .register
+            test_dir = mkdtemp()
+            test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
+            test_datum = printable_pwd(64)
+            with open(test_file, 'wb') as fd:
+                fd.write(test_datum)
+            try:
+                sf = SecFile(test_file, codec=test_co)
+                sf.encrypt(keep=True, **enc_kwargs)
+                sf.decrypt(**dec_kwargs)
+            except EncryptError:
+                fatal('Codec registration:  Encrypt test failed',
+                      CodecRegistryError)
+            except DecryptError:
+                fatal('Codec registration:  Decrypt test failed',
+                      CodecRegistryError)
+            finally:
+                try:
+                    os.unlink(test_file)
+                except:
+                    pass
+                try:
+                    if sf.file:
+                        recovered = open(sf.file, 'rb').read()
+                    os.unlink(sf.file)
+                except:
+                    pass
+            try:
+                assert recovered == test_datum
+            except:
+                fatal('Codec registration:  enc-dec self-test failed',
+                      CodecRegistryError)
+
         for key, fxn in list(new_functions.items()):
             try:
                 key = str(key)  # not unicode
@@ -349,7 +388,7 @@ class _SecFileBase(object):
     def file(self):
         """The current file path/name (string, not a file object).
         """
-        return self._file
+        return self._file  # can be None
 
     def _require_file(self, status=None):
         """Return the filename, raise error if missing, no file, or too large.
@@ -454,7 +493,6 @@ class _SecFileBase(object):
         except IOError as e:
             if e.errno == os.errno.EACCES:
                 writeable = False
-            raise
         finally:
             try:
                 os.unlink(test_name)
@@ -547,8 +585,10 @@ class _SecFileBase(object):
     @property
     def is_encrypted(self):
         # TO-DO: detect format regardless of file name
-        #return type(self) == SecFileArchive  # fails, its a SecFile
-        return self.file and self.file.endswith(ENC_EXT)
+        encrypted = (self.file and
+                     self.file.endswith(ENC_EXT) and
+                     tarfile.is_tarfile(self.file))
+        return encrypted
 
     @property
     def is_not_encrypted(self):
@@ -1363,8 +1403,6 @@ class SecFileArchive(_SecFileBase):
     def pack(self, files, keep=True):
         """Make a tgz file from a list of paths, set permissions.
 
-        Directories ok currently (might change and only allow a file).
-
         Eventually might take an arg to decide whether to use tar or zip.
         Just a tarfile wrapper with extension, permissions, unlink options.
         unlink is whether to unlink the original files after making an archive, not
@@ -1381,9 +1419,11 @@ class SecFileArchive(_SecFileBase):
         return self.name
 
     def _make_tar(self, files, keep):
+        """Require files not directories; store as name file (not path/file)
+        """
         tar_fd = tarfile.open(self.name, "w:gz")
         for fullp, fname in [(f, os.path.split(f)[1]) for f in files]:
-            tar_fd.add(fullp, fname, recursive=False)  # True get whole directory
+            tar_fd.add(fullp, fname, recursive=False)  # True = whole directory
             if not keep:
                 os.unlink(fullp)
         tar_fd.close()
@@ -2152,12 +2192,12 @@ class Tests(object):
         os.chdir(self.start_dir)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _known_values(self):
+    def _known_values(self, folder=''):
         """Return tmp files with known keys, data, signature for testing.
         This is a WEAK key, 1024 bits, for testing ONLY.
         """
         bits = '1024'
-        pub = 'pubKnown'
+        pub = os.path.join(folder, 'pubKnown')
         pubkey = """-----BEGIN PUBLIC KEY-----
             MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC9wLTHLDHvr+g8WAZT77al/dNm
             uFqFFNcgKGs1JDyN8gkqD6TR+ARa1Q4hJSaW8RUdif6eufrGR3DEhJMlXKh10QXQ
@@ -2169,7 +2209,7 @@ class Tests(object):
             with open(pub, 'w+b') as fd:
                 fd.write(pubkey)
 
-        priv = 'privKnown'
+        priv = os.path.join(folder, 'privKnown')
         privkey = """-----BEGIN RSA PRIVATE KEY-----
             Proc-Type: 4,ENCRYPTED
             DEK-Info: DES-EDE3-CBC,CAE91148C704A765
@@ -2193,7 +2233,7 @@ class Tests(object):
             with open(priv, 'w+b') as fd:
                 fd.write(privkey)
 
-        pphr = 'pphrKnown'
+        pphr = os.path.join(folder, 'pphrKnown')
         p = "337876469593251699797157678785713755296571899138117259"
         if not isfile(pphr):
             with open(pphr, 'w+b') as fd:
@@ -2448,6 +2488,7 @@ class Tests(object):
         codec.register(rot13)
         assert '_encrypt_rot13' in list(codec.keys())
         assert '_decrypt_rot13' in list(codec.keys())
+
         clearText = 'clearText.txt'
         secret = 'la la la, sssssh!'
         with open(clearText, 'wb') as fd:
@@ -3370,9 +3411,16 @@ openssl_path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
 
+# Register the default codec; test_keys trigger enc-dec self-test
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
-codec_registry = PFSCodecRegistry(default_codec)
+tmp = mkdtemp()
+u, v, p = Tests()._known_values(tmp)[:3]
+codec_registry = PFSCodecRegistry(default_codec,
+                                  test_keys = ({'pub': u},     # enc_kwargs
+                                      {'priv': v, 'pphr': p})  # dec_kwargs
+                                  )
+shutil.rmtree(tmp, ignore_errors=False)
 
 if __name__ == '__main__':
     result = main()
