@@ -1375,18 +1375,18 @@ class SecFileArchive(_SecFileBase):
         if isinstance_basestring23(files):
             files = [files]
         self.name = _uniq_file(self.name)
-        tar_fd = tarfile.open(self.name, "w:gz")
-        for p in [os.path.split(f)[1] for f in files]:
-            tar_fd.add(p, recursive=True)  # True by default, get whole directory
-            if not keep:
-                try:
-                    shutil.rmtree(p)  # might be a directory
-                except OSError:
-                    os.unlink(p)
-        tar_fd.close()
+        self._make_tar(files, keep)
 
         unset_umask()
         return self.name
+
+    def _make_tar(self, files, keep):
+        tar_fd = tarfile.open(self.name, "w:gz")
+        for fullp, fname in [(f, os.path.split(f)[1]) for f in files]:
+            tar_fd.add(fullp, fname, recursive=False)  # True get whole directory
+            if not keep:
+                os.unlink(fullp)
+        tar_fd.close()
 
     def _check(self):
         data_enc = self.name
@@ -3172,17 +3172,18 @@ class Tests(object):
         # raise FileStatusError if try to decrypt in Dropbox folder
         pub, priv, pphr = self._known_values()[:3]
         sf = SecFile(test_path)
-        sf.encrypt(pub)
+        sf.encrypt(pub, keep=True)
         assert sf.is_in_dropbox  # whether real or fake
         with pytest.raises(FileStatusError):
             sf.decrypt(priv, pphr)
+        os.unlink(test_path)
 
         # partial test of get_dropbox_path()
         dropbox_path = None
         if real_dropbox_path and sys.platform != 'win32':
             host_db = os.path.expanduser('~/.dropbox/host.db')
             # temporarily moves your actual dropbox locator file
-            # safe enough: seems to get auto-rebuilt by Dropbox if the file is lost
+            # seems safe enough: gets auto-rebuilt by Dropbox if the file is lost
             if exists(host_db):
                 try:
                     os.rename(host_db, host_db + '.orig')
@@ -3192,7 +3193,6 @@ class Tests(object):
                     os.rename(host_db + '.orig', host_db)
                 assert dropbox_path == False
 
-        os.unlink(test_path)
         dropbox_path = orig_path
 
 
