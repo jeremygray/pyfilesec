@@ -2675,11 +2675,11 @@ class Tests(object):
 
     def test_encrypt_decrypt(self):
         # test with null-length file, and some content
-        for secretText in ['', 'secret snippet %d' % int(get_time())]:
+        for secretText in ['', 'secret snippet %s' % printable_pwd(128)]:
             datafile = 'cleartext no unicode.txt'
             with open(datafile, 'wb') as fd:
                 fd.write(secretText)
-            assert getsize(datafile) in [0, 25]
+            assert getsize(datafile) in [0, 47]
 
             testBits = 2048  # fine to test with 1024 and 4096
             pubTmp1 = 'pubkey1 no unicode.pem'
@@ -3019,8 +3019,8 @@ class Tests(object):
             fd.write(b'\0')
         assert isfile(tw_path)  # need a file or can't test
         if not user_can_link:
-            code, links, __ = destroy(tw_path)
-            assert links == -1
+            result = SecFile(tw_path).destroy().result
+            assert result['orig_links'] == -1
             pytest.skip()  # need admin priv for fsutil
         numlinks = 2
         for i in range(numlinks):
@@ -3218,6 +3218,7 @@ class Tests(object):
         with pytest.raises(FileStatusError):
             sf.decrypt(priv, pphr)
         os.unlink(test_path)
+        os.unlink(sf.file)
 
         # partial test of get_dropbox_path()
         dropbox_path = None
