@@ -3274,6 +3274,9 @@ def main():
                 kw.update({'size': args.size})
             elif args.size is not None:
                 raise ValueError('bad argument for -z/--size to pad')
+        elif args.unpad:
+            sf_fxn = sf.pad
+            kw.update({'size': 0})
         elif args.sign:
             sf_fxn = sf.sign
             kw.update({'priv': args.priv})
@@ -3321,6 +3324,7 @@ def _parse_args():
     group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r][-o])')
     group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -s)')
     group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
+    group.add_argument('--unpad', action='store_true', help='remove padding (if any)')
     group.add_argument('--destroy', action='store_true', help='secure delete')
     group.add_argument('--hardlinks', action='store_true',help='return number of hardlinks to a file', default=False)
     group.add_argument('--tracked', action='store_true',help='return True if file is tracked using git, svn, or hg', default=False)
