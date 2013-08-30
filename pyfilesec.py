@@ -94,7 +94,7 @@ if True:
     DEFAULT_PAD_SIZE = 16384  # default resulting file size
 
     # used if user suppresses the date; will sort before a numerical date:
-    DATE_UNKNOWN = '(date-time unknown)'
+    DATE_UNKNOWN = '(date-time suppressed)'
     NO_META_DATA = {'meta-data %s' % DATE_UNKNOWN: {'meta-data': False}}
 
     whitespace_re = re.compile('\s')
@@ -184,8 +184,7 @@ class PFSCodecRegistry(object):
 
     # However, its not this simple yet: a) will need to update file extensions AES_EXT
     # and so on for files generated (currently are constants). b) `rotate()` will
-    # need a newEncMethod param. c) will need a way to give arguments to the
-    # new_enc() and new_dec() methods, should be possible with `*args **kwargs`.
+    # need a newEncMethod param.
 
     def __init__(self, defaults={}, test_keys=None):
         """The class is designed around the default functions, and is intended to be
@@ -217,15 +216,15 @@ class PFSCodecRegistry(object):
         return list(self._functions.keys())
 
     def register(self, new_functions, test_keys=None):
-        """Validate and add a codec to the registry.
+        """Validate and add a new codec functions to the registry.
 
-        Typically one adds and encrypt and decrypt pair. Decrypt-only
-        supports "read only" (decrypt) use of a codec.
+        Typically one adds and encrypt and decrypt pair. Its possible to register
+        only a decrypt function, to support "read only" (decrypt) use of a codec.
 
-        See the class descript for ``enc_keys`` and ``dec_keys``.
-
-        If ``test_keys`` is given as a tuple of (enc_kwargs, dec_kwargs), test
-        encrypt-decrypt and fail registration if can't recover known text.
+        If ``test_keys`` is provided, an
+        encrypt-decrypt self-test validation must passbefore registration can proceed.
+        ``test_keys``  should be a tuple of (enc_kwargs, dec_kwargs) that will be
+        passed to the respective functions being registered.
         """
         if test_keys:
             enc_kwargs, dec_kwargs = test_keys
@@ -308,7 +307,7 @@ class PFSCodecRegistry(object):
                 logging.warning(msg)
 
     def get_function(self, fxn_name):
-        """Return a validated function from {method_name: fxn} dict.
+        """Return a validated function based on its registry key (``fxn_name``).
         """
         if self.is_registered(fxn_name):
             return self._functions[fxn_name]
@@ -374,12 +373,12 @@ class _SecFileBase(object):
         if not isinstance_basestring23(infile):
             fatal('set_file: infile expected as a string', AttributeError)
         f = os.path.split(infile)[1]
-        if f and f[0] in ['.', '/']:
-            fatal('set_file: infile name starts with bad character (./)',
+        if f and f[0] in ['.', os.sep]:
+            fatal('set_file: infile name starts with bad character',
                   SecFileArchiveFormatError)
         self._file = _abspath(infile)
         if exists(self._file):
-            self.permissions = 0o600  # changes permissions on disk
+            self.permissions = PERMISSIONS  # changes permissions on disk
         else:
             raise OSError('no such file %s' % self._file)
         return self  # probably not needed / useful
@@ -389,6 +388,32 @@ class _SecFileBase(object):
         """The current file path/name (string, not a file object).
         """
         return self._file  # can be None
+
+    @property
+    def basename(self):
+        if not self.file:
+            return None
+        return os.path.basename(self.file)
+
+    def read(self, lines=0):
+        """Return lines from self.file as a string; 0 means lines.
+        """
+        if not self.file:
+            return '(no file)'
+        if self.is_encrypted:
+            return '(encrypted)'
+
+        if lines == 0:  # all
+            contents = open(self.file, 'rb').read()
+        else:
+            contents = ''.join(open(self.file, 'rb').readlines()[:lines])
+        return contents
+
+    @property
+    def snippet(self):
+        """Return up to 60 characters of the first line
+        """
+        return self.read(1).strip()[:60].strip()
 
     def _require_file(self, status=None):
         """Return the filename, raise error if missing, no file, or too large.
@@ -910,19 +935,6 @@ class SecFile(_SecFileBase):
             fatal(name + ": requested encMethod '%s' not registered" % enc_method)
         if not type(meta) in [bool, dict]:
             fatal(name + ': meta must be True, False, or dict', AttributeError)
-
-        # Handle file size constraints:
-        size = getsize(self.file)
-        if size > MAX_FILE_SIZE:
-            fatal(name + ": file too large (max size %d bytes)" % MAX_FILE_SIZE)
-
-        # Refuse to proceed without a pub key of sufficient bits:
-        #bits = get_key_length(pub)
-        #logging.info(name + ': pubkey length %d' % bits)
-        #if bits < 1024:
-        #    fatal("public key < 1024 bits; too short!", PublicKeyTooShortError)
-        #if bits < 2048:
-        #    logging.error(name + ': public key < 2048 bits, no real security')
         if not keep in [True, False]:
             fatal(name + ": bad value for 'keep' parameter")
 
@@ -951,8 +963,9 @@ class SecFile(_SecFileBase):
             json.dump(meta, fd)
 
         # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc
-        files = [data_enc, pwd_rsa, metafile]
-        arch_enc = SecFileArchive(self.file, files, keep=False)
+        new_name = os.path.splitext(self.file)[0] + ENC_EXT
+        arch_files = [data_enc, pwd_rsa, metafile]
+        arch_enc = SecFileArchive(new_name, arch_files, keep=False)
 
         if not keep:
             # secure-delete unencrypted original, unless encrypt failed:
@@ -974,46 +987,43 @@ class SecFile(_SecFileBase):
 
         unset_umask()
         self.set_file(arch_enc.name)  # likely off in some situations
-        self.result.update({'archive': self.file, 'meta': meta})
+        self.result.update({'status': 'good', 'cipher_text': self.file, 'meta': meta})
         return self
 
     def _make_metadata(self, datafile, data_enc, pub, enc_method, date=True, hmac=None):
         """Return info about an encryption context, as a {date-now: {info}} dict.
 
-        If `date` is True, date-now is numerical date of the form
-        year-month-day-localtime,
-        If `date` is False, date-now is '(date-time suppressed)'. The date values
+        If `date` is True, date-now is the local time in numerical form.
+        If `date` is False, date info is suppressed. The date values
         are also keys to the meta-data dict, and their format is chosen so that
         they will sort to be in chronological order, even if the original
-        encryption date was suppressed (it comes first). Only do `date=False` for
-        the first initial encryption, not for rotation.
+        encryption date was suppressed (it comes first).
         """
 
-        md = {'clear-text-file': abspath(datafile),
-            'sha256 of encrypted file': '%s' % sha256_(data_enc)}
+        md = {'clear_text': abspath(datafile),
+            'hash of cipher_text': '%s' % sha256_(data_enc)}
         if hmac:
             hmac_val = hmac_sha256(hmac, data_enc)
-            md.update({'hmac-sha256 of encrypted file': hmac_val})
+            md.update({'hmac (enc-then-mac)': hmac_val})
         md.update({'sha256 of public key': sha256_(pub),
             'encryption method': lib_name + '.' + enc_method,
-            'sha256 of lib %s' % lib_name: sha256_(lib_path),
-            'rsa padding': RSA_PADDING,
-            'max_file_size_limit': MAX_FILE_SIZE})
+            'hash of %s' % lib_name: sha256_(lib_path),
+            'rsa padding': RSA_PADDING})
         if date:
-            now = time.strftime("%Y_%m_%d_%H%M", time.localtime())
+            time_now = time.strftime("%Y_%m_%d_%H:%M", time.localtime())
             m = int(get_time() / 60)
             s = (get_time() - m * 60)
-            now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
+            time_now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
                 # only want ms precision for testing, which can easily
                 # generate two files within ms of each other
         else:
-            now = DATE_UNKNOWN
-        md.update({'encrypted year-month-day-localtime-Hm.s.ms': now,
-            'openssl version': openssl_version,
+            time_now = DATE_UNKNOWN
+        md.update({'encrypted at localtime Y_M_D_H:m.s.ms': time_now,
+            'openssl': openssl_version,
             'platform': sys.platform,
-            'python version': '%d.%d.%d' % sys.version_info[:3]})
+            'python': '%d.%d.%d' % sys.version_info[:3]})
 
-        return {'meta-data %s' % now: md}
+        return {'meta-data %s' % time_now: md}
 
     def decrypt(self, priv=None, pphr=None, keep_meta=False, keep_enc=False,
                 dec_method=None):
@@ -1139,20 +1149,33 @@ class SecFile(_SecFileBase):
                hmac_key=None, pad=None, keep_meta=True):
         """Swap old encryption (priv) for new (pub), i.e., decrypt-then-re-encrypt.
 
-        Returns the path to the "same" underlying file (i.e., same contents, new
-        encryption). New meta-data are added alongside the original meta-data. If
-        `new_pad` is given, the padding will be updated to the new value prior to
+        New meta-data are added alongside the original meta-data. If
+        ``pad`` is given, the padding will be updated to the new length prior to
         re-encryption.
 
         Conceptually there are three separate steps: rotate, confirm that the
-        rotation worked, and destroy the old (insecure) file. ``rotate()` will
-        only do the first step (rotation).
+        rotation worked, and destroy the old (insecure) file. ``rotate()`` will
+        only do the first of these.
 
         ``rotate()`` will preserve meta-data across encryption sessions, if
         available, adding to it rather than saving just the last one. (keep_meta=False
         will suppress all meta_data; typically rotation events are not sensitive.)
         Handling the meta-data is the principle motivation for having a rotate
         method; otherwise sf.decrypt(old).encrypt(new) would suffice.
+
+        :Parameters:
+
+            `priv` :
+                path to the old private key that is paired with the ``pub`` key that was used
+                for the existing encryption
+            `pphr` :
+                passphrase for the private key (as a string, or filename)
+            `pub` :
+                path to the new public key to be used for the new encryption.
+            `keep_meta` :
+                if False, unlink the meta file after decrypt
+            `hmac_key` :
+                key (string) to use for an HMAC to be saved in the meta-data
         """
         set_umask()
         name = 'rotate'
@@ -1291,7 +1314,7 @@ class SecFile(_SecFileBase):
         do appear to destroy the data (the inode), whereas Mac (srm) does not.
 
         If ``destroy()`` succeeds, the SecFile object is ``reset()``. The .result
-        attribute contains the details. If ``destroy()`` fails, ``.result` is not reset.
+        attribute contains the details. If ``destroy()`` fails, ``.result`` is not reset.
         """
 
         name = 'destroy'
@@ -1366,11 +1389,11 @@ class SecFile(_SecFileBase):
 
 
 class SecFileArchive(_SecFileBase):
-    """Class for working with an archive file (= *.enc).
+    """Class for working with an cipher_text archive file (= *.enc).
 
     Provide a name to create an empty archive, or infer a name from paths.
 
-    Currently an archive is a .tar.gz file.
+    Currently an cipher_text archive (file.enc) is a .tar.gz file.
     """
     def __init__(self, name='', files=None, keep=True):
         """
@@ -1378,12 +1401,9 @@ class SecFileArchive(_SecFileBase):
         # init must not create any temp files if paths=None
         if files and isinstance_basestring23(files):
             files = tuple(files)
-        if name and isfile(name) and name.endswith(ENC_EXT):
-            # given a name, and it is a valid archive file
+        if name:
+            # given a name, regardless of its file status
             self.name = name
-        elif name:
-            # got a name, but its not (yet) a valid archive file
-            self.name = name + ENC_EXT
         elif files:
             # no name, infer a name from paths, prefer .meta file as a base
             for p in files:
@@ -1396,6 +1416,8 @@ class SecFileArchive(_SecFileBase):
                 self.name = path + ENC_EXT
         else:
             self.name = _uniq_file('secFileArchive' + ENC_EXT)
+        if not name.endswith(ENC_EXT):
+            self.name = os.path.splitext(self.name)[0] + ENC_EXT
         logging.debug('SecFileArchive.__init__ %s' % self.name)
         if files:
             self.pack(files, keep=keep)
@@ -1405,28 +1427,28 @@ class SecFileArchive(_SecFileBase):
 
         Eventually might take an arg to decide whether to use tar or zip.
         Just a tarfile wrapper with extension, permissions, unlink options.
-        unlink is whether to unlink the original files after making an archive, not
+        unlink is whether to unlink the original files after making a cipher_text archive, not
         a secure-delete option.
         """
 
-        set_umask()
         if isinstance_basestring23(files):
             files = [files]
         self.name = _uniq_file(self.name)
         self._make_tar(files, keep)
 
-        unset_umask()
         return self.name
 
     def _make_tar(self, files, keep):
         """Require files not directories; store as name file (not path/file)
         """
+        set_umask()
         tar_fd = tarfile.open(self.name, "w:gz")
         for fullp, fname in [(f, os.path.split(f)[1]) for f in files]:
             tar_fd.add(fullp, fname, recursive=False)  # True = whole directory
             if not keep:
                 os.unlink(fullp)
         tar_fd.close()
+        unset_umask()
 
     def _check(self):
         data_enc = self.name
@@ -1449,7 +1471,7 @@ class SecFileArchive(_SecFileBase):
         return True
 
     def unpack(self):
-        """Extract files from archive into a tmp dir, return paths to files.
+        """Extract files from cipher_text archive into a tmp dir, return paths to files.
 
         :Parameters:
             ``keep`` :
@@ -1479,7 +1501,7 @@ class SecFileArchive(_SecFileBase):
             elif fname.endswith(META_EXT):
                 self.meta = os.path.join(tmp_dir, fname)
             else:
-                fatal(name + ': unexpected file in archive', SecFileArchiveFormatError)
+                fatal(name + ': unexpected file in cipher_text archive', SecFileArchiveFormatError)
 
         unset_umask()
 
@@ -2310,7 +2332,7 @@ class Tests(object):
         dec_method = _get_dec_method(md, 'unknown')
         assert dec_method == '_decrypt_rsa_aes256cbc'
 
-        # test malformed archive:
+        # test malformed cipher_text archive:
         archname = _uniq_file(os.path.splitext(datafile)[0] + ENC_EXT)
         bad_arch = make_archive(datafile, archname)  # datafile extension bad
         with pytest.raises(SecFileArchiveFormatError):
@@ -2919,12 +2941,12 @@ class Tests(object):
         cmdLineCmd = [sys.executable, pathToSelf, datafile, '--encrypt',
                       '--pub', pub1, '--keep', '--openssl=' + OPENSSL]
         oute = sys_call(cmdLineCmd)
-        assert 'archive' in oute
+        assert 'cipher_text' in oute
         enc = eval(oute)
-        assert isfile(enc['archive'])
+        assert isfile(enc['cipher_text'])
 
         # Decrypt:
-        cmdLineCmd = [sys.executable, pathToSelf, enc['archive'], '--decrypt', '--keep',
+        cmdLineCmd = [sys.executable, pathToSelf, enc['cipher_text'], '--decrypt', '--keep',
                       '--priv', priv1, '--pphr', pphr1, '--openssl=' + OPENSSL]
         outd = sys_call(cmdLineCmd)
         assert 'clear_text' in outd
@@ -2934,9 +2956,9 @@ class Tests(object):
         assert recoveredText == secretText  # need both enc and dec to work
 
         # Rotate:
-        assert isfile(enc['archive']) and enc['archive'].endswith(ENC_EXT)  # need --keep in d
-        cmdLineRotate = [sys.executable, pathToSelf, enc['archive'], '--rotate',
-                      '--pub', pub1, '-z', str(getsize(enc['archive']) * 2),
+        assert isfile(enc['cipher_text']) and enc['cipher_text'].endswith(ENC_EXT)  # need --keep in d
+        cmdLineRotate = [sys.executable, pathToSelf, enc['cipher_text'], '--rotate',
+                      '--pub', pub1, '-z', str(getsize(enc['cipher_text']) * 2),
                       '--priv', priv1, '--pphr', pphr1]
         outr = sys_call(cmdLineRotate)  # dict as a string
         assert 'rotate' in outr and 'good' in outr
@@ -3292,8 +3314,8 @@ def main():
                 sf.pad(args.size)
             kw.update({'pub': args.pub})
             args.keep and kw.update({'keep': args.keep})
-            meta = not args.nometa
-            meta and kw.update({'meta': meta})
+            args.nometa and kw.update({'meta': False})
+            args.nodate and kw.update({'date': False})
             args.hmac and kw.update({'hmac_key': args.hmac})
         elif args.decrypt:
             sf_fxn = sf.decrypt
@@ -3384,8 +3406,8 @@ def _parse_args():
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
     parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
-    parser.add_argument('-N', '--nodate', action='store_true', help='do not include date in the meta-data (clear-text)')
-    parser.add_argument('-M', '--nometa', action='store_true', help='suppress saving meta-data with encrypted file', default=False)
+    parser.add_argument('-N', '--nodate', action='store_true', help='suppress date (meta-data are clear-text)', default=False)
+    parser.add_argument('-M', '--nometa', action='store_true', help='suppress all meta-data', default=False)
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
     parser.add_argument('-g', '--gc', action='store_true', help='debug: use gc.DEBUG_LEAK (garbage collection)', default=False)
 

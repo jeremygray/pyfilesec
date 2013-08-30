@@ -9,7 +9,7 @@ import pyfilesec as pfs
 import os
 from os.path import abspath, getsize, split
 
-print "\nExample 1: pyFileSec pad, encrypt, decrypt, unpad\n"
+print "\nExample 1: pyfilesec.SecFile methods: pad, encrypt, decrypt, unpad\n"
 # for the demo, we need a data file, e.g., containing sensitive info:
 origfile = abspath('datafile.txt')  # filename
 with open(origfile, 'wb') as fd:
@@ -17,29 +17,34 @@ with open(origfile, 'wb') as fd:
 
 # Add padding to change the original file's size (to obscure /encrypted/ size):
 print 'original file name: "%s"' % split(origfile)[1]
-print 'original file contents: "%s"' % open(origfile, 'rb').read()
-print 'original file %5i bytes' % getsize(origfile)
-pfs.pad(origfile)
-print 'pad()     -->%6i' % getsize(origfile), split(origfile)[1]
+print 'original file contents: \n  "%s"' % open(origfile, 'rb').read()
+print 'original file:\n  sf.file\n'
+print 'obj.method       bytes  filename'
+print 'sf.size      == %6i ' % getsize(origfile), split(origfile)[1]
+
+sf = pfs.SecFile(origfile)
+sf.pad()
+print '  .pad()     -->%6i ' % getsize(origfile), split(origfile)[1]
 
 # To encrypt, need an RSA public key, in .pem format:
-pub  = 'pub_RSA_demo_only.pem'
-ciphertext = pfs.encrypt(origfile, pub)  # returns filename
-print 'encrypt() -->%6i' % getsize(ciphertext), split(ciphertext)[1], '(contents are protected; original securely removed)'
+sf.encrypt('pub_RSA_demo_only.pem')
+
+# sf.file now points to the encrypted file
+print '  .encrypt() -->%6i ' % getsize(sf.file), split(sf.file)[1], '(contents are cipher_text; original securely removed)'
 
 # To decrypt, need the matching RSA private key, and its passphrase if any.
 # Decryption (and priv key storage) could be done on another computer.
-priv = 'priv_RSA_demo_only.pem'
-pphr = 'pphr_demo_only'
-plaintext = pfs.decrypt(ciphertext, priv, pphr)  # returns filename
-print 'decrypt() -->%6i' % getsize(plaintext), split(plaintext)[1], '(contents are plaintext; same file name as original)'
+# decrypt sf.file, using private key and passphrase:
+sf.decrypt('priv_RSA_demo_only.pem', 'pphr_demo_only')
+
+# sf.file now points back to the original file
+print '  .decrypt() -->%6i ' % getsize(sf.file), split(sf.file)[1], '(contents are clear_text; same file name as original)'
 
 # The new decrypted (plain-text) file is still padded, unpad it:
-pfs.pad(plaintext, 0)  # this is always safe to do
-print 'unpad()   -->%6i %s' % (getsize(plaintext), split(plaintext)[1])
+sf.pad(0)  # size 0 means remove padding, if any
+print '  .unpad()   -->%6i  %s' % (getsize(sf.file), split(sf.file)[1])
 
-print 'recovered file contents: "%s"\n' % open(plaintext, 'rb').read()
+print 'recovered file contents (first line): \n  "%s"\n' % sf.read()
 
 # done with demo, clean-up files:
-for f in [ciphertext, plaintext, origfile+'.meta']:
-    os.unlink(f)
+os.unlink(sf.file)

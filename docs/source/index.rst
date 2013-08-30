@@ -231,95 +231,81 @@ Details about command-line syntax can be obtained using the usual ``--help`` opt
 
     % python pyfilesec.py --help
 
-Note: Any references to 'clear text' or 'plain text' simply means an unencrypted
-file. It could be a binary file, or even an already-encrypted file. There is no
-requirement that it be text.
+.. note:: Any references to 'clear text' or 'plain text' simply mean an unencrypted file. It could be a binary file. There is no requirement that it be text.
 
 class SecFile()
 ================
 
 A SecFile instance tracks a specific file, and regards it as being "the same"
-object despite differences to the underlying file on the disk file system.
+object despite differences to the underlying file on the disk file system (e.g.,
+being encrypted).
 
-Flexible usage is supported.
+**Example**
 
-**Examples**
-
-The notation required to encrypt a file is pretty minimal::
-
-    >>> SecFile('The Larch.txt').encrypt('pub.pem')
-
-The file that was originally named "The Larch.txt" (with a space in it) has been
-encrypted using the public key, and renamed with extension ``.enc``. The original
-file is securely deleted.
-
-Its often useful to retain a reference to the SecFile object. For example::
-
-    >>> sf = SecFile('The Larch.txt').encrypt('pub.pem')
-    >>> sf.file
-    '/Users/.../data/The Larch.enc'
-
-Providing a public key at init will set the key to use in subsequent calls to ``encrypt()``.
-These statements do the same thing as above::
-
-    >>> sf = SecFile('The Larch.txt', pub='pub.pem')
-    >>> sf.encrypt()
-    >>> sf.file
-    '/Users/.../data/The Larch.enc'
-
-Its fine to encrypt well after init, and the public key need not be specified until
-the call to encrypt. Here also note the change of file name and
-size (and that the new file is in same folder)::
+Here, a SecFile object has started to track a file named "The Larch.txt" (with a space in it)::
 
     >>> sf = SecFile('The Larch.txt')
     >>> sf.file
     '/Users/.../data/The Larch.txt'
-    >>> sf.size
-    16384L
-    >>> sf.is_encrypted
-    False
+
+The file has now been encrypted using the public key (stored in the file 'pub.pem')::
 
     >>> sf.encrypt('pub.pem')
     >>> sf.file
     '/Users/.../data/The Larch.enc'
-    >>> sf.size
-    18036L
+
+The SecFile instance remains the same, but the underlying file has been renamed
+with a new extension ``.enc``. The original file has securely deleted.
+
+SecFile objects have various properties that can be queried (continuing on from the above example)::
+
     >>> sf.is_encrypted
     True
+    >>> sf.snippet
+    '(encrypted)'
+    >>> sf.basename
+    'The Larch.enc'
 
-To decrypt using a private key from a file named ``priv.pem`` with a passphrase
-in a file named ``passphrase.txt``::
+Decrypt in the same way, except using a private key (taken from a file named ``priv.pem``).
+Note the transparent change of filename::
 
-    >>> sf.decrypt('priv.pem', 'passphrase.txt')
-    >>> sf.file
-    '/Users/.../data/The Larch.txt'
+    >>> sf.decrypt('priv.pem')
+    >>> sf.basename
+    'The Larch.txt'
 
-The original file name is restored (only the file name, not the path).
+The original file's basename is restored (and only the basename, not the path).
 
 .. autoclass:: pyfilesec.SecFile
     :members: encrypt, decrypt, rotate, sign, verify, destroy, pad, unpad
 
 Other available methods include:
 
-    ``set_file`` : change the file to work with, and set the ``.file`` property.
+    ``set_file()`` : change the file to work with, and set the ``.file`` property.
 
         .. note:: Calling ``set_file`` does not rename the existing file on the file system.
-        It just tells the sf object to work with a different file.
-        To change the underlying file name: ``os.rename(sf.file, new_file); sf.set_file(new_file)``.
+            It just tells the sf object to work with a different file. To change
+            the underlying file name: ``os.rename(sf.file, new_file); sf.set_file(new_file)``.
 
+    ``read(n)`` : read n lines from the file, return as a single string.
 
 SecFile objects have properties that can be accessed with the usual dot
 notation (i.e., as ``sf.property`` where ``sf`` is a SecFile object). Most cannot be set (exceptions
 noted).
 
     ``file`` : the full path to the underlying file on the file system
-        cannot be assigned, see ``set_file``.
+
+        .. note:: To change the file to work with, see ``set_file()``.
+
+    ``basename`` : same as ``os.path.basename(sf.file)``, or ``None`` if no file.
 
     ``size`` : (long int)
-        size in bytes on the disk as reported by ``os.path.getsize()``.
+        size in bytes on the disk as reported by ``os.path.getsize(sf.file)``.
+
+    ``snippet`` : (string)
+        up to 60 characters of the first line of the file; or will return '(encrypted)', or ``None`` if no file
 
     ``is_encrypted`` : (boolean)
-        i.e.: ``True`` if encrypted by ``pyFileSec.SecFile.encrypt()``; does not detect any-encryption-in-general.
+        ``True`` if encrypted by ``pyFileSec.SecFile.encrypt()``; does not detect any-encryption-in-general.
 
     ``is_in_dropbox`` : (boolean)
         ``True`` if inside the user's Dropbox folder
@@ -335,7 +321,8 @@ noted).
 
         .. note:: Can be assigned.
 
-    ``openssl`` : path to the OpenSSL executable file to use for cryptography
+    ``openssl`` : path
+        contains the path to the OpenSSL executable file to use.
 
         .. note:: Can be assigned.
 
