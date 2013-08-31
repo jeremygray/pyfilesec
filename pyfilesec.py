@@ -96,6 +96,7 @@ if True:
     # used if user suppresses the date; will sort before a numerical date:
     DATE_UNKNOWN = '(date-time suppressed)'
     NO_META_DATA = {'meta-data %s' % DATE_UNKNOWN: {'meta-data': False}}
+    METADATA_NOTE_MAX_LEN = 120
 
     whitespace_re = re.compile('\s')
     hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
@@ -107,7 +108,7 @@ if True:
     pfs_UNKNOWN = -1
 
     # decrypted file status:
-    PERMISSIONS = 0o600  # for decrypted file, no execute, no group, no other
+    PERMISSIONS = 0o600  # for all SecFiles: no execute, no group, no other
     UMASK = 0o077  # need u+x permission for diretories
     old_umask = None  # set as global in set_umask, unset_umask
 
@@ -162,26 +163,32 @@ if True:
 
 
 class PFSCodecRegistry(object):
-    """Class to explicitly manage the codec (encrypt & decrypt functions).
+    """Class to explicitly manage the encrypt and decrypt functions (= codec).
 
-    The main motivation for providing a codec-manager class is to provide a
-    controlled way to access to the functions that is capable of assuring a
-    standard format (including meta-data generation) even in the event that a
-    change in underlying cryptographic protocol is necessitated. It is meant to
-    provide an escape hatch, rather than very general flexibility.
+    A PFSCodecRegistry is used to return the actual encrypt and decrypt functions
+    to use when a SecFile object calls its ``.encrypt()`` or ``.decrypt()`` methods.
+    The functions are vetted to conform to a minimal expected format, and can
+    optionally be required to pass a encrypt-then-decrypt self-test before being
+    registered (and hence available to a SecFile to use).
 
-    It is useful to be able to document the method used for encryption with a
-    high level of confidence (for archival uses), especially if there should be
-    more than one codec available.
+    Typically, there is no need for anything other than the default PFSCodecRegistry
+    that is set-up automatically. Each instance of a ``SecFile`` keeps its
+    own copy of the registry. In part, having a registry is to help ensure
+    longer-term API stability even in the event that a change in underlying
+    cryptographic protocol is necessitated. It is also desirable to be able to
+    support a "read only" mode, i.e., to access and use all decryption methods,
+    while preventing encryption with that same codec.
 
-    It is also desirable to be able to support a "read only" mode, i.e., to
-    access and use all decryption methods, while preventing encryption with that
-    same codec.
-
-    The checks are designed to protect against archival ambiguity and accidental
+    The checks are designed to protect against archival ambiguity and operator
     errors, and not against adversarial manipulation of the registry.
-    """
 
+    To register a new function, the idea is to be able to do::
+
+        codec = PFSCodecRegistry()
+        new = {'_encrypt_xyz': _encrypt_xyz,
+               '_decrypt_xyz': _decrypt_xyz}
+        codec.register(new)
+    """
     # However, its not this simple yet: a) will need to update file extensions AES_EXT
     # and so on for files generated (currently are constants). b) `rotate()` will
     # need a newEncMethod param.
@@ -405,6 +412,11 @@ class _SecFileBase(object):
         if (os.path.splitext(self._file)[1] == '.pem' or
             'PUBLIC KEY' in open(infile, 'rb').read()):
             logging.warning('infile looks like a public key')
+
+    def set_file_time(self, new_time=None):
+        """Obscure the time-stamp on the underlying file system.
+        """
+        fatal('file time-stamp removal not supported yet', NotImplementedError)
 
     @property
     def file(self):
@@ -647,6 +659,47 @@ class _SecFileBase(object):
 
 class SecFile(_SecFileBase):
     """Class for working with a file as a more-secure object.
+
+    A SecFile instance tracks a specific file, and regards it as being "the same"
+    object despite differences to the underlying file on the disk file system (e.g.,
+    being encrypted).
+
+    **Example**
+
+    A SecFile object is created to track a file (here the file is named "The Larch.txt"
+    which happens to have a space in it). Typically the file name is given at
+    initialization, but it can be given later as well::
+
+        >>> sf = SecFile('The Larch.txt')
+        >>> sf.file
+        '/Users/.../data/The Larch.txt'
+
+    The file can be now encrypted using a public key (stored in the file 'pub.pem')::
+
+        >>> sf.encrypt('pub.pem')
+        >>> sf.file
+        '/Users/.../data/The Larch.enc'
+
+    The SecFile instance remains the same, but the underlying file has been renamed
+    with a new extension ``.enc``. The original file has securely deleted.
+
+    SecFile objects have various properties that can be queried (continuing on from the above example)::
+
+        >>> sf.is_encrypted
+        True
+        >>> sf.basename
+        'The Larch.enc'
+        >>> sf.snippet
+        '(encrypted)'
+
+    Decryption is done in a similar way, using a private key (here, as read from a file named ``priv.pem``)::
+
+        >>> sf.decrypt('priv.pem', 'pphr.txt')
+        >>> sf.basename
+        'The Larch.txt'
+
+    Note that the original file's basename is restored; the full path is not.
+
     """
     def __init__(self, infile=None, pub=None, priv=None, pphr=None,
                  codec=None, openssl=None):
@@ -845,7 +898,7 @@ class SecFile(_SecFileBase):
         return self
 
     def encrypt(self, pub=None, meta=True, date=True, keep=False,
-                enc_method='_encrypt_rsa_aes256cbc', hmac_key=None):
+                enc_method='_encrypt_rsa_aes256cbc', hmac_key=None, note=None):
         """Encrypt a file using AES-256, encrypt the password with RSA pub-key.
 
         The idea is that you can have and share a public key, which anyone can
@@ -876,8 +929,9 @@ class SecFile(_SecFileBase):
                 See ``load_metadata()`` and ``log_metadata()``.
             ``date``:
                 ``True`` : save the date in the clear-text meta-data.
-                ``False`` : suppress the date (if the date itself is sensitive)
-                File time-stamps are NOT obscured, even if ``date=False``.
+                ``False`` : suppress the date from being saved in the meta-data.
+                File time-stamps on the underlying file-system are NOT obscured,
+                even if ``date=False``.
             ``keep``:
                 ``False`` = remove original (unencrypted) file
                 ``True``  = leave original file
@@ -888,6 +942,11 @@ class SecFile(_SecFileBase):
                 post-encryption); if a key is provided, the HMAC will be generated
                 and stored with the meta-data. (This is encrypt-then-MAC.)
                 For stronger integrity assurance, use ``sign()``.
+            ``note`` :
+                allows a short, single-line string to be included in the meta-data.
+                trimmed to ensure that its < 120 characters (mainly so that the
+                text of a private key cannot become
+                accidentally embedded in the meta-data, which are not encrypted).
         """
         set_umask()
         name = 'encrypt'
@@ -905,6 +964,13 @@ class SecFile(_SecFileBase):
             fatal(name + ': meta must be True, False, or dict', AttributeError)
         if not keep in [True, False]:
             fatal(name + ": bad value for 'keep' parameter")
+        if isinstance_basestring23(note):
+            if '\n' in note:
+                fatal('a note cannot be multi-line.', EncryptError)
+            if len(note) > METADATA_NOTE_MAX_LEN:
+                logging.warning('note cannot be longer than %d chars, trimming' % METADATA_NOTE_MAX_LEN)
+                n = METADATA_NOTE_MAX_LEN // 2 - 3
+                note = note[:n] + ' ... ' + note[-n:]
 
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = self.codec.get_function(enc_method)
@@ -925,7 +991,7 @@ class SecFile(_SecFileBase):
             if meta is True:
                 meta = {}
             md = self._make_metadata(self.file, data_enc, self.pub,
-                                     enc_method, date, hmac_key)
+                                     enc_method, date, hmac_key, note)
             meta.update(md)
         with open(metafile, 'wb') as fd:
             json.dump(meta, fd)
@@ -958,11 +1024,12 @@ class SecFile(_SecFileBase):
         self.result.update({'status': 'good', 'cipher_text': self.file, 'meta': meta})
         return self
 
-    def _make_metadata(self, datafile, data_enc, pub, enc_method, date=True, hmac=None):
+    def _make_metadata(self, datafile, data_enc, pub, enc_method,
+                       date=True, hmac=None, note=None):
         """Return info about an encryption context, as a {date-now: {info}} dict.
 
-        If `date` is True, date-now is the local time in numerical form.
-        If `date` is False, date info is suppressed. The date values
+        If ``date`` is True, date-now is the local time in numerical form.
+        If ``date`` is False, date info is suppressed. The date values
         are also keys to the meta-data dict, and their format is chosen so that
         they will sort to be in chronological order, even if the original
         encryption date was suppressed (it comes first).
@@ -990,6 +1057,8 @@ class SecFile(_SecFileBase):
             'openssl': openssl_version,
             'platform': sys.platform,
             'python': '%d.%d.%d' % sys.version_info[:3]})
+        if isinstance_basestring23(note):
+            md.update({'note': note[:METADATA_NOTE_MAX_LEN]})
 
         return {'meta-data %s' % time_now: md}
 

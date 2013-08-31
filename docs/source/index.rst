@@ -106,19 +106,22 @@ front door is irrelevant if you make a habit of leaving the key under the doorma
 
 Some considerations:
 
-- A test-suite is included as part of the library. The aim is to provide very high
-  or complete coverage--it was over 90% coverage at one point but most tests need to be rewritten
-  for the ``SecFile`` class).
+- A test-suite is included as part of the library.
 - OpenSSL is not distributed as part of the library (see Installation).
 - By design, the computer used for encryption can be different from the computer used
   for decryption; it can be a different device, operating system, and version of OpenSSL.
-- You should encrypt and decrypt only on machines that are physically secure,
+  The only known incompatability that that signatures (obtained from ``sign()``)
+  can fail to ``verify()`` if the version of OpenSSL used is too different (i.e.,
+  if one is pre version 1.0 and the other is 1.0 or higher).
+- You should both encrypt and decrypt only on machines that are physically secure,
   with access limited to trusted people. Although encryption can be done anywhere,
   using a public key, if someone used a different public key to encrypt data
   intended for you, you would not be able to access "your" data.
 - Ideally, do not move your private key from the machine on which it was
   generated; certainly never ever email it. Its typically fine to share the public
   key, certainly within a small group of trusted people, such as a research lab.
+  The more widely it is distributed, the sooner it should be retired (and the
+  encryption rotated on files encrypted with that key).
 - Some good advice from GnuPG: "If your system allows for encrypted swap partitions,
   please make use of that feature."
 
@@ -154,35 +157,32 @@ Install things in the usual way for a python package::
 
     % pip install pyFileSec
 
-pyFileSec does not come with a copy of OpenSSL or a secure file-removal tool,
-which you'll need. Both are typically present on Mac and linux; if so,
-installation is complete.
-
-Mac and Linux
+Dependencies
 =================
 
-On a Mac, if you get this all is well::
+pyFileSec requires (but does not itself package) a copy of OpenSSL and a secure
+file-removal tool. Both are typically present on Mac and linux; if so,
+installation is complete.
+
+It is also possible to use a non-default (e.g., compiled) version of OpenSSL.
+You can specify the path with the ``--openssl path`` option (command-line use),
+or using ``pyfilesec.set_openssl(path)`` (python).
+
+**On a Mac**, if you get the same output all is well::
 
     % which openssl
     /usr/bin/openssl
     % which srm
     /usr/bin/srm
 
-On Linux, its typically very similar (``shred``)::
+**On Linux**, its typically very similar::
 
     % which openssl
     /usr/bin/openssl
     % which shred
     /usr/bin/shred
 
-It is also possible to use a non-default (e.g., compiled) version of OpenSSL.
-You can specify the path with the ``--openssl=path`` option (command-line use),
-or using ``set_openssl(path)`` (API use).
-
-Windows
-========
-
-On Windows, its also free but not as easy.
+**On Windows**, its also free but not as easy.
 
 1. Download and install OpenSSL from http://slproweb.com/products/Win32OpenSSL.html.
 First install the "Visual C++ 2008 Redistributables" (from the same page).
@@ -194,15 +194,15 @@ able to detect and use OpenSSL.
 http://technet.microsoft.com/en-us/sysinternals/bb897443.aspx. pyFileSec should
 be able to detect ``sdelete.exe``.
 
-You may need to run these once manually and accept the terms before being able to
-use them.
+You will likely need to run these programs once manually and accept the terms
+before being able to use them from pyFileSec.
 
 Getting started
-----------------
+================
 
 Generally, you do not need administrative privildges to work with pyFileSec once
-it is installed. The only exception is that, on Windows, you need to be an admin
-to check whether files have other hard links to them.
+it is installed. (The only exception is that, on Windows, you need to be an admin
+to check whether files have other hard links to them.)
 
 Command line usage is likely to be easier with an alias. To find out what path
 and syntax to use in an alias, start python interactively (type ``python`` at a
@@ -225,7 +225,7 @@ generate an RSA key-pair using pyFileSec; any valid .pem format key-pair will wo
 API
 ------------------------
 
-The API describes how to use a SecFile and its methods from within python.
+The API describes how to work with a SecFile object from within python.
 An understanding of the parameters will be useful for command-line / shell-script usage.
 Details about command-line syntax can be obtained using the usual ``--help`` option::
 
@@ -233,52 +233,17 @@ Details about command-line syntax can be obtained using the usual ``--help`` opt
 
 .. note:: Any references to 'clear text' or 'plain text' simply mean an unencrypted file. It could be a binary file. There is no requirement that it be text.
 
+The main class of interest is SecFile, described next. Three other classes are used
+internally, and so are also described here for completeness. There should be
+no need to understand anything except a SecFile in order to use it.
+
 class SecFile()
 ================
-
-A SecFile instance tracks a specific file, and regards it as being "the same"
-object despite differences to the underlying file on the disk file system (e.g.,
-being encrypted).
-
-**Example**
-
-Here, a SecFile object has started to track a file named "The Larch.txt" (with a space in it)::
-
-    >>> sf = SecFile('The Larch.txt')
-    >>> sf.file
-    '/Users/.../data/The Larch.txt'
-
-The file has now been encrypted using the public key (stored in the file 'pub.pem')::
-
-    >>> sf.encrypt('pub.pem')
-    >>> sf.file
-    '/Users/.../data/The Larch.enc'
-
-The SecFile instance remains the same, but the underlying file has been renamed
-with a new extension ``.enc``. The original file has securely deleted.
-
-SecFile objects have various properties that can be queried (continuing on from the above example)::
-
-    >>> sf.is_encrypted
-    True
-    >>> sf.snippet
-    '(encrypted)'
-    >>> sf.basename
-    'The Larch.enc'
-
-Decrypt in the same way, except using a private key (taken from a file named ``priv.pem``).
-Note the transparent change of filename::
-
-    >>> sf.decrypt('priv.pem')
-    >>> sf.basename
-    'The Larch.txt'
-
-The original file's basename is restored (and only the basename, not the path).
 
 .. autoclass:: pyfilesec.SecFile
     :members: encrypt, decrypt, rotate, sign, verify, destroy, pad, unpad
 
-Other available methods include:
+Other available SecFile methods include:
 
     ``set_file()`` : change the file to work with, and set the ``.file`` property.
 
@@ -332,8 +297,43 @@ noted).
     ``hardlinks`` : count of all hardlinks to the file (int)
         the count includes ``sf.file`` as one link. requires Admin priviledges on Windows.
 
-Codec Registry
-===============
+Class SecFileArchive
+=====================
+
+A SecFileArchive object manages the encrypted (``.enc``) version of the file. In particular,
+an encrypted "file" has three pieces:
+
+    - an encrypted version of the plain_text file (currently encrypted using AES-256-CBC)
+
+    - an encrypted version of the AES password (sometimes called a session key) as encrypted using an RSA public key
+
+    - a file containing meta-data about the encryption event (or a placeholder saying that meta-data were suppressed)
+
+A SecFileArchive takes care of packing and unpacking the three pieces into a
+single underlying file on the file system. Currently this is an ordinary ``.tar.gz`` file::
+
+    % echo f > file
+    % python pyfilesec.py --encrypt file --pub pub.pem
+    % ls file.enc
+    file.enc
+    % tar xzvf file.enc
+    x file.aes256
+    x file.aes256.pwdrsa
+    x file.meta
+
+The meta-data (``file.meta``) is always clear-text. This is to facillitate human
+inspection in archival uses.
+
+.. autoclass:: pyfilesec.SecFileArchive
+    :members:
+
+Class RsaKeys
+==============
+
+.. autoclass:: pyfilesec.RsaKeys
+
+Class Codec Registry
+=====================
 
 Currently there is only one option for a codec.
 
@@ -355,8 +355,7 @@ To see log messages during tests::
 
     $ python pyfilesec.py debug
 
-All tests pass on Mac and Linux. All except unicode in filename and file permissions
-pass on Windows 7. If you try the 'debug' option, note that some of the tests
+If you try the 'debug' option, note that some of the tests
 are designed to check error situations; i.e., what is being tested is that situations
 that should fail, do fail, and are recognized as failure situations. This means
 that in the verbose output you should see some things that look exactly like error
@@ -382,7 +381,7 @@ Beyond the test-suite
 ========================
 
 Files encrypted on one machine can be decrypted on a different platform. (Not
-tested yet with machines with different endian-ness, however.)
+tested yet with machines known to be of different endian-ness, however.)
 
 With one exception, the specific version of OpenSSL does not matter. The
 known exception is that there are incompatibilities between v0.9.x and v1.0.x
@@ -417,7 +416,7 @@ Large files are fine (max tested is 8G). File-size inflation is consistently 3%:
     8G:  8589934592 plain text --> 8849744181 encrypted
 
 A fair amount of disk space is used for intermediate files during encryption.
-An 8G plaintext file will *temporarily* require up tp 28G disk space (total)::
+Encrypting an 8G plaintext file will *temporarily* require up tp 28G disk space (total)::
 
       -rw-------  1 jgray     4357464064 8gig.enc         # grows to 8849744181
       -rw-------  1 jgray     8589934592 8gig.zeros
@@ -425,11 +424,12 @@ An 8G plaintext file will *temporarily* require up tp 28G disk space (total)::
       -rw-------  1 jgray            512 8gig.zeros.aes256pwd.rsa
       -rw-------  1 jgray            667 8gig.zeros.meta
 
-Currently the original file is only deleted after all the other steps have
-been carried out, the idea being to allow a more complete check that everything
-went as expected. Presumably--and with a slightly higher risk of losing data, in
+The reason for such space requirements is that, currently, the original file is
+only deleted after all the other steps have
+been carried out (and carried out successfully). The idea is to ensure as complete check that everything
+was indeed successful. Presumably--and with a slightly higher risk of losing data, in
 theory--one could delete the original file after the AES encryption and before
-archiving it. Only the encrypted (.aes256) file goes in the archive, not the original.
+archiving it. Only the encrypted (.aes256) file goes in the ``.enc``` archive, not the original.
 
 The larger .aes256 files get removed, leaving::
 
