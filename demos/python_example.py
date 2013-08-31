@@ -9,16 +9,16 @@ import pyfilesec as pfs
 import os
 from os.path import abspath, getsize, split
 
-print "\nExample 1: pyfilesec.SecFile methods: pad, encrypt, decrypt, unpad\n"
+print "\nPython example: pyfilesec.SecFile methods: pad, encrypt, decrypt, unpad\n"
 # for the demo, we need a data file, e.g., containing sensitive info:
 origfile = abspath('datafile.txt')  # filename
 with open(origfile, 'wb') as fd:
     fd.write('sensitive stuff (e.g., HIPAA-covered info)')
 
 # Add padding to change the original file's size (to obscure /encrypted/ size):
-print 'original file name: "%s"' % split(origfile)[1]
-print 'original file contents: \n  "%s"' % open(origfile, 'rb').read()
-print 'original file:\n  sf.file\n'
+print 'original file name:     "%s"' % split(origfile)[1]
+print 'original file contents: "%s"' % open(origfile, 'rb').read()
+print 'original file:          sf.file\n'
 print 'obj.method       bytes  filename'
 print 'sf.size      == %6i ' % getsize(origfile), split(origfile)[1]
 

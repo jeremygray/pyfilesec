@@ -3,14 +3,16 @@ Demos for pyFileSec
 The examples in this directory are intended to be run from the command line
 from within this directory (demos/):
 
-Example 1 illustrates how to use pyFileSec functions from with a python script.
+Python:
+The file python_example.py illustrates how to use pyFileSec functions from with a python script.
 To run the example, just type:
 
-    % python example_1.py
+    % python python_example.py
 
-Example 2 illustrates how to use pyFileSec functions from the command line.
+Command-line:
+The file sh_example.sh illustrates how to use pyFileSec functions from the command line.
 
-    % sh example_2.sh
+    % sh sh_ example.sh
 
 The same syntax is used to call pyFileSec from within another program that can make
 shell calls. For example, E-Prime can using the function Shell().

@@ -321,9 +321,8 @@ class PFSCodecRegistry(object):
 
 
 class _SecFileBase(object):
-    def __init__(self):
-        pass
-    # move misc properties and helper functions here
+    def __init__(self, pub=None, priv=None, pphr=None):
+        self._rsakeys = RsaKeys(pub=pub, priv=priv, pphr=pphr)
 
     def _get_openssl(self):
         if not self._openssl:
@@ -337,6 +336,27 @@ class _SecFileBase(object):
         self._openssl_version = None  # force update if/when needed
 
     openssl = property(_get_openssl, _set_openssl, None, 'path to openssl')
+
+    @property
+    def pub(self):
+        if hasattr(self._rsakeys, 'pub'):
+            return self._rsakeys.pub
+        else:
+            return None
+
+    @property
+    def priv(self):
+        if hasattr(self._rsakeys, 'priv'):
+            return self._rsakeys.priv
+        else:
+            return None
+
+    @property
+    def pphr(self):
+        if hasattr(self._rsakeys, 'pphr'):
+            return self._rsakeys.pphr
+        else:
+            return None
 
     @property
     def openssl_version(self):
@@ -364,6 +384,7 @@ class _SecFileBase(object):
         """Set the filename, and change the file's permissions on disk.
 
         File permissions are set to conservative value on disk (Mac, Linux).
+        Warn if infile looks like a public key (easy to get positional arg wrong)
         """
         # self.file is always a path, not a file object
         if infile is None:
@@ -381,7 +402,9 @@ class _SecFileBase(object):
             self.permissions = PERMISSIONS  # changes permissions on disk
         else:
             raise OSError('no such file %s' % self._file)
-        return self  # probably not needed / useful
+        if (os.path.splitext(self._file)[1] == '.pem' or
+            'PUBLIC KEY' in open(infile, 'rb').read()):
+            logging.warning('infile looks like a public key')
 
     @property
     def file(self):
@@ -444,62 +467,7 @@ class _SecFileBase(object):
         priv: string or file --> file if priv is encrypted, otherwise string
         pphr: string or file --> string
         """
-        def _get_pub(pub=None):
-            """Get pub from self or from param, set as needed
-            """
-            # TO DO: screen for small RSA modulus
-            if isinstance_basestring23(pub):
-                if exists(pub) and 'PUBLIC KEY' in open(pub, 'rb').read():
-                    self.pub = _abspath(pub)
-                else:
-                    fatal('bad public key %s' % pub, PublicKeyError)
-                try:
-                    key_len = get_key_length(self.pub)
-                except ValueError:
-                    fatal('bad public key %s' % pub, PublicKeyError)
-                if key_len < RSA_MODULUS_MIN:
-                    fatal('short public key %s' % pub, PublicKeyTooShortError)
-                if key_len < RSA_MODULUS_WARN:
-                    logging.warning('short public key %s' % pub)
-            if not hasattr(self, 'pub'):
-                self.pub = None
-            return self.pub
-
-        def _get_priv(priv=None):
-            """Get pub from self or from param, set as needed
-            """
-            # TO DO: screen for small RSA modulus, ENCRYPTED
-            if isinstance_basestring23(priv):
-                if exists(priv) and 'PRIVATE KEY' in open(priv, 'rb').read():
-                    # got a file
-                    self.priv = _abspath(priv)
-                elif 'PRIVATE KEY' in priv:
-                    # got actual key
-                    self.priv = priv
-                else:
-                    logging.error('bad private key %s' % priv)
-            if not hasattr(self, 'priv'):
-                self.priv = None
-            return self.priv
-
-        def _get_pphr(pphr=None):
-            """Get pphr from self, param, set as needed
-
-            Load from file if give a file
-            """
-            # TO DO: screen for weak passphrase
-            if isinstance_basestring23(pphr):
-                if exists(pphr):
-                    self.pphr = open(pphr, 'rb').read()
-                else:
-                    self.pphr = pphr
-            if not hasattr(self, 'pphr'):
-                self.pphr = None
-            return self.pphr
-
-        _get_pub(pub)  # get, or set-then-get
-        _get_priv(priv)  # if its encrypted, require a plausible pphr, if not del(self.pphr)
-        _get_pphr(pphr)
+        self._rsakeys._require_keys(pub=pub, priv=priv, pphr=pphr)
 
     @property
     def is_in_writeable_dir(self):
@@ -716,8 +684,8 @@ class SecFile(_SecFileBase):
         # strategy: methods build up .results, so make another SecFile instance if a method
         # needs to call other methods that would overwrite current .results in progress
 
+        _SecFileBase.__init__(self, pub=pub, priv=priv, pphr=pphr)
         self.set_file(infile)
-        self._require_keys(pub=pub, priv=priv, pphr=pphr)
         if not codec:
             codec = codec_registry  # default codec
         self.codec = copy.deepcopy(codec)
@@ -1559,6 +1527,89 @@ class SecFileArchive(_SecFileBase):
         if log:
             logging.info(md_fmt)
         return md_fmt
+
+
+class RsaKeys(object):
+    def __init__(self, pub=None, priv=None, pphr=None):
+        self._require_keys(pub=pub, priv=priv, pphr=pphr)
+
+    def _require_keys(self, pub=None, priv=None, pphr=None):
+        """Accept new value, use existing if no new, or fail.
+
+        priv: string or file --> file if priv is encrypted, otherwise string
+        pphr: string or file --> string
+        """
+        self._get_pub(pub)  # get, or set-then-get
+        priv_requires_pphr = self._get_priv(priv)
+        if pphr or priv_requires_pphr:
+            self._get_pphr(pphr)
+            if not self.pphr and priv_requires_pphr:
+                fatal('encrypted private key requires a passphrase',
+                    PrivateKeyError)
+            if not self.pphr:
+                fatal('passphrase could not be set',
+                    PrivateKeyError)
+
+    def _get_pub(self, pub=None):
+        """Get pub from self or from param, set as needed
+        """
+        # TO DO: screen for small RSA modulus
+        if isinstance_basestring23(pub):
+            if exists(pub) and 'PUBLIC KEY' in open(pub, 'rb').read():
+                self.pub = _abspath(pub)
+            else:
+                fatal('bad public key %s' % pub, PublicKeyError)
+            try:
+                key_len = get_key_length(self.pub)
+            except ValueError:
+                fatal('bad public key %s' % pub, PublicKeyError)
+            if key_len < RSA_MODULUS_MIN:
+                fatal('short public key %s' % pub, PublicKeyTooShortError)
+            if key_len < RSA_MODULUS_WARN:
+                logging.warning('short public key %s' % pub)
+        if not hasattr(self, 'pub'):
+            self.pub = None
+        return self.pub
+
+    def _get_priv(self, priv=None):
+        """Get priv from self or from param, set as needed.
+
+        Return bool to indicate whether priv in encrypted (= require pphr)
+        """
+        # TO DO: screen for small RSA modulus, ENCRYPTED
+        require_pphr = False
+        if isinstance_basestring23(priv):
+            if exists(priv):  # is_file
+                contents = open(priv, 'rb').read()
+                if 'PRIVATE KEY' in contents:
+                    self.priv = _abspath(priv)
+                else:
+                    fatal('bad private key', PrivateKeyError)
+                if 'ENCRYPTED' in contents:
+                    require_pphr = True
+            else:
+                fatal('bad private key (no file %s)' % priv, PrivateKeyError)
+        if not hasattr(self, 'priv'):
+            self.priv = None
+            return False
+        return require_pphr
+
+    def _get_pphr(self, pphr=None):
+        """Get pphr from self, param, set as needed
+
+        Load from file if give a file
+        """
+        # don't screen for weak passphrase here, its too late
+        if isinstance_basestring23(pphr):
+            if exists(pphr):
+                self.pphr = open(pphr, 'rb').read()
+            else:
+                self.pphr = pphr
+        if not hasattr(self, 'pphr'):
+            self.pphr = None
+
+        # don't warn about pphr length or trailing white-space -- leaks info
+        return self.pphr
 
 
 class GenRSA(object):
