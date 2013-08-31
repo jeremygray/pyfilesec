@@ -2271,7 +2271,9 @@ class Tests(object):
         """
         bits = '1024'
         pub = os.path.join(folder, 'pubKnown')
-        pubkey = """-----BEGIN PUBLIC KEY-----
+        pubkey = """   !!! DEMO public key do not use!!!
+
+            -----BEGIN PUBLIC KEY-----
             MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC9wLTHLDHvr+g8WAZT77al/dNm
             uFqFFNcgKGs1JDyN8gkqD6TR+ARa1Q4hJSaW8RUdif6eufrGR3DEhJMlXKh10QXQ
             z8EUJHtxIrAgRQSUZz73ebeY4kV21jFyEEAyZnpAsXZMssC5BBtctaUYL9GR3bFN
@@ -2283,7 +2285,9 @@ class Tests(object):
                 fd.write(pubkey)
 
         priv = os.path.join(folder, 'privKnown')
-        privkey = """-----BEGIN RSA PRIVATE KEY-----
+        privkey = """   !!! DEMO private key do not use!!!
+
+            -----BEGIN RSA PRIVATE KEY-----
             Proc-Type: 4,ENCRYPTED
             DEK-Info: DES-EDE3-CBC,CAE91148C704A765
 
@@ -2432,15 +2436,23 @@ class Tests(object):
         args = _parse_args()
         out = main()
 
-        sys.argv = [__file__, '--sign',
-                    '--priv', priv, '--pphr', pphr, out['file']]
+        sys.argv = [__file__, '--sign', tmp,
+                    '--priv', priv, '--pphr', pphr, '--out', 'sig.cmdline']
         args = _parse_args()
-        out = main()
+        outs = main()
+        contents = open(outs['out'], 'rb').read()
+        if openssl_version < 'OpenSSL 1.0':
+            assert "mrKDFi4NrfJVTm+RLB+dHuSHNImUl9" in outs['sig']
+            assert "mrKDFi4NrfJVTm+RLB+dHuSHNImUl9" in contents
+        else:
+            assert 'An3qI8bOdvuKt9g7a+fdFoEdh79Iip' in outs['sig']
+            assert "An3qI8bOdvuKt9g7a+fdFoEdh79Iip" in contents
 
-        sys.argv = [__file__, '--verify',
-                    '--sig', priv, '--pub', pub, out['file']]
+        sys.argv = [__file__, '--verify', tmp,
+                    '--sig', outs['out'], '--pub', pub]
         args = _parse_args()
-        main()
+        outv = main()
+        assert outv['verified'] == True
 
         sys.argv = [__file__, '--pad', tmp + tmp, '--verbose']
         args = _parse_args()
