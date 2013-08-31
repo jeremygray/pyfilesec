@@ -329,7 +329,7 @@ class PFSCodecRegistry(object):
 
 class _SecFileBase(object):
     def __init__(self, pub=None, priv=None, pphr=None):
-        self._rsakeys = RsaKeys(pub=pub, priv=priv, pphr=pphr)
+        self.rsakeys = RsaKeys(pub=pub, priv=priv, pphr=pphr)
 
     def _get_openssl(self):
         if not self._openssl:
@@ -343,27 +343,6 @@ class _SecFileBase(object):
         self._openssl_version = None  # force update if/when needed
 
     openssl = property(_get_openssl, _set_openssl, None, 'path to openssl')
-
-    @property
-    def pub(self):
-        if hasattr(self._rsakeys, 'pub'):
-            return self._rsakeys.pub
-        else:
-            return None
-
-    @property
-    def priv(self):
-        if hasattr(self._rsakeys, 'priv'):
-            return self._rsakeys.priv
-        else:
-            return None
-
-    @property
-    def pphr(self):
-        if hasattr(self._rsakeys, 'pphr'):
-            return self._rsakeys.pphr
-        else:
-            return None
 
     @property
     def openssl_version(self):
@@ -384,8 +363,9 @@ class _SecFileBase(object):
         """
         name = 'reset'
         logging.info(name + ' start')
-        self.__init__(infile=None, pub=self.pub, priv=self.priv, pphr=self.pphr,
-                 codec=self.codec, openssl=self._openssl)
+        self.__init__(infile=None, pub=self.rsakeys.pub,
+                      priv=self.rsakeys.priv, pphr=self.rsakeys.pphr,
+                      codec=self.codec, openssl=self._openssl)
 
     def set_file(self, infile):
         """Set the filename, and change the file's permissions on disk.
@@ -472,14 +452,6 @@ class _SecFileBase(object):
         if self.is_not_encrypted:
             fatal('Require an encrypted file.', FileNotEncryptedError)
         return SecFileArchive(self.file)
-
-    def _require_keys(self, pub=None, priv=None, pphr=None):
-        """Accept new value, use existing if no new, or fail.
-
-        priv: string or file --> file if priv is encrypted, otherwise string
-        pphr: string or file --> string
-        """
-        self._rsakeys._require_keys(pub=pub, priv=priv, pphr=pphr)
 
     @property
     def is_in_writeable_dir(self):
@@ -734,9 +706,10 @@ class SecFile(_SecFileBase):
             properties cannot rely on self.result values, can be stale
             require_X methods must only use the default / already set file
         '''
-        # strategy: methods build up .results, so make another SecFile instance if a method
+        # methods build up .results, so make another SecFile instance if a method
         # needs to call other methods that would overwrite current .results in progress
 
+        # sets self.rsakeys:
         _SecFileBase.__init__(self, pub=pub, priv=priv, pphr=pphr)
         self.set_file(infile)
         if not codec:
@@ -952,8 +925,8 @@ class SecFile(_SecFileBase):
         name = 'encrypt'
         self.result = {'method': name, 'status': 'started'}
         self._require_file(self.is_in_writeable_dir)  # enc file ok, allow but warn about it
-        self._require_keys(pub=pub)
-        if not self.pub:
+        self.rsakeys.require(pub=pub)
+        if not self.rsakeys.pub:
             fatal(name + ': requires a public key', EncryptError)
         logging.debug(name + 'start')
         if self.is_encrypted:
@@ -975,7 +948,7 @@ class SecFile(_SecFileBase):
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = self.codec.get_function(enc_method)
         set_umask()  # redundant
-        data_enc, pwd_rsa = ENCRYPT_FXN(self.file, self.pub, openssl=self.openssl)
+        data_enc, pwd_rsa = ENCRYPT_FXN(self.file, self.rsakeys.pub, openssl=self.openssl)
         ok_encrypt = (isfile(data_enc) and
                         os.stat(data_enc)[stat.ST_SIZE] and
                         isfile(pwd_rsa) and
@@ -990,7 +963,7 @@ class SecFile(_SecFileBase):
         else:  # True or exising md
             if meta is True:
                 meta = {}
-            md = self._make_metadata(self.file, data_enc, self.pub,
+            md = self._make_metadata(self.file, data_enc, self.rsakeys.pub,
                                      enc_method, date, hmac_key, note)
             meta.update(md)
         with open(metafile, 'wb') as fd:
@@ -1096,14 +1069,14 @@ class SecFile(_SecFileBase):
         name = 'decrypt'
         self.result = {'method': name, 'status': 'started'}
         arch_enc = self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
-        self._require_keys(priv=priv, pphr=pphr)
+        self.rsakeys.require(priv=priv, pphr=pphr)
         #if not self.priv:
         #    fatal(name + ': requires a private key', DecryptError)
         logging.debug(name + 'start')
 
         if self.is_tracked:
             logging.warning(name + ': file exposed to version control')
-        if not self.pphr and 'ENCRYPTED' in open(self.priv, 'r').read().upper():
+        if not self.rsakeys.pphr and 'ENCRYPTED' in open(self.rsakeys.priv, 'r').read().upper():
             fatal(name + ': missing passphrase (for encrypted privkey)', DecryptError)
 
         # Extract files from the archive (dataFileEnc) into the same directory,
@@ -1127,7 +1100,7 @@ class SecFile(_SecFileBase):
             # Decrypt (into same new tmp dir):
             DECRYPT_FXN = self.codec.get_function(dec_method)
             set_umask()  # redundant
-            data_dec = DECRYPT_FXN(data_aes, pwd_file, self.priv, self.pphr,
+            data_dec = DECRYPT_FXN(data_aes, pwd_file, self.rsakeys.priv, self.rsakeys.pphr,
                                    openssl=self.openssl)
 
             # Rename decrypted and meta files (mv to dest_dir):
@@ -1219,14 +1192,17 @@ class SecFile(_SecFileBase):
         logging.debug(name + ': start (decrypt old, [pad new,] encrypt new)')
         self.result = {'method': name, 'status': 'started'}
         self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
-        self._require_keys(pub=pub, priv=priv, pphr=pphr)
+        dec_rsakeys = RsaKeys(priv=(priv or self.rsakeys.priv),
+                              pphr=(pphr or self.rsakeys.pphr))
+        enc_rsakeys = RsaKeys(pub=(pub or self.rsakeys.pub))
+        #self.rsakeys.require(pub=pub, priv=priv, pphr=pphr)
 
         file_dec = None
         try:
             # encrypt() will destroy intermediate clear_text, but might be
             # an exception before getting to encrypt(), so wrap in try except
 
-            sf = SecFile(self.file).decrypt(self.priv, pphr=self.pphr, keep_meta=True)
+            sf = SecFile(self.file).decrypt(dec_rsakeys.priv, pphr=dec_rsakeys.pphr, keep_meta=True)
             self.meta = sf.meta
             self.set_file(sf.file)  # decrypted file name
 
@@ -1246,7 +1222,7 @@ class SecFile(_SecFileBase):
                 SecFile(self.file).pad(pad)
             file_dec = self.file  # track file names so can destroy if needed
 
-            sf = SecFile(self.file).encrypt(pub=self.pub, date=True, meta=md,
+            sf = SecFile(self.file).encrypt(pub=enc_rsakeys.pub, date=True, meta=md,
                      keep=False, hmac_key=hmac_key)
             self.set_file(sf.file)  # newly encrypted file name
         except FileNotEncryptedError:
@@ -1277,15 +1253,15 @@ class SecFile(_SecFileBase):
         name = 'sign'
         logging.debug(name + ': start')
         self._require_file()
-        self._require_keys(priv=priv, pphr=pphr)
+        self.rsakeys.require(priv=priv, pphr=pphr)
         sig_out = self.file + '.sig'
 
-        cmd_SIGN = [self.openssl, 'dgst', '-sign', self.priv, '-out', sig_out]
-        if self.pphr:
+        cmd_SIGN = [self.openssl, 'dgst', '-sign', self.rsakeys.priv, '-out', sig_out]
+        if self.rsakeys.pphr:
             cmd_SIGN += ['-passin', 'stdin']
         cmd_SIGN += ['-keyform', 'PEM', self.file]
-        if self.pphr:
-            sys_call(cmd_SIGN, stdin=self.pphr)
+        if self.rsakeys.pphr:
+            sys_call(cmd_SIGN, stdin=self.rsakeys.pphr)
         else:
             sys_call(cmd_SIGN)
         sig = open(sig_out, 'rb').read()
@@ -1307,11 +1283,11 @@ class SecFile(_SecFileBase):
         name = 'verify'
         logging.debug(name + ': start')
         self._require_file()
-        self._require_keys(pub=pub)
+        self.rsakeys.require(pub=pub)
         if not sig:
             fatal('signature required for verify(), as string or filename')
 
-        cmd_VERIFY = [self.openssl, 'dgst', '-verify', self.pub, '-keyform', 'PEM']
+        cmd_VERIFY = [self.openssl, 'dgst', '-verify', self.rsakeys.pub, '-keyform', 'PEM']
         if isfile(sig):
             sig = open(sig, 'rb').read()
         with NamedTemporaryFile(delete=False) as sig_file:
@@ -1605,18 +1581,18 @@ class RsaKeys(object):
     RsaKeys object.
     """
     def __init__(self, pub=None, priv=None, pphr=None):
-        self._require_keys(pub=pub, priv=priv, pphr=pphr)
+        self.require(pub=pub, priv=priv, pphr=pphr)
 
-    def _require_keys(self, pub=None, priv=None, pphr=None):
+    def require(self, pub=None, priv=None, pphr=None):
         """Accept new value, use existing if no new, or fail.
 
         priv: string or file --> file if priv is encrypted, otherwise string
         pphr: string or file --> string
         """
-        self._get_pub(pub)  # get, or set-then-get
-        priv_requires_pphr = self._get_priv(priv)
+        self._set_pub(pub)
+        priv_requires_pphr = self._set_priv(priv)
         if pphr or priv_requires_pphr:
-            self._get_pphr(pphr)
+            self._set_pphr(pphr)
             if not self.pphr and priv_requires_pphr:
                 fatal('encrypted private key requires a passphrase',
                     PrivateKeyError)
@@ -1624,13 +1600,13 @@ class RsaKeys(object):
                 fatal('passphrase could not be set',
                     PrivateKeyError)
 
-    def _get_pub(self, pub=None):
+    def _set_pub(self, pub=None):
         """Get pub from self or from param, set as needed
         """
         # TO DO: screen for small RSA modulus
         if isinstance_basestring23(pub):
             if exists(pub) and 'PUBLIC KEY' in open(pub, 'rb').read():
-                self.pub = _abspath(pub)
+                self._pub = _abspath(pub)
             else:
                 fatal('bad public key %s' % pub, PublicKeyError)
             try:
@@ -1642,10 +1618,10 @@ class RsaKeys(object):
             if key_len < RSA_MODULUS_WARN:
                 logging.warning('short public key %s' % pub)
         if not hasattr(self, 'pub'):
-            self.pub = None
-        return self.pub
+            self._pub = None
+        #return self.pub
 
-    def _get_priv(self, priv=None):
+    def _set_priv(self, priv=None):
         """Get priv from self or from param, set as needed.
 
         Return bool to indicate whether priv in encrypted (= require pphr)
@@ -1656,7 +1632,7 @@ class RsaKeys(object):
             if exists(priv):  # is_file
                 contents = open(priv, 'rb').read()
                 if 'PRIVATE KEY' in contents:
-                    self.priv = _abspath(priv)
+                    self._priv = _abspath(priv)
                 else:
                     fatal('bad private key', PrivateKeyError)
                 if 'ENCRYPTED' in contents:
@@ -1664,11 +1640,11 @@ class RsaKeys(object):
             else:
                 fatal('bad private key (no file %s)' % priv, PrivateKeyError)
         if not hasattr(self, 'priv'):
-            self.priv = None
+            self._priv = None
             return False
         return require_pphr
 
-    def _get_pphr(self, pphr=None):
+    def _set_pphr(self, pphr=None):
         """Get pphr from self, param, set as needed
 
         Load from file if give a file
@@ -1676,14 +1652,35 @@ class RsaKeys(object):
         # don't screen for weak passphrase here, its too late
         if isinstance_basestring23(pphr):
             if exists(pphr):
-                self.pphr = open(pphr, 'rb').read()
+                self._pphr = open(pphr, 'rb').read()
             else:
-                self.pphr = pphr
+                self._pphr = pphr
         if not hasattr(self, 'pphr'):
-            self.pphr = None
+            self._pphr = None
 
         # don't warn about pphr length or trailing white-space -- leaks info
-        return self.pphr
+        return self._pphr
+
+    @property
+    def pub(self):
+        if hasattr(self, '_pub'):
+            return self._pub
+        else:
+            return None
+
+    @property
+    def priv(self):
+        if hasattr(self, '_priv'):
+            return self._priv
+        else:
+            return None
+
+    @property
+    def pphr(self):
+        if hasattr(self, '_pphr'):
+            return self._pphr
+        else:
+            return None
 
 
 class GenRSA(object):
