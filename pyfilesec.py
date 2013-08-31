@@ -1530,6 +1530,11 @@ class SecFileArchive(_SecFileBase):
 
 
 class RsaKeys(object):
+    """Class to accept, screen, and hold RSA key paths or values.
+
+    The .pub .priv and .pphr properties exposed in _SecFileBase live in an
+    RsaKeys object.
+    """
     def __init__(self, pub=None, priv=None, pphr=None):
         self._require_keys(pub=pub, priv=priv, pphr=pphr)
 
@@ -2028,7 +2033,13 @@ def hmac_sha256(key, filename):
 
 def isinstance_basestring23(duck):
     # placeholder for 2to3
-    return isinstance(duck, basestring)
+    #return isinstance(duck, basestring)
+    try:
+        duck + 'quack'
+        duck.endswith('quack')
+        return True
+    except:
+        return False
 
 
 def printable_pwd(nbits=256):
