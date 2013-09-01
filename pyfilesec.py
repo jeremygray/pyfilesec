@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.2.01alpha (branch = SecFile class)'
+__version__ = '0.2.10 alpha'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
