@@ -266,6 +266,13 @@ noted).
     ``size`` : (long int)
         size in bytes on the disk as reported by ``os.path.getsize(sf.file)``.
 
+    ``metadata`` : (dict)
+        returns {} for an unencrypted file.
+
+    ``metadataf`` : (string)
+        human-friendly version of ``metadata``, e.g., for log files.
+        returns '{}' for an unencrypted file.
+
     ``snippet`` : (string)
         up to 60 characters of the first line of the file; or will return '(encrypted)', or ``None`` if no file
 
