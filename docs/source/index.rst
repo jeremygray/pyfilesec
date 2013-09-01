@@ -338,6 +338,28 @@ Class RsaKeys
 ==============
 
 .. autoclass:: pyfilesec.RsaKeys
+    :members: update, require, sniff, test
+
+An ``RsaKeys`` object has three properties:
+
+    ``pub`` : path
+        contains the path to the public key file.
+
+    ``priv`` : path
+        contains the path to the private key file.
+
+    ``pphr`` : (string)
+        contains the actual passphrase. If the passphrase was given initially as a path, it is read from the file.
+
+
+Class GenRSA
+================
+
+This class can be used to generate key-pairs that are appropriate for use
+with pyFileSec.
+
+.. autoclass:: pyfilesec.GenRSA
+    :members: dialog
 
 Class Codec Registry
 =====================
@@ -367,20 +389,6 @@ are designed to check error situations; i.e., what is being tested is that situa
 that should fail, do fail, and are recognized as failure situations. This means
 that in the verbose output you should see some things that look exactly like error
 messages (e.g., "RSA operation error") because these are logged.
-
-The test-suite
-==============
-
-The integrated test-suite is designed to be used with `py.test`. All tests in
-`class Tests` are discovered and run::
-
-    % py.test pyfilesec.py
-
-The same tests can also be run via debug mode,
-saving logging messages and intermediate files. Invoke from the command line
-with option `debug`, and redirect the output to a log file::
-
-    % python pyfilesec.py debug > log
 
 For details of the specific tests, consult the code directly.
 

@@ -52,8 +52,8 @@ from   tempfile import mkdtemp, NamedTemporaryFile
 import time
 
 # other imports:
-# GenRSA.dialog will import _pyperclip if use --clipboard commandline option
-# from win32com.shell import shell for getting is user an admin (to link)
+# GenRSA.dialog will import _pyperclip   # if use --clipboard commandline
+# from win32com.shell import shell  # for getting is user an admin (to link)
 
 # CONSTANTS and INITS ------------ (with code folding) --------------------
 if True:
@@ -76,6 +76,11 @@ if True:
     # RSA key
     RSA_MODULUS_MIN = 1024  # threshold to avoid PublicKeyTooShortError
     RSA_MODULUS_WARN = 2048  # threshold to avoid warning about short key
+
+    # RsaKeys require()
+    NEED_PUB = 1
+    NEED_PRIV = 2
+    NEED_PPHR = 4
 
     # warn that operations will take a while, check disk space, ...
     LRG_FILE_WARN = 2 ** 24  # 17M; used in tests but not implemented elsewhere
@@ -138,6 +143,9 @@ if True:
 
     class PrivateKeyError(PyFileSecError):
         '''Error to indicate that loading a private key failed.'''
+
+    class PassphraseError(PyFileSecError):
+        '''Error to indicate a passphrase error condition.'''
 
     class SecFileArchiveFormatError(PyFileSecError):
         '''Error to indicate bad format or file name inside archive file.'''
@@ -938,7 +946,7 @@ class SecFile(_SecFileBase):
         name = 'encrypt'
         self.result = {'method': name, 'status': 'started'}
         self._require_file(self.is_in_writeable_dir)  # enc file ok, allow but warn about it
-        self.rsakeys.require(pub=pub)
+        self.rsakeys.update(pub=pub, req=NEED_PUB)
         if not self.rsakeys.pub:
             fatal(name + ': requires a public key', EncryptError)
         logging.debug(name + 'start')
@@ -1083,7 +1091,7 @@ class SecFile(_SecFileBase):
         self.result = {'method': name, 'status': 'started'}
         logging.debug(name + 'start')
         arch_enc = self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
-        self.rsakeys.require(priv=priv, pphr=pphr)
+        self.rsakeys.update(priv=priv, pphr=pphr, req=NEED_PRIV)
         if not self.rsakeys.priv:
             fatal(name + ': requires a private key', DecryptError)
         if not self.rsakeys.pphr and 'ENCRYPTED' in open(self.rsakeys.priv, 'r').read().upper():
@@ -1198,8 +1206,9 @@ class SecFile(_SecFileBase):
         self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
         dec_rsakeys = RsaKeys(priv=(priv or self.rsakeys.priv),
                               pphr=(pphr or self.rsakeys.pphr))
+        dec_rsakeys.require(NEED_PRIV)
         enc_rsakeys = RsaKeys(pub=(pub or self.rsakeys.pub))
-        #self.rsakeys.require(pub=pub, priv=priv, pphr=pphr)
+        enc_rsakeys.require(NEED_PUB)
 
         file_dec = None
         try:
@@ -1257,7 +1266,7 @@ class SecFile(_SecFileBase):
         name = 'sign'
         logging.debug(name + ': start')
         self._require_file()
-        self.rsakeys.require(priv=priv, pphr=pphr)
+        self.rsakeys.update(priv=priv, pphr=pphr, req=NEED_PRIV)
         sig_out = self.file + '.sig'
 
         cmd_SIGN = [self.openssl, 'dgst', '-sign', self.rsakeys.priv, '-out', sig_out]
@@ -1287,7 +1296,7 @@ class SecFile(_SecFileBase):
         name = 'verify'
         logging.debug(name + ': start')
         self._require_file()
-        self.rsakeys.require(pub=pub)
+        self.rsakeys.update(pub=pub, req=NEED_PUB)
         if not sig:
             fatal('signature required for verify(), as string or filename',
                   AttributeError)
@@ -1416,9 +1425,9 @@ class SecFileArchive(_SecFileBase):
 
     - Providing files will also ``pack()`` them into the archive.
 
-    - Providing an existing archive ``arc`` will also unpack it into a tmp directory
-    and return full paths to the file names. (This can result in stray tmp files
-    if they are not removed by the user, but everything sensitive is encrypted.)
+    - Providing an existing archive ``arc`` will also unpack it into a tmp
+        directory and return full paths to the file names. (This can result in
+        stray tmp files if they are not removed by the user, but everything sensitive is encrypted.)
     """
     def __init__(self, name='', files=None, arc=None, keep=True):
         """
@@ -1577,36 +1586,115 @@ class SecFileArchive(_SecFileBase):
 
 
 class RsaKeys(object):
-    """Class to accept, screen, and hold RSA key paths or values.
-
-    The .pub .priv and .pphr properties exposed in _SecFileBase live in an
-    RsaKeys object.
+    """Class to manage and test RSA key-pairs.
     """
     def __init__(self, pub=None, priv=None, pphr=None):
-        self.require(pub=pub, priv=priv, pphr=pphr)
+        self.update(pub=pub, priv=priv, pphr=pphr)
 
     def test(self):
-        """Check key length, trailing \n space, pub-priv match, pphr-priv match
+        """Tests whether the key pair is suitable for use with pyFileSec.
+
+        Keys should be tested in matched pairs. Includes an actual test of
+        encrypt-then-decrypt using the keys with the default codec.
         """
+        self.require(req=NEED_PUB | NEED_PRIV)
+        pubk, pub_bits = self.sniff(self.pub)
+        if pubk != 'pub':
+            fatal('RsaKeys test: pub is not a public key', PublicKeyError)
+        privk, enc = self.sniff(self.priv)
+        if privk != 'priv':
+            fatal('RsaKeys test: priv is not a private key', PrivateKeyError)
+        if enc != bool(self.pphr):
+            fatal('RsaKeys test: no passphrase for encrypted private key',
+                  PassphraseError)
+
+        # compare pub against pub as extracted from priv:
+        cmdEXTpub = [OPENSSL, 'rsa', '-in', self.priv, '-pubout']
+        if self.pphr:
+            cmdEXTpub += ['-passin', 'stdin']
+        test_pub = sys_call(cmdEXTpub, stdin=self.pphr)
+        # user might have comment or extra stuff in self.pub, so use 'in'
+        if test_pub not in open(self.pub, 'rb').read():
+            fatal('public key not paired with private key', PublicKeyError)
+
+        if pub_bits < RSA_MODULUS_MIN:
+            fatal('public key too short; no real security below 1024 bits',
+                  PublicKeyTooShortError)
+        if pub_bits < RSA_MODULUS_WARN:
+            logging.warning('short RSA key')
+
+        # can the new keys be used to enc-dec in the codec?
+        test_codec = PFSCodecRegistry(default_codec,
+                        test_keys = ( # keys will trigger the auto-test
+                            {'pub': self.pub},                 # enc_kwargs
+                            {'priv': self.priv, 'pphr': self.pphr}) # dec_kwargs
+                        )
         return self
 
-    def require(self, pub=None, priv=None, pphr=None):
-        """Accept new value, use existing if no new, or fail.
+    def sniff(self, key):
+        """Inspects the file ``key``, returns information.
 
-        priv: string or file --> file if priv is encrypted, otherwise string
-        pphr: string or file --> string
+        Example return values:
+
+            ``('pub', 2048)`` = public key with length (RSA modulus) 2048 bits
+
+            ``('priv', True)`` = encrypted private key (will require a passphrase to use)
+
+            ``(None, None)`` = not a detectable key format
         """
-        self._set_pub(pub)
-        priv_requires_pphr = self._set_priv(priv)
-        if pphr or priv_requires_pphr:
-            self._set_pphr(pphr)
-            if not self.pphr and priv_requires_pphr:
-                fatal('encrypted private key requires a passphrase',
-                    PrivateKeyError)
-            if not self.pphr:  # always set at this point?
-                fatal('passphrase could not be set', PrivateKeyError)
+        if not isinstance_basestring23(key):
+            return None, None
+        if not isfile(key):
+            return '(no file)', None
 
-    def _set_pub(self, pub=None):
+        keytype = enc = None
+        with open(key, 'rb') as fd:
+            for line in iter(partial(fd.readline), b''):
+                if '-----BEGIN' in line and 'PUBLIC KEY-----' in line:
+                    keytype = 'pub'
+                    modulus = get_key_length(key)
+                    return keytype, modulus
+                if '-----BEGIN' in line and 'PRIVATE KEY-----' in line:
+                    keytype = 'priv'
+                if len(line) >= 64:
+                    enc = False
+                    return keytype, enc  # hit end of header info
+                if 'ENCRYPTED' in line and keytype == 'priv':
+                    enc = True
+                    return keytype, enc
+                if '-----END' in line and 'KEY-----' in line:
+                    return keytype, enc
+        return None, None
+
+    def require(self, req):
+        """Raise error if key requirement(s) ``req`` are not met; assert-like.
+
+        Used by SecFile methods: ``rsakeys.require(req=NEED_PUB | NEED_PRIV)``
+        reads as ``assert rsakeys.pub and rsakeys.priv`` or raise a tailored
+        error, including a missing passphrase if the private key is encrypted.
+        """
+        if req & NEED_PUB:
+            if not self.pub:
+                fatal('public key required, missing', PublicKeyError)
+        if req & NEED_PRIV:
+            if not self.priv:
+                fatal('private key required, missing', PrivateKeyError)
+        if req & NEED_PPHR:
+            if not self.pphr:
+                fatal('passphrase required, missing', PassphraseError)
+        return self
+
+    def update(self, pub=None, priv=None, pphr=None, req=0):
+        """Accept new value, use existing val if no new one, or fail.
+        """
+        self._update_pub(pub)
+        self._update_priv(priv)
+        self._update_pphr(pphr)
+        if self.priv_requires_pphr:
+            req |= NEED_PPHR
+        req and self.require(req)
+
+    def _update_pub(self, pub=None):
         """Get pub from self or from param, set as needed
         """
         if isinstance_basestring23(pub):
@@ -1624,33 +1712,26 @@ class RsaKeys(object):
                 logging.warning('short public key %s' % pub)
         elif pub is not None:
             fatal('bad public key; expected a string or None', PublicKeyError)
-        if not hasattr(self, 'pub'):  # always has one at this point?
-            self._pub = None
 
-    def _set_priv(self, priv=None):
+    def _update_priv(self, priv=None):
         """Get priv from self or from param, set as needed.
 
         Return bool to indicate whether priv in encrypted (= require pphr)
         """
-        # TO DO: screen for small RSA modulus, ENCRYPTED
-        require_pphr = False
+        self.priv_requires_pphr = False
         if isinstance_basestring23(priv):
             if exists(priv):  # is_file
-                contents = open(priv, 'rb').read()
+                contents = open(priv, 'rb').read()  # better to sniff just the first few lines...
                 if 'PRIVATE KEY' in contents:
                     self._priv = _abspath(priv)
                 else:
                     fatal('bad private key', PrivateKeyError)
                 if 'ENCRYPTED' in contents:
-                    require_pphr = True
+                    self.priv_requires_pphr = True
             else:
                 fatal('bad private key (no file %s)' % priv, PrivateKeyError)
-        if not hasattr(self, 'priv'):  # always set at this point?
-            self._priv = None
-            return False
-        return require_pphr
 
-    def _set_pphr(self, pphr=None):
+    def _update_pphr(self, pphr=None):
         """Get pphr from self, param, set as needed
 
         Load from file if give a file
@@ -1663,11 +1744,6 @@ class RsaKeys(object):
                 self._pphr = pphr
         elif pphr is not None:
             fatal('bad passphrase; expected string or None', PrivateKeyError)
-
-        # don't warn about pphr length or trailing white-space -- leaks info
-        if not hasattr(self, '_pphr'):
-            fatal('bad or missing passphrase', PrivateKeyError)
-        return self._pphr
 
     @property
     def pub(self):
@@ -1692,6 +1768,8 @@ class RsaKeys(object):
 
 
 class GenRSA(object):
+    """A class to generate RSA key-pairs
+    """
     def __init__(self):
         pass
 
@@ -1722,8 +1800,12 @@ class GenRSA(object):
     def generate(self, pub='pub.pem', priv='priv.pem', pphr=None, bits=4096):
         """Generate new RSA pub and priv keys, return paths to files.
 
-        pphr should be a string containing the actual passphrase (if desired).
+        ``pphr`` should be a string containing the actual passphrase (if desired).
         """
+        if bits < RSA_MODULUS_MIN:
+            fatal('Too short a key length requested',
+                  PublicKeyTooShortError)
+
         set_umask()
         # Generate priv key:
         cmdGEN = [OPENSSL, 'genrsa', '-out', priv]
@@ -1739,6 +1821,13 @@ class GenRSA(object):
         sys_call(cmdEXTpub, stdin=pphr)
 
         unset_umask()
+        try:
+            RsaKeys(pub=pub, priv=priv, pphr=pphr).test()
+        except:
+            msg = 'new RSA keys failed to validate; removing them'
+            logging.error(msg)
+            self._cleanup(msg, priv, pub)
+            raise
         return _abspath(pub), _abspath(priv)
 
     def _cleanup(self, msg, priv, pub, pphr=None):
@@ -1760,31 +1849,35 @@ class GenRSA(object):
     def dialog(self, interactive=True, out=None):
         """Command line dialog to generate an RSA key pair, PEM format.
 
-        Launch from the command line::
+        To launch from the command line::
 
             % python pyfilesec.py genrsa
 
-        or same thing, but save the passphrase into a file named 'pphr' [or save onto the clipboard]::
+        The following will do the same thing, but save the passphrase into a file named 'pphr' [or save onto the clipboard]::
 
             % python pyfilesec.py genrsa --out pphr [--clipboard]
 
-        or within a python interpreter shell::
+        And it can be done from a python interpreter shell::
 
             >>> import pyfilesec as pfs
             >>> pfs.genrsa()
 
         The passphrase will not be printed if it was entered manually. If it is
-        auto-generated, it will either be printed or saved to a file (if option
-        ``--out`` is used). This is the only copy of the passphrase.
+        auto-generated, it will be printed or will be saved to a file if option
+        ``--out`` is given. This is the only copy of the passphrase; the key-pair
+        is useless without it (acutally, its worse than useless--you could still
+        encrypt something that you could not decrypt).
 
         Choose from 2048, 4096, or 8192 bits; 1024 is not secure for medium-term
         storage, and 16384 bits is not needed (nor is 8192). A passphrase is
-        required, or one will be auto generated and printed to the console (this is
-        the only copy, don't lose it). Ideally, generate a strong passphrase using
+        required, or one will be auto generated. Ideally, generate a strong passphrase using
         a password manager (e.g., KeePassX), save there, paste it into the dialog.
+        (It is also possible for pyFileSec to generate a passphrase which you can
+        then paste into a password manager; see the ``--clipboard`` command-line
+        option.)
 
-        You may only ever need to do this once. You may also want to generate keys
-        for testing purposes, and then generate keys for actual use.
+        You may want to generate keys for testing purposes, and then generate
+        different keys for actual use.
         """
         # `interactive=False` is for test coverage, but could be scripted too
         # will import _pyperclip and copy pphr to clipboard
@@ -2289,7 +2382,7 @@ def sha256_(filename):
     """
     # from stackoverflow:
     dgst = hashlib.sha256()
-    with open(filename, mode='rb') as fd:
+    with open(filename, 'rb') as fd:
         for buf in iter(partial(fd.read, 2048), b''):  # null byte sentinel
             dgst.update(buf)
     return dgst.hexdigest()
@@ -2518,7 +2611,6 @@ class Tests(object):
 
         # bad file name
         sf._file = test_file + 'xyz'
-        print sf.file
         with pytest.raises(OSError):
             sf._require_file()
         sf.set_file(test_file)
@@ -2575,9 +2667,9 @@ class Tests(object):
             sf.encrypt(pub, note='a\n\n')
 
         # decrypt missing passphrase when one is required
-        with pytest.raises(DecryptError):
-            sf.decrypt()
         with pytest.raises(PrivateKeyError):
+            sf.decrypt()
+        with pytest.raises(PassphraseError):
             sf.decrypt(priv=priv)
 
         # decrypt unencrypted priv key (no passphrase)
@@ -2616,7 +2708,7 @@ class Tests(object):
         # test individual keys:
         with pytest.raises(PublicKeyError):
             RsaKeys(pub=priv)
-        with pytest.raises(PrivateKeyError):
+        with pytest.raises(PassphraseError):
             RsaKeys(pub, priv).test()
         with open('bad_pub', 'wb') as fd:
             fd.write('PUBLIC KEY')
@@ -3158,7 +3250,7 @@ class Tests(object):
             # send some bad parameters:
             with pytest.raises(ValueError):
                 SecFile(datafile).encrypt(pub2, enc_method='abc')
-            with pytest.raises(EncryptError):
+            with pytest.raises(PublicKeyError):
                 SecFile(datafile).encrypt(pub=None)
             with pytest.raises(OSError):
                 SecFile(datafile + ' oops').encrypt(pub2)
@@ -3201,11 +3293,18 @@ class Tests(object):
                 sf.decrypt(priv2, pphr1)
 
             # should refuse-to-encrypt if pub key is too short:
-            pub256, __ = GenRSA().generate('pub256.pem', 'priv256.pem', bits=256)
-            assert get_key_length(pub256) == 256  # need a short key to use in test
-            sf = SecFile(datafile).encrypt(pub1, keep=True)
             with pytest.raises(PublicKeyTooShortError):
-                sf.encrypt(pub256)
+                pub256, __ = GenRSA().generate('pub256.pem', 'priv256.pem', bits=256)
+            #assert get_key_length(pub256) == 256  # need a short key to use in test
+            global RSA_MODULUS_MIN
+            rsa_mod_orig = RSA_MODULUS_MIN
+            RSA_MODULUS_MIN = 4096
+            try:
+                sf = SecFile(datafile)
+                with pytest.raises(PublicKeyTooShortError):
+                    sf.encrypt(pub2)
+            finally:
+                RSA_MODULUS_MIN = rsa_mod_orig
 
     def test_rotate(self):
         # Set-up:
@@ -3876,16 +3975,18 @@ openssl_path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
 
-# Register the default codec; test_keys trigger enc-dec self-test
+# Register the default codec, runs auto-test
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
 tmp = mkdtemp()
-u, v, p = Tests()._known_values(tmp)[:3]
-codec_registry = PFSCodecRegistry(default_codec,
-                                  test_keys = ({'pub': u},     # enc_kwargs
-                                      {'priv': v, 'pphr': p})  # dec_kwargs
-                                  )
-shutil.rmtree(tmp, ignore_errors=False)
+try:
+    u, v, p = Tests()._known_values(tmp)[:3]
+    codec_registry = PFSCodecRegistry(default_codec,
+                                      test_keys = ({'pub': u},     # enc_kwargs
+                                          {'priv': v, 'pphr': p})  # dec_kwargs
+                                      )
+finally:
+    shutil.rmtree(tmp, ignore_errors=False)
 
 if __name__ == '__main__':
     result = main()
