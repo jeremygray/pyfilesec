@@ -164,7 +164,7 @@ if True:
         '''Error to indicate an argument problem, e.g., no file specified.'''
 
     class FileNotEncryptedError(PyFileSecError):
-        '''Error to indicate that an encrypted file is required (not provided).'''
+        '''Error to indicate that an encrypted file is required.'''
 
     class FileStatusError(PyFileSecError):
         '''Error to indicate that a require_file status check failed.'''
@@ -173,13 +173,14 @@ if True:
 class PFSCodecRegistry(object):
     """Class to explicitly manage the encrypt and decrypt functions (= codec).
 
-    A PFSCodecRegistry is used to return the actual encrypt and decrypt functions
-    to use when a SecFile object calls its ``.encrypt()`` or ``.decrypt()`` methods.
-    The functions are vetted to conform to a minimal expected format, and can
-    optionally be required to pass a encrypt-then-decrypt self-test before being
-    registered (and hence available to a SecFile to use).
+    A PFSCodecRegistry is used to return the actual encrypt and decrypt
+    functions to use when a SecFile object calls its ``.encrypt()`` or
+    ``.decrypt()`` methods. The functions are vetted to conform to a minimal
+    expected format, and can optionally be required to pass an
+    encrypt-then-decrypt self-test before being registered (and hence available
+    to a SecFile to use).
 
-    Typically, there is no need for anything other than the default PFSCodecRegistry
+    Typically, there is no need for anything other than the default registry
     that is set-up automatically. Each instance of a ``SecFile`` keeps its
     own copy of the registry. In part, having a registry is to help ensure
     longer-term API stability even in the event that a change in underlying
@@ -197,13 +198,13 @@ class PFSCodecRegistry(object):
                '_decrypt_xyz': _decrypt_xyz}
         codec.register(new)
     """
-    # However, its not this simple yet: a) will need to update file extensions AES_EXT
-    # and so on for files generated (currently are constants). b) `rotate()` will
-    # need a newEncMethod param.
+    # However, its not this simple yet: a) will need to update file extensions
+    # and so on for files generated (currently are constants).
+    # b) `rotate()` will need a newEncMethod param.
 
     def __init__(self, defaults={}, test_keys=None):
-        """The class is designed around the default functions, and is intended to be
-        easily extensible. To register a new function, the
+        """The class is designed around the default functions, and is intended
+        to be easily extensible. To register a new function, the
         idea is to be able to do::
 
             codec = PFSCodecRegistry()
@@ -214,14 +215,14 @@ class PFSCodecRegistry(object):
 
         and then `encrypt(method='_encrypt_xyz')` will work.
 
-        If ``enc_kwargs`` and ``dec_kargs`` are given (as kwarg dicts), the codec
-        will be tested on a sample file. Registration will only succeed if the
-        new decryption method can recover a snippet of text that was encrypted
-        by the new encryption function.
+        If ``enc_kwargs`` and ``dec_kargs`` are given (as kwarg dicts), the
+        codecwill be tested on a sample file. Registration will only succeed if
+        the new decryption method can recover a snippet of text that was
+        encrypted by the new encryption function.
 
-        The codec keys (e.g., '_encrypt_xyz' in the above example) should match the
-        function names (for clarity), and for this reason should be ascii-compatible
-        (because names in python 2 cannot be unicode).
+        The codec keys (e.g., '_encrypt_xyz' in the above example) should match
+        the function names (for clarity), and for this reason should be
+        ascii-compatible (because names in python 2 cannot be unicode).
         """
         self.name = 'PFSCodecRegistry'
         self._functions = {}
@@ -233,13 +234,14 @@ class PFSCodecRegistry(object):
     def register(self, new_functions, test_keys=None):
         """Validate and add a new codec functions to the registry.
 
-        Typically one adds and encrypt and decrypt pair. Its possible to register
-        only a decrypt function, to support "read only" (decrypt) use of a codec.
+        Typically one adds and encrypt and decrypt pair. Its possible to
+        register only a decrypt function, to support "read only" (decrypt) use
+        of a codec.
 
         If ``test_keys`` is provided, an
-        encrypt-decrypt self-test validation must passbefore registration can proceed.
-        ``test_keys``  should be a tuple of (enc_kwargs, dec_kwargs) that will be
-        passed to the respective functions being registered.
+        encrypt-decrypt self-test validation must passbefore registration can
+        proceed. ``test_keys``  should be a tuple of (enc_kwargs, dec_kwargs)
+        that will be passed to the respective functions being registered.
         """
         if test_keys:
             enc_kwargs, dec_kwargs = test_keys
@@ -292,7 +294,7 @@ class PFSCodecRegistry(object):
                 fatal(self.name + ': function "%s" already registered' % key)
             self._functions.update({key: fxn})
             fxn_info = '%s(): fxn hash=%d' % (key, hash(fxn))
-            # could requires functions be in external files, get a sha256 of the file, ...
+            # could requires functions be in external files, get a sha256 ...
             logging.info(self.name + ': registered %s' % fxn_info)
 
         # allow _dec without _enc, but not vice-verse:
@@ -322,7 +324,7 @@ class PFSCodecRegistry(object):
                 logging.warning(msg)
 
     def get_function(self, fxn_name):
-        """Return a validated function based on its registry key (``fxn_name``).
+        """Return a validated function based on its registry key ``fxn_name``.
         """
         if self.is_registered(fxn_name):
             return self._functions[fxn_name]
@@ -376,7 +378,7 @@ class _SecFileBase(object):
         """Set the filename, and change the file's permissions on disk.
 
         File permissions are set to conservative value on disk (Mac, Linux).
-        Warn if infile looks like a public key (easy to get positional arg wrong)
+        Warn if infile looks like a public key (easy to get pos. arg wrong)
         """
         # self.file is always a path, not a file object
         if infile is None:
@@ -447,7 +449,8 @@ class _SecFileBase(object):
             fatal('_require_file: bad status', FileStatusError)
         # use getsize because self.size calls _require_file() --> recursion
         if getsize(self._file) > MAX_FILE_SIZE:
-            fatal("file too large (max size %d bytes)" % MAX_FILE_SIZE, FileStatusError)
+            fatal("file too large (max size %d bytes)" % MAX_FILE_SIZE,
+                  FileStatusError)
         return self.file
 
     def _require_enc_file(self, status=None):
@@ -490,9 +493,10 @@ class _SecFileBase(object):
 
     @property
     def metadataf(self):
-        """Return formatted meta-data dict (human-friendly string for log, etc).
+        """Return formatted meta-data dict (human-friendly string).
         """
-        return json.dumps(self.metadata, indent=2, sort_keys=True, separators=(',', ': '))
+        return json.dumps(self.metadata, indent=2, sort_keys=True,
+                          separators=(',', ': '))
 
     @property
     def metadata(self):
@@ -528,15 +532,17 @@ class _SecFileBase(object):
         else:
             pass
             # import win32security  # looks interesting
-            # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | \
+            # info = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
             #           DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION
             # info = 1,3,7 works as admin, 15 not enough priv; SACL = 8
             # win32security.GetFileSecurity(filename, info)
             # win32security.SetFileSecurity
-        logging.info(name + ': %s %s' % (self.file, permissions_str(self.file)))
+        logging.info(name +
+                     ': %s %s' % (self.file, permissions_str(self.file)))
 
     permissions = property(_get_permissions, _set_permissions, None,
-        "mac/nix:  Returns POSIX ugo permissions\nwin32  :  not implemented, returns -1")
+        "mac/nix:  Returns POSIX ugo permissions\n"
+        "win32  :  not implemented, returns -1")
 
     @property
     def hardlinks(self):
@@ -549,7 +555,7 @@ class _SecFileBase(object):
                 links = sys_call(cmd)
                 count = len([f for f in links.splitlines() if f.strip()])
             else:
-                logging.warning('need to be an admin to use fsutil.exe (hardlink)')
+                logging.warning('be an Admin to use fsutil.exe (hardlink)')
                 count = -1
         else:
             count = os.stat(filename)[stat.ST_NLINK]
@@ -653,30 +659,32 @@ class _SecFileBase(object):
 class SecFile(_SecFileBase):
     """Class for working with a file as a more-secure object.
 
-    A SecFile instance tracks a specific file, and regards it as being "the same"
-    object despite differences to the underlying file on the disk file system (e.g.,
-    being encrypted).
+    A SecFile instance tracks a specific file, and regards it as being
+    "the same" object despite differences to the underlying file on the disk
+    file system (e.g., being encrypted).
 
     **Example**
 
-    A SecFile object is created to track a file (here the file is named "The Larch.txt"
-    which happens to have a space in it). Typically the file name is given at
-    initialization, but it can be given later as well::
+    A SecFile object is created to track a file (here the file is named
+    "The Larch.txt", which happens to have a space in it). Typically the file
+    name is given at initialization, but it can be given later as well::
 
         >>> sf = SecFile('The Larch.txt')
         >>> sf.file
         '/Users/.../data/The Larch.txt'
 
-    The file can be now encrypted using a public key (stored in the file 'pub.pem')::
+    The file can be now encrypted using a public key (stored in the file named
+    ``pub.pem``)::
 
         >>> sf.encrypt('pub.pem')
         >>> sf.file
         '/Users/.../data/The Larch.enc'
 
-    The SecFile instance remains the same, but the underlying file has been renamed
-    with a new extension ``.enc``. The original file has securely deleted.
+    The SecFile instance remains the same, but the underlying file has been
+    renamed with extension ``.enc``. The original file has securely deleted.
 
-    SecFile objects have various properties that can be queried (continuing on from the above example)::
+    SecFile objects have various properties that can be queried (continuing on
+    from the above example)::
 
         >>> sf.is_encrypted
         True
@@ -685,7 +693,8 @@ class SecFile(_SecFileBase):
         >>> sf.snippet
         '(encrypted)'
 
-    Decryption is done in a similar way, using a private key (here, as read from a file named ``priv.pem``)::
+    Decryption is done in a similar way, using a private key (here, as read
+    from a file named ``priv.pem``)::
 
         >>> sf.decrypt('priv.pem', 'pphr.txt')
         >>> sf.basename
@@ -706,7 +715,7 @@ class SecFile(_SecFileBase):
         """
         '''API guide:
             self.file can be set explicitly or implicitly by user
-                explicitly = at init, or through set_file; no other way (property).
+                explicitly = at init, or through set_file; no other way.
                 implicitly = change name due to a change of state
                     such as destroy --> None; encrypt --> .enc
                 good: sf = SecFile(filename).encrypt(pub)
@@ -723,12 +732,12 @@ class SecFile(_SecFileBase):
                 * sig_out : name of file containing sig
                 * verified : bool
                 ...
-                query .results right after a call; not guaranteed accurate beyond that
+                query .results right after a call; not guaranteed long-term
             properties cannot rely on self.result values, can be stale
             require_X methods must only use the default / already set file
         '''
-        # methods build up .results, so make another SecFile instance if a method
-        # needs to call other methods that would overwrite current .results in progress
+        # methods build up .results. if a method needs to call other methods
+        # that would overwrite current .results in progress use another SecFile
 
         # sets self.rsakeys:
         _SecFileBase.__init__(self, pub=pub, priv=priv, pphr=pphr)
@@ -746,44 +755,45 @@ class SecFile(_SecFileBase):
     def pad(self, size=DEFAULT_PAD_SIZE):
         """Append null bytes to ``filename`` until it has length ``size``.
 
-        The size is changed but `the fact that it was changed` is only obscured if
-        the padded file is encrypted. ``pad`` only changes the effective length,
-        and the padding is easy to see (unless the padding is encrypted).
+        The size is changed but `the fact that it was changed` is only obscured
+        if the padded file is encrypted. ``pad`` only changes the effective
+        length, and the padding is easy to see (unless the padding is
+        encrypted).
 
-        Files shorter than `size` will be padded out to `size` (see details below).
-        The minimum resulting file size is 128 bytes. Files that are already padded
-        will first have any padding removed, and then be padded out to the new
-        target size.
+        Files shorter than `size` will be padded out to `size` (see details
+        below). The minimum resulting file size is 128 bytes. Files that are
+        already padded will first have any padding removed, and then be padded
+        out to the new target size.
 
-        Padded files include a few bytes for padding-descriptor tags, not just null
-        bytes. Thus files that are close to ``size`` already would not have their
-        sizes obscured AND also be marked as being padded (in the last ~36 bytes),
-        raising a ``PaddingError``. To avoid this, you can check using the
-        convenience function ``_ok_to_pad()`` before calling ``pad()``.
+        Padded files include a few bytes for padding-descriptor tags, not just
+        null bytes. Thus files that are close to ``size`` already would not
+        have their sizes obscured AND also be marked as being padded (in the
+        last ~36 bytes), raising a ``PaddingError``. To avoid this, you can
+        check using the convenience function ``_ok_to_pad()`` before calling
+        ``pad()``.
 
         Internal padding format:
 
             ``file + n bytes + padding descriptors + final byte``
 
         The padding descriptors consist of ``10-digits + one byte + PFS_PAD``,
-        where ``byte`` is b'\0' (the null byte). The process does not depend on the
-        value of the byte. The 10 digits gives the length of the padding as an
-        integer, in bytes. ``n`` is selected to make the new file size equal the
-        requested ``size``.
+        where ``byte`` is b'\0' (the null byte). The process does not depend on
+        the value of the byte. The 10 digits gives the length of the padding as
+        an integer, in bytes. ``n`` is selected to make the new file size equal
+        the requested ``size``.
 
         To make unpadding easier and more robust (and enable human inspection),
-        the end bytes provide the number of padding bytes that were added, plus an
-        identifier. 10 digits is not hard-coded as 10, but as the length of
+        the end bytes provide the number of padding bytes that were added, plus
+        an identifier. 10 digits is not hard-coded as 10, but as the length of
         ``str(max_file_size)``, where the ``max_file_size`` constant is 8G by
-        default. This means that any changes to the max file size constant can thus
-        cause pad / unpad failures across versions.
+        default. This means that any changes to the max file size constant can
+        thus cause pad / unpad failures across versions.
 
         Special ``size`` values:
 
            0 : unpad = remove any existing padding, no error if not present
 
-           -1 : strict unpad = remove padding if present, raise ``PaddingError``
-           if not present
+           -1 : strict unpad = remove padding if present, error if not present
         """
         name = 'pad'
         self.result = {'method': name, 'status': 'started'}
@@ -792,10 +802,12 @@ class SecFile(_SecFileBase):
         logging.debug(name + 'start')
         size = int(size)
         if 0 < size < PAD_MIN:
-            logging.info(name + ': requested size increased to %i bytes' % PAD_MIN)
+            logging.info(name +
+                         ': requested size increased to %i bytes' % PAD_MIN)
             size = PAD_MIN
         if size > MAX_FILE_SIZE:
-            fatal(name + ': size must be <= %d (maximum file size)' % MAX_FILE_SIZE)
+            fatal(name +
+                  ': size must be <= %d (maximum file size)' % MAX_FILE_SIZE)
         # handle special size values (0, -1) => unpad
         pad_count = self._pad_len()
         if size < 1:
@@ -807,8 +819,8 @@ class SecFile(_SecFileBase):
             SecFile(self.file).pad(0)
         needed = self._ok_to_pad(size)
         if needed == 0:
-            msg = name + ': file length not obscured (length >= requested size)'
-            fatal(msg, PaddingError)
+            msg = ': file length not obscured (length >= requested size)'
+            fatal(name + msg, PaddingError)
         pad_bytes = PAD_STR + "%010d" % (needed + PAD_LEN)
 
         # append bytes to pad the file:
@@ -893,14 +905,15 @@ class SecFile(_SecFileBase):
 
     def encrypt(self, pub=None, meta=True, date=True, keep=False,
                 enc_method='_encrypt_rsa_aes256cbc', hmac_key=None, note=None):
-        """Encrypt a file using AES-256, encrypt the password with RSA pub-key.
-
-        The idea is that you can have and share a public key, which anyone can
-        use to encrypt things that only you can decrypt. Generating good keys and
-        managing them is non-trivial (see `genRsaKeys()` and documentation).
+        """Encrypt a file using a public key.
 
         By default, the original plaintext is secure-deleted after encryption
         (default ``keep=False``). This is time-consuming, but important.
+
+        The idea is that you can have and share a public key, which anyone can
+        use to encrypt things that only you can decrypt. Generating good keys
+        and managing them is non-trivial (see ``genrsa()`` and documentation).
+
 
         Files larger than 8G before encryption will raise an error.
 
@@ -910,50 +923,54 @@ class SecFile(_SecFileBase):
         :Parameters:
 
             ``pub``:
-                The public key to use, specified as the path to a ``.pem`` file.
-                The minimum recommended key length is 2048 bits; 1024 is allowed
-                but strongly discouraged as it is not medium-term secure.
+                The public key to use, specified as the path to a ``.pem``
+                file. The minimum recommended key length is 2048 bits; 1024
+                is allowed but strongly discouraged.
             ``meta``:
                 If ``True`` or a dict, include the meta-data (plaintext) in the
                 archive. If given a dict, the dict will be updated with new
                 meta-data. This allows all meta-data to be retained from the
-                initial encryption through multiple rotations of the encryption.
+                initial encryption through multiple rotations of encryption.
                 If ``False``, will indicate that the meta-data were suppressed.
 
                 See ``load_metadata()`` and ``log_metadata()``.
             ``date``:
                 ``True`` : save the date in the clear-text meta-data.
-                ``False`` : suppress the date from being saved in the meta-data.
-                File time-stamps on the underlying file-system are NOT obscured,
-                even if ``date=False``.
+                ``False`` : suppress date from being saved in the meta-data.
+
+                .. note:: File time-stamps on the underlying file-system are
+                    NOT obscured, even if ``date=False``.
+
             ``keep``:
                 ``False`` = remove original (unencrypted) file
                 ``True``  = leave original file
             ``enc_method``:
-                name of the function / method to use (currently only one option)
+                name of the function / method to use (currently only one
+                option, the default)
             ``hmac_key``:
                 optional key to use for a message authentication (HMAC-SHA256,
-                post-encryption); if a key is provided, the HMAC will be generated
-                and stored with the meta-data. (This is encrypt-then-MAC.)
-                For stronger integrity assurance, use ``sign()``.
+                post-encryption); if a key is provided, the HMAC will be
+                generated and stored with the meta-data. (This is
+                encrypt-then-MAC.) For stronger integrity assurance, use
+                ``sign()``.
             ``note`` :
-                allows a short, single-line string to be included in the meta-data.
-                trimmed to ensure that its < 120 characters (mainly so that the
-                text of a private key cannot become
-                accidentally embedded in the meta-data, which are not encrypted).
+                allows a short, single-line string to be included in the
+                meta-data. trimmed to ensure that its < 120 characters (mainly
+                so that the text of a private key cannot become embedded
+                in the meta-data, which are not encrypted).
         """
         set_umask()
         name = 'encrypt'
         self.result = {'method': name, 'status': 'started'}
-        self._require_file(self.is_in_writeable_dir)  # enc file ok, allow but warn about it
+        self._require_file(self.is_in_writeable_dir)  # enc file ok, warn
         self.rsakeys.update(pub=pub, req=NEED_PUB)
         if not self.rsakeys.pub:
             fatal(name + ': requires a public key', EncryptError)
         logging.debug(name + 'start')
         if self.is_encrypted:
-            logging.warning(name + ": file is already encrypted; encrypting again")
+            logging.warning(name + ": file is already encrypted")
         if not self.codec.is_registered(enc_method):
-            fatal(name + ": requested encMethod '%s' not registered" % enc_method)
+            fatal(name + ": requested '%s' not registered" % enc_method)
         if not type(meta) in [bool, dict]:
             fatal(name + ': meta must be True, False, or dict', AttributeError)
         if not keep in [True, False]:
@@ -962,14 +979,16 @@ class SecFile(_SecFileBase):
             if '\n' in note:
                 fatal('a note cannot be multi-line.', EncryptError)
             if len(note) > METADATA_NOTE_MAX_LEN:
-                logging.warning('note cannot be longer than %d chars, trimming' % METADATA_NOTE_MAX_LEN)
+                logging.warning('note cannot be longer than %d chars, trimming'
+                                % METADATA_NOTE_MAX_LEN)
                 n = METADATA_NOTE_MAX_LEN // 2 - 3
                 note = note[:n] + ' ... ' + note[-n:]
 
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = self.codec.get_function(enc_method)
         set_umask()  # redundant
-        data_enc, pwd_rsa = ENCRYPT_FXN(self.file, self.rsakeys.pub, openssl=self.openssl)
+        data_enc, pwd_rsa = ENCRYPT_FXN(self.file, self.rsakeys.pub,
+                                        openssl=self.openssl)
         ok_encrypt = (isfile(data_enc) and
                         os.stat(data_enc)[stat.ST_SIZE] and
                         isfile(pwd_rsa) and
@@ -1006,7 +1025,7 @@ class SecFile(_SecFileBase):
                 demolish = SecFile(self.file).destroy().result
                 if demolish['disposition'] != destroy_code[pfs_DESTROYED]:
                     fatal('destroy orig. failed within encrypt', EncryptError)
-                self.set_file(arch_enc.name)  # don't lose status during set_file
+                self.set_file(arch_enc.name)
                 logging.info(name +
                     ': post-encrypt destroyed orig. file complete')
             else:
@@ -1015,12 +1034,13 @@ class SecFile(_SecFileBase):
 
         unset_umask()
         self.set_file(arch_enc.name)  # likely off in some situations
-        self.result.update({'status': 'good', 'cipher_text': self.file, 'meta': meta})
+        self.result.update({'status': 'good', 'cipher_text': self.file,
+                            'meta': meta})
         return self
 
     def _make_metadata(self, datafile, data_enc, pub, enc_method,
                        date=True, hmac=None, note=None):
-        """Return info about an encryption context, as a {date-now: {info}} dict.
+        """Return info about an encryption context, as {date-now: {info}} dict.
 
         If ``date`` is True, date-now is the local time in numerical form.
         If ``date`` is False, date info is suppressed. The date values
@@ -1042,7 +1062,7 @@ class SecFile(_SecFileBase):
             time_now = time.strftime("%Y_%m_%d_%H:%M", time.localtime())
             m = int(get_time() / 60)
             s = (get_time() - m * 60)
-            time_now += ('.%6.3f' % s).replace(' ', '0')  # zeros for clarity & sorting
+            time_now += ('.%6.3f' % s).replace(' ', '0')  # zeros for sorting
                 # only want ms precision for testing, which can easily
                 # generate two files within ms of each other
         else:
@@ -1065,17 +1085,17 @@ class SecFile(_SecFileBase):
         `pphr` can be the passphrase itself (a string), or a file name. These
         must match the public key used for encryption.
 
-        Works on a copy of ``data.enc``, tries to decrypt it, and will clean-up only those files.
-        The original ``data.enc`` is not used (except to make a copy).
+        Works on a copy of ``data.enc``, tries to decrypt it.
+        The original ``data.enc`` is removed (unless ``keep_enc=True``).
 
-        Tries to detect whether the decrypted file would end up inside a Dropbox
-        folder; if so, refuse to proceed.
+        Tries to detect whether the decrypted file would end up inside a
+        Dropbox folder; if so, refuse to proceed.
 
         :Parameters:
 
             `priv` :
-                path to the private key that is paired with the ``pub`` key used at
-                encryption; in ``.pem`` format
+                path to the private key that is paired with the ``pub`` key
+                used at encryption; in ``.pem`` format
             `pphr` :
                 passphrase for the private key (as a string, or filename)
             `keep_meta` :
@@ -1090,12 +1110,15 @@ class SecFile(_SecFileBase):
         name = 'decrypt'
         self.result = {'method': name, 'status': 'started'}
         logging.debug(name + 'start')
-        arch_enc = self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
+        arch_enc = self._require_enc_file(self.is_not_in_dropbox &
+                                          self.is_in_writeable_dir)
         self.rsakeys.update(priv=priv, pphr=pphr, req=NEED_PRIV)
         if not self.rsakeys.priv:
             fatal(name + ': requires a private key', DecryptError)
-        if not self.rsakeys.pphr and 'ENCRYPTED' in open(self.rsakeys.priv, 'r').read().upper():
-            fatal(name + ': missing passphrase (for encrypted privkey)', DecryptError)
+        if (not self.rsakeys.pphr and
+            'ENCRYPTED' in open(self.rsakeys.priv, 'r').read().upper()):
+            fatal(name + ': missing passphrase (for encrypted privkey)',
+                  DecryptError)
 
         if self.is_tracked:
             logging.warning(name + ': file exposed to version control')
@@ -1103,26 +1126,26 @@ class SecFile(_SecFileBase):
         # Extract files from the archive (dataFileEnc) into the same directory,
         # avoid name collisions, decrypt:
         try:
-            # Unpack from archive into the dest_dir = same dir as the .enc file:
+            # Unpack from archive into dest_dir = same dir as the .enc file:
             dest_dir = os.path.split(arch_enc.name)[0]
             logging.info(name + ': decrypting into %s' % dest_dir)
 
             data_aes, pwd_file, meta_file = arch_enc.unpack()
             if not all([data_aes, pwd_file, meta_file]):
-                logging.warn(name + ': did not find 3 files in archive %s' % arch_enc.name)
+                logging.warn(name + ': did not find 3 files in archive %s' %
+                             arch_enc.name)
             tmp_dir = os.path.split(data_aes)[0]
 
             # Get a valid decrypt method, from meta-data or argument:
-            clear_text = None  # file name; set in case _get_dec_method raise()es
+            clear_text = None  # file name; set in case something raise()es
             if not dec_method:
-                dec_method = arch_enc.get_dec_method(self.codec)  # from .meta, or default
-                #fatal(name + ': Could not get a valid decryption method', DecryptError)
+                dec_method = arch_enc.get_dec_method(self.codec)
 
             # Decrypt (into same new tmp dir):
             DECRYPT_FXN = self.codec.get_function(dec_method)
             set_umask()  # redundant
-            data_dec = DECRYPT_FXN(data_aes, pwd_file, self.rsakeys.priv, self.rsakeys.pphr,
-                                   openssl=self.openssl)
+            data_dec = DECRYPT_FXN(data_aes, pwd_file, self.rsakeys.priv,
+                                   self.rsakeys.pphr, openssl=self.openssl)
 
             # Rename decrypted and meta files (mv to dest_dir):
             _new_path = os.path.join(dest_dir, os.path.basename(data_dec))
@@ -1134,10 +1157,11 @@ class SecFile(_SecFileBase):
                 shutil.copy(data_dec, clear_text)
                 demolish = SecFile(data_dec).destroy().result
                 if demolish['disposition'] != destroy_code[pfs_DESTROYED]:
-                    msg = name + ': destroy tmp clear txt failed: %s' % data_dec
+                    msg = name + ': destroy tmp file failed: %s' % data_dec
                     fatal(msg, DestroyError)
             perm_str = permissions_str(clear_text)
-            logging.info('decrypted, permissions ' + perm_str + ': ' + clear_text)
+            logging.info('decrypted, permissions ' +
+                         perm_str + ': ' + clear_text)
             if meta_file and keep_meta:
                 newMeta = _uniq_file(clear_text + META_EXT)
                 try:
@@ -1147,10 +1171,11 @@ class SecFile(_SecFileBase):
                     shutil.copy(meta_file, newMeta)
                     demolish = SecFile(meta_file).destroy().result
                     if demolish['disposition'] != destroy_code[pfs_DESTROYED]:
-                        msg = name + ': destroy tmp meta-data failed: %s' % meta_file
-                        fatal(msg, DestroyError)
+                        msg = ': destroy tmp meta-data failed: %s' % meta_file
+                        fatal(name + msg, DestroyError)
                 perm_str = permissions_str(newMeta)
-                logging.info('meta-data, permissions ' + perm_str + ': ' + newMeta)
+                logging.info('meta-data, permissions ' +
+                             perm_str + ': ' + newMeta)
         finally:
             # clean-up, nothing clear-text inside
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -1159,7 +1184,7 @@ class SecFile(_SecFileBase):
         if not keep_enc:
             os.unlink(arch_enc.name)
         self.set_file(clear_text)  # set file
-        self.result = {'method': name, 'status': 'started'}  # destroy overwrites
+        self.result = {'method': name, 'status': 'started'}
         self.result.update({'clear_text': clear_text, 'status': 'good'})
         if meta_file and keep_meta:
             self.result.update({'meta': newMeta})
@@ -1169,27 +1194,29 @@ class SecFile(_SecFileBase):
 
     def rotate(self, pub=None, priv=None, pphr=None,
                hmac_key=None, pad=None, keep_meta=True):
-        """Swap old encryption (priv) for new (pub), i.e., decrypt-then-re-encrypt.
+        """Swap old encryption for new: decrypt-then-re-encrypt.
 
-        New meta-data are added alongside the original meta-data. If
-        ``pad`` is given, the padding will be updated to the new length prior to
-        re-encryption.
+        Conceptually there are three separate steps: decrypt with ``priv``
+        (this is the "old" private key), re-encrypt (with the "new" public
+        key), confirm that the rotation worked, and destroy the old (insecure)
+        file. ``rotate()`` will only do the first two of these.
 
-        Conceptually there are three separate steps: rotate, confirm that the
-        rotation worked, and destroy the old (insecure) file. ``rotate()`` will
-        only do the first of these.
+        If ``pad`` is given, the padding will be updated to the new length
+        prior to re-encryption.
 
+        New meta-data are added alongside the original meta-data.
         ``rotate()`` will preserve meta-data across encryption sessions, if
-        available, adding to it rather than saving just the last one. (keep_meta=False
-        will suppress all meta_data; typically rotation events are not sensitive.)
-        Handling the meta-data is the principle motivation for having a rotate
-        method; otherwise sf.decrypt(old).encrypt(new) would suffice.
+        available, adding to it rather than saving just the last one.
+        (``keep_meta=False`` will suppress all meta_data; typically rotation
+        events are not sensitive.) Handling the meta-data is the principle
+        motivation for having a rotate method; otherwise
+        ``sf.decrypt(old).encrypt(new)`` would suffice.
 
         :Parameters:
 
             `priv` :
-                path to the old private key that is paired with the ``pub`` key that was used
-                for the existing encryption
+                path to the old private key that is paired with the ``pub``
+                key that was used for the existing encryption
             `pphr` :
                 passphrase for the private key (as a string, or filename)
             `pub` :
@@ -1203,7 +1230,8 @@ class SecFile(_SecFileBase):
         name = 'rotate'
         logging.debug(name + ': start (decrypt old, [pad new,] encrypt new)')
         self.result = {'method': name, 'status': 'started'}
-        self._require_enc_file(self.is_not_in_dropbox & self.is_in_writeable_dir)
+        self._require_enc_file(self.is_not_in_dropbox &
+                               self.is_in_writeable_dir)
         dec_rsakeys = RsaKeys(priv=(priv or self.rsakeys.priv),
                               pphr=(pphr or self.rsakeys.pphr))
         dec_rsakeys.require(NEED_PRIV)
@@ -1215,7 +1243,8 @@ class SecFile(_SecFileBase):
             # encrypt() will destroy intermediate clear_text, but might be
             # an exception before getting to encrypt(), so wrap in try except
 
-            sf = SecFile(self.file).decrypt(dec_rsakeys.priv, pphr=dec_rsakeys.pphr, keep_meta=True)
+            sf = SecFile(self.file).decrypt(dec_rsakeys.priv, keep_meta=True,
+                                            pphr=dec_rsakeys.pphr)
             self.meta = sf.meta
             self.set_file(sf.file)  # decrypted file name
 
@@ -1225,7 +1254,7 @@ class SecFile(_SecFileBase):
                     md = self.load_metadata()
                     logging.debug(name + ': read metadata from file')
                 except:
-                    logging.error(name + ': failed to read metadata file; using None')
+                    logging.error(name + ': failed to read metadata')
                     md = self.NO_META_DATA
             else:
                 logging.debug(name + ': self.meta no such file')
@@ -1235,11 +1264,12 @@ class SecFile(_SecFileBase):
                 SecFile(self.file).pad(pad)
             file_dec = self.file  # track file names so can destroy if needed
 
-            sf = SecFile(self.file).encrypt(pub=enc_rsakeys.pub, date=True, meta=md,
-                     keep=False, hmac_key=hmac_key)
+            sf = SecFile(self.file).encrypt(pub=enc_rsakeys.pub, date=True,
+                     meta=md, keep=False, hmac_key=hmac_key)
             self.set_file(sf.file)  # newly encrypted file name
         except FileNotEncryptedError:
-            fatal(name + ': not given an encrypted file', FileNotEncryptedError)
+            fatal(name + ': not given an encrypted file',
+                  FileNotEncryptedError)
         finally:
             # generally rotate must not leave any decrypted stuff. exception:
             #   decrypt, destroy orig.enc, *then* get exception --> now what?
@@ -1258,10 +1288,10 @@ class SecFile(_SecFileBase):
         return self
 
     def sign(self, priv=None, pphr=None, out=None):
-        """Sign a given file with a private key, via `openssl dgst`.
+        """Sign a given file with a private key.
 
-        Get a digest of the file, sign the digest, return base64-encoded signature
-        or save it in file ``out``.
+        Get a digest of the file, sign the digest, return base64-encoded
+        signature (or save it in file ``out``).
         """
         name = 'sign'
         logging.debug(name + ': start')
@@ -1269,7 +1299,8 @@ class SecFile(_SecFileBase):
         self.rsakeys.update(priv=priv, pphr=pphr, req=NEED_PRIV)
         sig_out = self.file + '.sig'
 
-        cmd_SIGN = [self.openssl, 'dgst', '-sign', self.rsakeys.priv, '-out', sig_out]
+        cmd_SIGN = [self.openssl, 'dgst', '-sign',
+                        self.rsakeys.priv, '-out', sig_out]
         if self.rsakeys.pphr:
             cmd_SIGN += ['-passin', 'stdin']
         cmd_SIGN += ['-keyform', 'PEM', self.file]
@@ -1291,7 +1322,7 @@ class SecFile(_SecFileBase):
     def verify(self, pub=None, sig=None):
         """Verify signature of ``filename`` using pubkey ``pub``.
 
-        ``sig`` should be a base64-encoded signature, or a path to a signature file.
+        ``sig`` should be a base64-encoded signature, or a path to a sig file.
         """
         name = 'verify'
         logging.debug(name + ': start')
@@ -1301,7 +1332,8 @@ class SecFile(_SecFileBase):
             fatal('signature required for verify(), as string or filename',
                   AttributeError)
 
-        cmd_VERIFY = [self.openssl, 'dgst', '-verify', self.rsakeys.pub, '-keyform', 'PEM']
+        cmd_VERIFY = [self.openssl, 'dgst', '-verify',
+                        self.rsakeys.pub, '-keyform', 'PEM']
         if isfile(sig):
             sig = open(sig, 'rb').read()
         with NamedTemporaryFile(delete=False) as sig_file:
@@ -1309,13 +1341,13 @@ class SecFile(_SecFileBase):
         cmd_VERIFY += ['-signature', sig_file.name, self.file]
         result = sys_call(cmd_VERIFY)
         os.unlink(sig_file.name)  # b/c delete=False
+        verified = result in ['Verification OK', 'Verified OK']
 
-        self.result = {'verified': result in ['Verification OK', 'Verified OK'],
-                       'file': self.file}
+        self.result = {'verified': verified, 'file': self.file}
         return self.result['verified']
 
     def destroy(self):
-        """Try to secure-delete a file; returns (status, link count, time taken).
+        """Try to secure-delete a file.
 
         Calls an OS-specific secure-delete utility, defaulting to::
 
@@ -1327,21 +1359,19 @@ class SecFile(_SecFileBase):
 
             SecFile('a.enc').destroy().result
 
-        If these are not available, ``destroy()`` will warn and fall through to trying
-        to merely overwrite the data with 0's (with unknown effectiveness). Do
-        not rely on this default behavior.
-
         Ideally avoid the need to destroy files as much as possible. Keep
         sensitive data in RAM. File systems that are journaled, have RAID, are
         mirrored, or other back-up are much trickier to secure-delete.
 
-        ``destroy()`` may fail to remove all traces of a file if multiple hard-links
-        exist for the file. For this reason, the original link count is returned.
-        In the case of multiple hardlinks, Linux (shred) and Windows (sdelete)
-        do appear to destroy the data (the inode), whereas Mac (srm) does not.
+        ``destroy()`` may fail to remove all traces of a file if multiple
+        hard-links exist for the file. For this reason, the original link count
+        is returned. In the case of multiple hardlinks, Linux (shred) and
+        Windows (sdelete) do appear to destroy the data (the inode), whereas
+        Mac (srm) does not.
 
-        If ``destroy()`` succeeds, the SecFile object is ``reset()``. The .result
-        attribute contains the details. If ``destroy()`` fails, ``.result`` is not reset.
+        If ``destroy()`` succeeds, the SecFile object is ``reset()``. The
+        ``.result`` attribute contains the details. If ``destroy()`` fails,
+        ``.result`` is not reset.
         """
 
         name = 'destroy'
@@ -1350,7 +1380,7 @@ class SecFile(_SecFileBase):
         target_file = self._require_file()
 
         if self.is_in_dropbox:
-            logging.error(name + ': in dropbox; no secure delete of remote files')
+            logging.error(name + ": in dropbox; can't secure delete remotely")
         if self.is_tracked:
             logging.warning(name + ': file exposed to version control')
         destroy_t0 = get_time()
@@ -1407,10 +1437,10 @@ class SecFile(_SecFileBase):
         if orig_links > 1 or disposition == pfs_UNKNOWN:
             vals.extend([inum, mount_path])
             keys.extend(['inum', 'mount_path'])
-        self.result =  dict(list(zip(keys, vals)))
+        self.result = dict(list(zip(keys, vals)))
         if isfile(target_file):  # yikes, file still remains
-            msg = name + ': %s remains after destroy(), %d bytes' % (target_file, getsize(target_file))
-            fatal(msg, DestroyError)
+            msg = name + ': %s remains after destroy(), %d bytes'
+            fatal(msg % (target_file, getsize(target_file)), DestroyError)
 
         return self
 
@@ -1421,13 +1451,15 @@ class SecFileArchive(_SecFileBase):
     Used transparently by SecFile as needed; typically there's no need to work
     directly with a SecFileArchive.
 
-    - Provide a name to create an empty archive, or infer a name from paths in ``files``, or from archive ``arc`` name.
+    - Provide a name to create an empty archive, or infer a name from paths in
+        ``files``, or from archive ``arc`` name.
 
     - Providing files will also ``pack()`` them into the archive.
 
     - Providing an existing archive ``arc`` will also unpack it into a tmp
         directory and return full paths to the file names. (This can result in
-        stray tmp files if they are not removed by the user, but everything sensitive is encrypted.)
+        stray tmp files if they are not removed by the user, but everything
+        sensitive is encrypted.)
     """
     def __init__(self, name='', files=None, arc=None, keep=True):
         """
@@ -1465,8 +1497,8 @@ class SecFileArchive(_SecFileBase):
 
         Eventually might take an arg to decide whether to use tar or zip.
         Just a tarfile wrapper with extension, permissions, unlink options.
-        unlink is whether to unlink the original files after making a cipher_text archive, not
-        a secure-delete option.
+        unlink is whether to unlink the original files after making a
+        cipher_text archive, not a secure-delete option.
         """
 
         if isinstance_basestring23(files):
@@ -1511,7 +1543,11 @@ class SecFileArchive(_SecFileBase):
         return True
 
     def unpack(self):
-        """Extract files from cipher_text archive into a tmp dir, return paths to files.
+        """Extract files from cipher_text archive, return paths to files.
+
+        Files are unpacked into a tmp directory; the process calling ``pack()``
+        should take care to clean up those files appropriately. There is no
+        sensitive information revealed by unpacking files.
 
         :Parameters:
             ``keep`` :
@@ -1541,7 +1577,8 @@ class SecFileArchive(_SecFileBase):
             elif fname.endswith(META_EXT):
                 self.meta = os.path.join(tmp_dir, fname)
             else:
-                fatal(name + ': unexpected file in cipher_text archive', SecFileArchiveFormatError)
+                fatal(name + ': unexpected file in cipher_text archive',
+                      SecFileArchiveFormatError)
 
         unset_umask()
 
@@ -1550,7 +1587,7 @@ class SecFileArchive(_SecFileBase):
     def get_dec_method(self, codec):
         """Return a valid decryption method from meta-data or default.
 
-        Cross-validate requested dec_method against meta-data, warn if mismatch.
+        Cross-validate requested dec_method against meta-data.
         """
         enc_method = 'unknown'
         meta_file = self.meta
@@ -1625,9 +1662,9 @@ class RsaKeys(object):
 
         # can the new keys be used to enc-dec in the codec?
         test_codec = PFSCodecRegistry(default_codec,
-                        test_keys = ( # keys will trigger the auto-test
-                            {'pub': self.pub},                 # enc_kwargs
-                            {'priv': self.priv, 'pphr': self.pphr}) # dec_kwargs
+                        test_keys=(  # keys kwargs will trigger the auto-test
+                            {'pub': self.pub},
+                            {'priv': self.priv, 'pphr': self.pphr})
                         )
         return self
 
@@ -1638,7 +1675,8 @@ class RsaKeys(object):
 
             ``('pub', 2048)`` = public key with length (RSA modulus) 2048 bits
 
-            ``('priv', True)`` = encrypted private key (will require a passphrase to use)
+            ``('priv', True)`` = encrypted private key (will require a
+                passphrase to use)
 
             ``(None, None)`` = not a detectable key format
         """
@@ -1721,7 +1759,7 @@ class RsaKeys(object):
         self.priv_requires_pphr = False
         if isinstance_basestring23(priv):
             if exists(priv):  # is_file
-                contents = open(priv, 'rb').read()  # better to sniff just the first few lines...
+                contents = open(priv, 'rb').read()  # better to sniff...
                 if 'PRIVATE KEY' in contents:
                     self._priv = _abspath(priv)
                 else:
@@ -1800,7 +1838,7 @@ class GenRSA(object):
     def generate(self, pub='pub.pem', priv='priv.pem', pphr=None, bits=4096):
         """Generate new RSA pub and priv keys, return paths to files.
 
-        ``pphr`` should be a string containing the actual passphrase (if desired).
+        ``pphr`` should be a string containing the actual passphrase.
         """
         if bits < RSA_MODULUS_MIN:
             fatal('Too short a key length requested',
@@ -1853,7 +1891,8 @@ class GenRSA(object):
 
             % python pyfilesec.py genrsa
 
-        The following will do the same thing, but save the passphrase into a file named 'pphr' [or save onto the clipboard]::
+        The following will do the same thing, but save the passphrase into a
+        file named 'pphr' [or save onto the clipboard]::
 
             % python pyfilesec.py genrsa --out pphr [--clipboard]
 
@@ -1864,17 +1903,17 @@ class GenRSA(object):
 
         The passphrase will not be printed if it was entered manually. If it is
         auto-generated, it will be printed or will be saved to a file if option
-        ``--out`` is given. This is the only copy of the passphrase; the key-pair
-        is useless without it (acutally, its worse than useless--you could still
-        encrypt something that you could not decrypt).
+        ``--out`` is given. This is the only copy of the passphrase; the
+        key-pair is useless without it (acutally, its worse than useless--you
+        could still encrypt something that you could not decrypt).
 
-        Choose from 2048, 4096, or 8192 bits; 1024 is not secure for medium-term
-        storage, and 16384 bits is not needed (nor is 8192). A passphrase is
-        required, or one will be auto generated. Ideally, generate a strong passphrase using
-        a password manager (e.g., KeePassX), save there, paste it into the dialog.
-        (It is also possible for pyFileSec to generate a passphrase which you can
-        then paste into a password manager; see the ``--clipboard`` command-line
-        option.)
+        Choose from 2048, 4096, or 8192 bits. 1024 is not secure medium-term,
+        and 16384 bits is not needed (nor is 8192). A passphrase is required,
+        or one will be auto generated. Ideally, generate a strong passphrase in
+        a password manager (e.g., KeePassX), save there, paste it into the
+        dialog. (It is also possible for pyFileSec to generate a passphrase
+        which you can then paste into a password manager; see the
+        ``--clipboard`` command-line option.)
 
         You may want to generate keys for testing purposes, and then generate
         different keys for actual use.
@@ -1888,11 +1927,11 @@ class GenRSA(object):
         AUTO_PPHR_BITS = 128
         RSA_BITS_DEFAULT = 4096
 
-        # use args for filenames if given explicitly:
-        pub = (args and args.pub) or abspath(_uniq_file('pub_RSA.pem'))  # ensure unique
-        priv = (args and args.priv) or pub.replace('pub_RSA', 'priv_RSA')  # matched pair
+        # use args for filenames if given explicitly, ensure uniq matched sets:
+        pub = (args and args.pub) or abspath(_uniq_file('pub_RSA.pem'))
+        priv = (args and args.priv) or pub.replace('pub_RSA', 'priv_RSA')
         if not args or args and args.passfile:
-            pphr_out = pub.replace('pub_RSA', 'pphr_RSA')  # matched name
+            pphr_out = pub.replace('pub_RSA', 'pphr_RSA')  # matched
             pphr_out = os.path.splitext(pphr_out)[0] + '.txt'
         else:
             pphr_out = None
@@ -1901,11 +1940,9 @@ class GenRSA(object):
             try:
                 import _pyperclip
             except ImportError:
-                fatal('could not import _pyperclip (should come with %s' % lib_name,
-                      ImportError)
+                fatal('could not import _pyperclip', ImportError)
             except RuntimeError:
-                fatal('could not load _pyperclip, ? could not open display',
-                      RuntimeError)
+                fatal('_pyperclip import: fail to open display?', RuntimeError)
         pub = abspath(pub)
         priv = abspath(priv)
         if pub == priv:
@@ -1913,7 +1950,8 @@ class GenRSA(object):
 
         msg = '\n%s: RSA key-pair generation dialog\n' % lib_name
         print(msg)
-        if os.path.exists(priv) or args and args.passfile and os.path.exists(pphr_out):
+        if (os.path.exists(priv) or
+                args and args.passfile and os.path.exists(pphr_out)):
             print('  > output file(s)already exist <\n'
                    '  > Clean up files and try again. Exiting. <')
             return None, None, None
@@ -1930,8 +1968,8 @@ class GenRSA(object):
             pphrout_msg = '  pphr = %s' % pphr_out
             print(pphrout_msg)
         if args and interactive:
-            print('\nEnter a passphrase for the private key (16 or more chars)\n'
-                  '  or press <return> to auto-generate a passphrase')
+            print('\nEnter a passphrase for the private key (16 or more chars)'
+                  '\n  or press <return> to auto-generate a passphrase')
             pphr = getpass.getpass('Passphrase: ')
         else:
             pphr = ''
@@ -1952,7 +1990,8 @@ class GenRSA(object):
             return None, None
         bits = RSA_BITS_DEFAULT
         if interactive:
-            b = input23('Enter the desired RSA key length (2048, 4096, 8192): [%d] ' % RSA_BITS_DEFAULT)
+            b = input23('Enter the key length (2048, 4096, 8192): [%d] ' %
+                        RSA_BITS_DEFAULT)
             if b in ['2048', '4096', '8192']:
                 bits = int(b)
         bits_msg = '  using %i' % bits
@@ -1963,7 +2002,7 @@ class GenRSA(object):
         print(ent_msg)
 
         nap = (2, 5)[bool(interactive)]  # 5 sec sleep in interactive mode
-        msg = '\nMove the mouse around for %ds (to help generate entropy)' % nap
+        msg = '\nMove the mouse for %ds (to help generate entropy)' % nap
         print(msg)
         sys.stdout.flush()
         try:
@@ -1980,7 +2019,8 @@ class GenRSA(object):
             self._cleanup(' > cancelled, exiting <', priv, pub, pphr)
             return None, None, None
         except:
-            self._cleanup('\n  > exception in generate(), exiting <', priv, pub, pphr)
+            self._cleanup('\n  > exception in generate(), exiting <',
+                          priv, pub, pphr)
             return None, None, None
 
         pub_msg = 'public key:  ' + pub
@@ -1997,13 +2037,17 @@ class GenRSA(object):
                     unset_umask()
                 except:
                     self._cleanup('', priv, pub, pphr)
-                if not isfile(pphr_out) or not getsize(pphr_out) == AUTO_PPHR_BITS // 4:
-                    self._cleanup(' > failed to save passphrase file, exiting <', priv, pub, pphr)
+                if (not isfile(pphr_out) or
+                        not getsize(pphr_out) == AUTO_PPHR_BITS // 4):
+                    self._cleanup(' > save passphrase file failed, exiting <',
+                                  priv, pub, pphr)
                     return None, None
             elif args and args.clipboard:
                 _pyperclip.copy(pphr)
-                pphr_msg = ('passphrase:  saved to clipboard only... paste it somewhere safe!!\n' +
-                            '      (It is exactly %d characters long, no end-of-line char)' % (AUTO_PPHR_BITS // 4))
+                pphr_msg = ('passphrase:  saved to clipboard only... '
+                            'paste it somewhere safe!!\n'
+                            '      (It is exactly %d characters long, '
+                            'no end-of-line char)' % (AUTO_PPHR_BITS // 4))
             elif not interactive:
                 # this is for test cov, safe but meaningless for scripted use
                 clip_orig = _pyperclip.paste()
@@ -2021,6 +2065,7 @@ class GenRSA(object):
 
         if not interactive:
             return pub, priv, pphr_out
+        return '\nExit.'
 
 
 def _abspath(filename):
@@ -2282,7 +2327,8 @@ def set_destroy():
     if not isfile(DESTROY_EXE):
         raise NotImplementedError("Can't find a secure file-removal tool")
 
-    logging.info('set destroy init: use %s %s' % (DESTROY_EXE, ' '.join(DESTROY_OPTS)))
+    logging.info('set destroy init: use %s %s' % (DESTROY_EXE,
+                                                  ' '.join(DESTROY_OPTS)))
 
     return DESTROY_EXE, DESTROY_OPTS
 
@@ -2538,7 +2584,7 @@ class Tests(object):
             with open(pub, 'w+b') as fd:
                 fd.write(pubkey)
         priv = os.path.join(folder, 'privKnown_no_pphr')
-        privkey= """-----BEGIN RSA PRIVATE KEY-----
+        privkey = """-----BEGIN RSA PRIVATE KEY-----
             MIICWwIBAAKBgQC3jHEfUzcy4B8N/Neiee3XYGiySNsNU9jB/tUwEOS3gSOs4IQG
             GkL7bwvqfby+UwFTHx3F2UfIANQ5qtq6xY88JaV7kgpx84K96CneT9x8zSr71ZPm
             KeQJWDLq0V15jo3ABUj8gvPMiytWA0IhhiaCrZrIbCjd/2UTJlSVnAxuBwIDAQAB
@@ -2662,7 +2708,7 @@ class Tests(object):
         # encrypt-encrypted warning:
         pub, priv, pphr = self._known_values()[:3]
         sf.encrypt(pub)
-        sf.encrypt(pub, note='a'+'a'*METADATA_NOTE_MAX_LEN)  # logging.warn
+        sf.encrypt(pub, note='a' * (METADATA_NOTE_MAX_LEN + 1))  # logging.warn
         with pytest.raises(EncryptError):
             sf.encrypt(pub, note='a\n\n')
 
@@ -2735,7 +2781,8 @@ class Tests(object):
 
         # test get_key_length function
         klen = get_key_length(pub)
-        cmdGETMOD = [OPENSSL, 'rsa', '-modulus', '-in', pub, '-pubin', '-noout']
+        cmdGETMOD = [OPENSSL, 'rsa', '-modulus', '-in',
+                     pub, '-pubin', '-noout']
         modulus = sys_call(cmdGETMOD).replace('Modulus=', '')
         assert hexdigits_re.match(modulus)
 
@@ -2771,7 +2818,8 @@ class Tests(object):
         with open('abc' + META_EXT, 'wb') as fd:
             fd.write(str(NO_META_DATA))
         #assert exists(datafile)
-        sf = SecFileArchive(paths=['abc' + AES_EXT, 'abc' + RSA_EXT, 'abc' + META_EXT])
+        sf = SecFileArchive(paths=['abc' + AES_EXT,
+                                    'abc' + RSA_EXT, 'abc' + META_EXT])
         dec_method = sf.get_dec_method('unknown')
         assert dec_method in list(default_codec.keys())
 
@@ -3235,8 +3283,9 @@ class Tests(object):
 
             pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
             prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
-            pphr2_w_spaces = '  ' + printable_pwd(180) + '   '  # spaces in pphr
-            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr2_w_spaces, testBits)
+            pphr2_w_spaces = '  ' + printable_pwd(180) + '   '
+            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2,
+                                            pphr2_w_spaces, testBits)
 
             # test decrypt with GOOD passphrase, trailing whitespace:
             sf = SecFile(datafile).encrypt(pub2)  # not keep=True
@@ -3294,8 +3343,8 @@ class Tests(object):
 
             # should refuse-to-encrypt if pub key is too short:
             with pytest.raises(PublicKeyTooShortError):
-                pub256, __ = GenRSA().generate('pub256.pem', 'priv256.pem', bits=256)
-            #assert get_key_length(pub256) == 256  # need a short key to use in test
+                pub256, __ = GenRSA().generate('pub256.pem',
+                                               'priv256.pem', bits=256)
             global RSA_MODULUS_MIN
             rsa_mod_orig = RSA_MODULUS_MIN
             RSA_MODULUS_MIN = 4096
@@ -3477,7 +3526,8 @@ class Tests(object):
         assert isfile(enc['cipher_text'])
 
         # Decrypt:
-        cmdLineCmd = [sys.executable, pathToSelf, enc['cipher_text'], '--decrypt', '--keep',
+        cmdLineCmd = [sys.executable, pathToSelf,
+                      enc['cipher_text'], '--decrypt', '--keep',
                       '--priv', priv1, '--pphr', pphr1, '--openssl=' + OPENSSL]
         outd = sys_call(cmdLineCmd)
         assert 'clear_text' in outd
@@ -3487,10 +3537,12 @@ class Tests(object):
         assert recoveredText == secretText  # need both enc and dec to work
 
         # Rotate:
-        assert isfile(enc['cipher_text']) and enc['cipher_text'].endswith(ENC_EXT)  # need --keep in d
-        cmdLineRotate = [sys.executable, pathToSelf, enc['cipher_text'], '--rotate',
-                      '--pub', pub1, '-z', str(getsize(enc['cipher_text']) * 2),
-                      '--priv', priv1, '--pphr', pphr1]
+        assert (isfile(enc['cipher_text']) and
+            enc['cipher_text'].endswith(ENC_EXT))  # need --keep in d
+        cmdLineRotate = [sys.executable, pathToSelf,
+                         enc['cipher_text'], '--rotate',
+                        '--pub', pub1, '--priv', priv1, '--pphr', pphr1,
+                        '-z', str(getsize(enc['cipher_text']) * 2)]
         outr = sys_call(cmdLineRotate)  # dict as a string
         assert 'rotate' in outr and 'good' in outr
         rot = eval(outr)
@@ -3788,7 +3840,7 @@ class Tests(object):
         if real_dropbox_path and sys.platform != 'win32':
             host_db = os.path.expanduser('~/.dropbox/host.db')
             # temporarily moves your actual dropbox locator file
-            # seems safe enough: gets auto-rebuilt by Dropbox if the file is lost
+            # seems safe enough: gets auto-rebuilt by Dropbox if file is lost
             if exists(host_db):
                 try:
                     os.rename(host_db, host_db + '.orig')
@@ -3931,10 +3983,10 @@ def _parse_args():
     group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
     group.add_argument('--unpad', action='store_true', help='remove padding (if any)')
     group.add_argument('--destroy', action='store_true', help='secure delete')
-    group.add_argument('--hardlinks', action='store_true',help='return number of hardlinks to a file', default=False)
-    group.add_argument('--tracked', action='store_true',help='return True if file is tracked using git, svn, or hg', default=False)
-    group.add_argument('--permissions', action='store_true',help='return file permissions', default=False)
-    group.add_argument('--dropbox', action='store_true',help='return True if a file is in Dropbox folder', default=False)
+    group.add_argument('--hardlinks', action='store_true', help='return number of hardlinks to a file', default=False)
+    group.add_argument('--tracked', action='store_true', help='return True if file is tracked using git, svn, or hg', default=False)
+    group.add_argument('--permissions', action='store_true', help='return file permissions', default=False)
+    group.add_argument('--dropbox', action='store_true', help='return True if a file is in Dropbox folder', default=False)
 
     group2 = parser.add_mutually_exclusive_group()
     group2.add_argument('--clipboard', action='store_true', help='genrsa: passphrase placed on clipboard (only)', default=False)
@@ -3982,7 +4034,7 @@ tmp = mkdtemp()
 try:
     u, v, p = Tests()._known_values(tmp)[:3]
     codec_registry = PFSCodecRegistry(default_codec,
-                                      test_keys = ({'pub': u},     # enc_kwargs
+                                      test_keys=({'pub': u},     # enc_kwargs
                                           {'priv': v, 'pphr': p})  # dec_kwargs
                                       )
 finally:

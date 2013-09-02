@@ -60,7 +60,7 @@ Milestones
 -----------
 
 - 0.3  class SecFile; Python 3 (2to3 mostly passes now)
-- 0.4  An alternative encryption backend (possibly pycrypto and gpg support)
+- 0.4  An alternative encryption backend (possibly pyCrypto and gpg support)
 - 0.5  Windows file-permissions
 
 
@@ -68,5 +68,5 @@ See also
 ---------
 
 - pyCrypto, M2Crypto, pyOpenSSL - excellent crypto packages, no or few sys-admin features
-- pycogworks.crypto - similar audience as pyfilesec, no file encyrption
+- pycogworks.crypto - similar audience as pyfilesec, no file encryption
 - Ephemeral - provides encrypted temporary files
