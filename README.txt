@@ -15,10 +15,9 @@ The motivation for developing pyFileSec is to better secure research data obtain
 from human subjects, e.g., in combination with PsychoPy (http://www.psychopy.org)
 or the Open Science Framework (http://www.openscienceframework.org). The hope is
 that pyFileSec will be more widely useful. For example, command-line options
-make it accessible from non-python or non-open-source programs, such as EPrime
-via the ``Shell()`` command.
+make it accessible from non-python or non-open-source programs.
 
-Several excellent Python packages are available for encryption. However, file
+Several truly excellent Python packages are available for encryption. However, file
 security requires more than just good encryption. The main and potentially
 unique contribution of pyFileSec is that it aspires to provide cross-platform, secure
 file-management with a low barrier to entry and a stable API going forward. These
@@ -26,27 +25,24 @@ considerations motivate many of the design choices.
 
 The main functions provided include encryption (``encrypt``, ``decrypt``,
 ``rotate``) and verification (``sign``, ``verify``). It is also easy to
-obscure file length (``pad``, ``unpad``), securely remove files from disk (``destroy``).
-Large files (8G) and command-line / shell-script usage are also supported.
+obscure file length (``pad``, ``unpad``), securely remove files from disk (``destroy``)
+and inspect meta-data.
+Large files (tested up to 8G) and command-line usage are also supported.
 
 By default, file permissions are set to conservative values (only Mac & linux
-at this point). Clear-text files are deleted securely after a successful encryption. If the
-file (inode) had other links to it, their presence is reported.
-Decryption will not proceed inside a Dropbox folder (to help limit unintended
-propagation of clear-text to other machines). Decryption into a folder that
-appears to be under version control will proceed but and the version control will be noted
-(for svn, git, and hg).
+at this point). Unencrypted files are deleted securely after a successful encryption.
+Multiple hardlinks, version control, and Dropbox folders are detected and reported.
 
 Public-key (asymmetric) encryption is used for security and flexibility,
-currently relying on calls to OpenSSL for all cryptography (RSA + AES256 --
-an approach that is well-known). The aim is to provide an
-easily extensible framework for adding other encryption backends (e.g.,
-PyCrypto or GPG, should they be desired), without requiring changes to the API.
+currently relying on calls to OpenSSL for all cryptography. The aim is to provide
+a robust and easily extensible framework for adding other encryption backends,
+without requiring changes to the API.
 
 Bug reports and code contributions are welcome; the project is on github and you
 can contact me there (https://github.com/jeremygray/pyFileSec). For contacting me
 privately, e.g., about security issues, please look for my gmail address at the
-top of the main code. Help with Windows would be great (see the issues list).
+top of the main code. Help with Windows would be particularly welcome (see the
+issues list).
 
 
 Contributors
@@ -63,6 +59,14 @@ Sol Simpson - Windows compatibility
 Milestones
 -----------
 
-- 0.3  class SecFile; Tests; Python 3 (2to3 mostly passes now)
+- 0.3  class SecFile; Python 3 (2to3 mostly passes now)
 - 0.4  An alternative encryption backend (possibly pycrypto and gpg support)
 - 0.5  Windows file-permissions
+
+
+See also
+---------
+
+- pyCrypto, M2Crypto, pyOpenSSL - excellent crypto packages, no or few sys-admin features
+- pycogworks.crypto - similar audience as pyfilesec, no file encyrption
+- Ephemeral - provides encrypted temporary files
