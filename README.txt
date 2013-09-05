@@ -25,13 +25,12 @@ considerations motivate many of the design choices.
 
 The main functions provided include encryption (``encrypt``, ``decrypt``,
 ``rotate``) and verification (``sign``, ``verify``). It is also easy to
-obscure file length (``pad``, ``unpad``), securely remove files from disk (``destroy``)
-and inspect meta-data.
-Large files (tested up to 8G) and command-line usage are also supported.
-
-By default, file permissions are set to conservative values (only Mac & linux
-at this point). Unencrypted files are deleted securely after a successful encryption.
-Multiple hardlinks, version control, and Dropbox folders are detected and reported.
+obscure file length (``pad``, ``unpad``), securely remove files from disk
+(``destroy``) and inspect meta-data. Large files (tested up to 8G) and
+command-line usage are also supported. By default, file permissions are set to
+conservative values (only Mac & linux at this point). Unencrypted files are
+deleted securely after a successful encryption. Multiple hardlinks, version
+control, and Dropbox folders are detected and reported.
 
 Public-key (asymmetric) encryption is used for security and flexibility,
 currently relying on calls to OpenSSL for all cryptography. The aim is to provide
@@ -59,7 +58,8 @@ Sol Simpson - Windows compatibility
 Milestones
 -----------
 
-- 0.3  class SecFile; Python 3 (2to3 mostly passes now)
+- 0.2  class SecFile (in v0.2.10 alpha)
+- 0.3  Python 3 (2to3 mostly passes now)
 - 0.4  An alternative encryption backend (possibly pyCrypto and gpg support)
 - 0.5  Windows file-permissions
 
@@ -67,6 +67,6 @@ Milestones
 See also
 ---------
 
-- pyCrypto, M2Crypto, pyOpenSSL - excellent crypto packages, no or few sys-admin features
+- pyCrypto, M2Crypto, pyOpenSSL - broad crypto packages, few sys-admin features
 - pycogworks.crypto - similar audience as pyfilesec, no file encryption
-- Ephemeral - provides encrypted temporary files
+- Ephemeral - encrypted temporary files

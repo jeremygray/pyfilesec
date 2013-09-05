@@ -1,2 +1,3 @@
 #/bin/sh
-py.test --cov-report term-missing --cov pyfilesec
+
+py.test -k-slow --cov-report term-missing --cov pyfilesec

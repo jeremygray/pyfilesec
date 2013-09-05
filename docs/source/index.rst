@@ -247,9 +247,7 @@ Other available SecFile methods include:
 
     ``set_file()`` : change the file to work with, and set the ``.file`` property.
 
-        .. note:: Calling ``set_file`` does not rename the existing file on the file system.
-            It just tells the sf object to work with a different file. To change
-            the underlying file name: ``os.rename(sf.file, new_file); sf.set_file(new_file)``.
+    ``rename(new_name)`` : changes the name of the existing file on the file system.
 
     ``read(n)`` : read n lines from the file, return as a single string.
 
@@ -258,8 +256,6 @@ notation (i.e., as ``sf.property`` where ``sf`` is a SecFile object). Most canno
 noted).
 
     ``file`` : the full path to the underlying file on the file system
-
-        .. note:: To change the file to work with, see ``set_file()``.
 
     ``basename`` : same as ``os.path.basename(sf.file)``, or ``None`` if no file.
 
