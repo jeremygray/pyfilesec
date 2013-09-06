@@ -2,9 +2,9 @@ Version 0.2 (alpha status)
 ==========================
 
 Available in repository (github.com/jeremygray/pyfilesec):
-v0.2.10 alpha
+v0.2.10alpha
 ---------------------
-* REFACTOR complete; class SecFile and others; more features, tests
+* ADDED class SecFile and other classes; more features, tests ~90% coverage, documentation
 
 v0.2.03
 ---------------------

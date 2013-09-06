@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.2.10 alpha'
+__version__ = '0.2.10alpha'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
@@ -37,7 +37,6 @@ import argparse
 from   base64 import b64encode, b64decode
 import copy
 from   functools import partial  # for buffered hash digest
-import getpass  # for RSA key-gen
 import hashlib
 import json
 import os
@@ -52,9 +51,18 @@ import tarfile
 from   tempfile import mkdtemp, NamedTemporaryFile
 import time
 
-# other imports:
-# GenRSA.dialog will import _pyperclip   # if use --clipboard commandline
-# from win32com.shell import shell  # for getting is user an admin (to link)
+if sys.platform == 'win32':
+    get_time = time.clock
+    from win32com.shell import shell
+    user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
+else:
+    get_time = time.time
+    user_can_link = True
+
+# other imports in GenRSA.dialog:
+#   import _pyperclip    # if use --clipboard from commandline
+#   import getpass       # for no-display passphrase entry during RSA key-gen
+
 
 # CONSTANTS and INITS ------------ (with code folding) --------------------
 if True:
@@ -722,7 +730,7 @@ class SecFile(_SecFileBase):
             ``codec`` : the pyFileSec codec to use
             ``openssl`` : path to the version of OpenSSL to use
         """
-        '''API guide:
+        '''dev notes: ---------
             self.file can be set explicitly or implicitly by user
                 explicitly = at init, or through set_file; no other way.
                 implicitly = change name due to a change of state
@@ -744,9 +752,20 @@ class SecFile(_SecFileBase):
                 query .results right after a call; not guaranteed long-term
             properties cannot rely on self.result values, can be stale
             require_X methods must only use the default / already set file
+
+            methods build up self.results. if a method needs to use self.method
+            just use another SecFile() obj.method instead, preserves .result
+
+            methods that create files must ensure a _uniq_name() is used. this
+            also means that the actual file name created might not be the name
+            passed to the method. for this reason the result['filename'] should
+            either be checked after a method call (eg in .rename), or should be
+            ensured to be unique before the call.
+
+            the parameter `openssl` should probably be `lib_crypto`, in order
+            to support gpg or pycrypto usage. then .encrypt(pub) will call the
+            corresponding lib
         '''
-        # methods build up .results. if a method needs to call other methods
-        # that would overwrite current .results in progress use another SecFile
 
         # sets self.rsakeys:
         _SecFileBase.__init__(self, pub=pub, priv=priv, pphr=pphr)
@@ -756,10 +775,12 @@ class SecFile(_SecFileBase):
         self.codec = copy.deepcopy(codec)
         self._openssl = openssl
 
-        # only register things at init, must call methods explicitly
-
     def __str__(self):
-        return '<pyfilesec.SecFile object, file=%s>' % repr(self.file)
+        txt = '<pyfilesec.SecFile object, file=%s, enc=%s>'
+        return  txt % (repr(self.file), self.is_encrypted)
+
+    def __repr__(self):
+        return str(self)
 
     def pad(self, size=DEFAULT_PAD_SIZE):
         """Append null bytes to ``filename`` until it has length ``size``.
@@ -1956,11 +1977,18 @@ class GenRSA(object):
         if args and interactive:
             print('\nEnter a passphrase for the private key (16 or more chars)'
                   '\n  or press <return> to auto-generate a passphrase')
-            pphr = getpass.getpass('Passphrase: ')
+            try:
+                import getpass
+                pphr = getpass.getpass('Passphrase: ')
+            except ImportError:
+                pphr = input23('Passphrase (will be displayed): ')
         else:
             pphr = ''
         if pphr:
-            pphr2 = getpass.getpass('same again: ')
+            try:
+                pphr2 = getpass.getpass('same again: ')
+            except:
+                pphr2 = input23('same again: ')
             if pphr != pphr2:
                 print('  > Passphrase mismatch. Exiting. <')
                 return None, None, None
@@ -3648,6 +3676,7 @@ class Tests(object):
         assert sf.result['orig_links'] == numlinks + 1  # +1 for itself
         assert sf.result['orig_links'] == orig_links
 
+    @pytest.mark.slow
     def test_8192_bit_keys(self):
         # mostly just to show that it can be done
         pub = 'pub_8192.pem'
@@ -4023,14 +4052,6 @@ def _parse_args():
 
 
 # Basic set-up (order matters) ------------------------------------------------
-
-if sys.platform == 'win32':
-    get_time = time.clock
-    from win32com.shell import shell
-    user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
-else:
-    get_time = time.time
-    user_can_link = True
 
 if __name__ == "__main__":
     args = _parse_args()

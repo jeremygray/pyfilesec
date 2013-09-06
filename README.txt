@@ -17,11 +17,11 @@ or the Open Science Framework (http://www.openscienceframework.org). The hope is
 that pyFileSec will be more widely useful. For example, command-line options
 make it accessible from non-python or non-open-source programs.
 
-Several truly excellent Python packages are available for encryption. However, file
-security requires more than just good encryption. The main and potentially
-unique contribution of pyFileSec is that it aspires to provide cross-platform, secure
-file-management with a low barrier to entry and a stable API going forward. These
-considerations motivate many of the design choices.
+Several truly excellent Python packages are available for encryption. However,
+file security requires more than just good encryption. The main and potentially
+unique contribution of pyFileSec is that it aspires to provide cross-platform,
+secure file-management with a low barrier to entry and a stable API going
+forward. These considerations motivate many of the design choices.
 
 The main functions provided include encryption (``encrypt``, ``decrypt``,
 ``rotate``) and verification (``sign``, ``verify``). It is also easy to
@@ -31,6 +31,12 @@ command-line usage are also supported. By default, file permissions are set to
 conservative values (only Mac & linux at this point). Unencrypted files are
 deleted securely after a successful encryption. Multiple hardlinks, version
 control, and Dropbox folders are detected and reported.
+
+pyFileSec provides the class ``SecFile``, which is designed to be easy to use::
+
+    >>> import pyfilesec as pfs
+    >>> sf = pfs.SecFile('data.txt')
+    >>> sf.encrypt(path_to_pubkey)
 
 Public-key (asymmetric) encryption is used for security and flexibility,
 currently relying on calls to OpenSSL for all cryptography. The aim is to provide
@@ -43,6 +49,9 @@ privately, e.g., about security issues, please look for my gmail address at the
 top of the main code. Help with Windows would be particularly welcome (see the
 issues list).
 
+Software that includes pyFileSec
+---------------------------------
+- PsychoPy, as of v1.79.00 (forthcoming)
 
 Contributors
 -------------
@@ -58,7 +67,7 @@ Sol Simpson - Windows compatibility
 Milestones
 -----------
 
-- 0.2  class SecFile (in v0.2.10 alpha)
+- 0.2  class SecFile (available in v0.2.10alpha)
 - 0.3  Python 3 (2to3 mostly passes now)
 - 0.4  An alternative encryption backend (possibly pyCrypto and gpg support)
 - 0.5  Windows file-permissions
