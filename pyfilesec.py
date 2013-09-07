@@ -124,9 +124,9 @@ if True:
     pfs_UNLINKED = 0
     pfs_UNKNOWN = -1
 
-    # decrypted file status:
+    # SecFile.file permissions:
     PERMISSIONS = 0o600  # for all SecFiles: no execute, no group, no other
-    UMASK = 0o077  # need u+x permission for diretories
+    UMASK = 0o077  # need u+x permission for directories
     old_umask = None  # set as global in set_umask, unset_umask
 
     # string to help be sure a .bat file belongs to pfs (win32, set_openssl):
@@ -762,7 +762,7 @@ class SecFile(_SecFileBase):
             either be checked after a method call (eg in .rename), or should be
             ensured to be unique before the call.
 
-            the parameter `openssl` should probably be `lib_crypto`, in order
+            the parameter `openssl` should probably be `engine`, in order
             to support gpg or pycrypto usage. then .encrypt(pub) will call the
             corresponding lib
         '''

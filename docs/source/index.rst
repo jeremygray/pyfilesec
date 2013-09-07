@@ -11,16 +11,16 @@ File-oriented security in python
 
 pyFileSec provides a class ``SecFile`` that is intended
 to make it easier to protect computer files from casual
-inspection or accidental disclosure. By design, privacy assurance, ease-of-use, and a
-stable, cross-platform API are important security goals. Integrity
+inspection or accidental disclosure. By design, privacy assurance, ease-of-use,
+and a stable, cross-platform API are important security goals. Integrity
 assurance is useful but not a top priority. The speed of code execution is
 relatively unimportant. Truly sensitive information should be protected through
 multiple means, including procedural, physical, and legal methods.
 
 pyFileSec is less about encryption (which it does handily, as do many excellent
 packages), and more about managing the immediate security issues that arise
-when working with files. Anyone doing system administration tasks in a
-research lab might find it useful, possibly including edvanced users and
+when working with files. Anyone doing system administration in a research lab
+might find it useful (including advanced users, not just IT staff), as might
 developers of software presentation programs for human subjects research. Anyone
 needing file management with compatible security goals could potentially benefit.
 
@@ -66,17 +66,17 @@ on your behalf. With encryption, however, it would likely be prohibitively expen
 to hire someone to "break in on your behalf"; hopefully that is not possible,
 even for a well-funded adversary. So it is possible to lose data by trying to secure it.
 
-**Development status:** As of version 0.2.0, the development status is still **alpha**,
-meaning that major API changes and bugs are likely. The development emphasis is
-currently on refactoring the code from a function-based organization (0.2.0)
-to a class-based organization (milestone 0.3 release). class SecFile will be the
-core class provided by the package. Documentation is a work in progress. A few
-extensions are planned, e.g., an alternative encryption backend and zip. File
-permissions on Windows needs work. Python 3 is completely untested.
+**Development status:** As of version 0.2.10, the development status is **alpha**,
+meaning that major API changes and bugs are possible. The development emphasis is
+currently on refactoring the code for Python 3.
+Documentation is a work in progress. A few extensions are planned, notably
+alternative encryption backends (likely pycrypto and gpg) and using zip for
+archives. File
+permissions on Windows needs work.
 
-Comments and code contributions are welcome. Feedback can be posted on github
-(see issues at https://github.com/jeremygray/pyfilesec/). Contact by
-private email is preferred for anything sensitive, such as security concerns.
+Comments, bug reports or fixes, and code contributions are welcome. Feedback can
+be posted on github (see issues at https://github.com/jeremygray/pyfilesec/).
+Contact by private email is preferred for anything sensitive.
 
 
 Principles and Approach

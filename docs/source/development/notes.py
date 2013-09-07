@@ -136,6 +136,12 @@
         # cmd_GPG = ['gpg', '-u', recipient_ID, '-o', datafileDec, '-d', '--passphrase-fd', '0', datafileEnc]
         # _sysCall(cmd_GPG, stdin=passphrase)
 
+        # "There is a small security glitch in the OpenPGP (and therefore GnuPG)
+        # system; to avoid this you should always sign and encrypt a message
+        # instead of only encrypting it."
+
+
+
         return datafileDec
     - test on Python 3.2
     - use zip instead of tar; tarfile.TarInfo() for managing owner, permissions, time, etc
@@ -170,7 +176,8 @@
     - move to pkeyutl instead of rsautl when possible; currently not:
         -decrypt with passphrase seems to fail, maybe -sign as well
     - use zip instead of tar for file bundle, easier to work with items in mem
-    - encrypt/decrypt from/to a tempfile.SpooledTemporaryFile() instead of cleartext file
+    - encrypt/decrypt from/to a tempfile.SpooledTemporaryFile() instead of
+      cleartext file; mlock to keep from swap; encrypt the SpooledTempFile
     - rewrite enc / dec as a class
 
     OpenSSL entropy:
