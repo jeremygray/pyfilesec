@@ -2,6 +2,10 @@ Version 0.2 (alpha status)
 ==========================
 
 Available in repository (github.com/jeremygray/pyfilesec):
+v0.2.11alpha
+---------------------
+* ADDED class SecStr to better manage sensitive strings like passwords
+
 v0.2.10alpha
 ---------------------
 * ADDED class SecFile and other classes; more features, tests ~90% coverage, documentation

@@ -51,6 +51,17 @@ import tarfile
 from   tempfile import mkdtemp, NamedTemporaryFile
 import time
 
+# for SecStr:
+from   ctypes import memset, Structure, py_object, c_long, c_int, sizeof
+try:
+    from ctypes import c_ssize_t
+except (ImportError, OSError):
+    # import failed on linux (CentOS 6.4, python 2.6.6); ok on mac 10.8, win 7
+    # http://docs.python.org/3.4/library/ctypes.html
+    # get 32/64 bit: file -L `python -c "import sys; print(sys.executable)"`
+
+    c_ssize_t = c_int  # same 32 and 64 bit arch?
+
 if sys.platform == 'win32':
     get_time = time.clock
     from win32com.shell import shell
@@ -263,7 +274,7 @@ class PFSCodecRegistry(object):
             test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
             test_datum = printable_pwd(64)
             with open(test_file, 'wb') as fd:
-                fd.write(test_datum)
+                fd.write(test_datum.str)
             try:
                 sf = SecFile(test_file, codec=test_co)
                 sf.encrypt(keep=True, **enc_kwargs)
@@ -286,7 +297,7 @@ class PFSCodecRegistry(object):
                 except:
                     pass
             try:
-                assert recovered == test_datum
+                assert recovered == test_datum.str
             except:
                 fatal('Codec registration:  enc-dec self-test failed',
                       CodecRegistryError)
@@ -294,7 +305,7 @@ class PFSCodecRegistry(object):
         for key, fxn in list(new_functions.items()):
             try:
                 key = str(key)  # not unicode
-            except:
+            except UnicodeEncodeError:
                 fatal('keys restricted to str (not unicode)')
             if not len(key) > 3 or key[:4] not in ['_enc', '_dec']:
                 msg = ': failed to register "%s": need _enc..., _dec...' % key
@@ -306,7 +317,7 @@ class PFSCodecRegistry(object):
                 fatal(self.name + ': function "%s" already registered' % key)
             self._functions.update({key: fxn})
             fxn_info = '%s(): fxn hash=%d' % (key, hash(fxn))
-            # could requires functions be in external files, get a sha256 ...
+            # could require functions be in external files, get a sha256 ...
             logging.info(self.name + ': registered %s' % fxn_info)
 
         # allow _dec without _enc, but not vice-verse:
@@ -340,8 +351,7 @@ class PFSCodecRegistry(object):
         """
         if self.is_registered(fxn_name):
             return self._functions[fxn_name]
-        fatal('function %s not in registry' % fxn_name,
-              CodecRegistryError)
+        fatal('function %s not in registry' % fxn_name, CodecRegistryError)
 
     def is_registered(self, fxn_name):
         """Returns True if `fxn_name` is registered; validated at registration.
@@ -488,7 +498,8 @@ class _SecFileBase(object):
         directory, filename = os.path.split(self._file)
         writeable = True
         try:
-            test_name = os.path.join(directory, printable_pwd(32))
+            tmp = printable_pwd(32)
+            test_name = os.path.join(directory, tmp.str)
             open(test_name, 'wb')
         except IOError as e:
             if e.errno == os.errno.EACCES:
@@ -925,7 +936,7 @@ class SecFile(_SecFileBase):
             if overwrite > 0:
                 for i in range(7):
                     fd.seek(filelen - overwrite)
-                    fd.write(printable_pwd(overwrite * 4))
+                    fd.write(printable_pwd(overwrite * 4).str)
             # trim the padding length info
             fd.truncate(new_length)
         logging.info(name + ': truncated the file to remove padding')
@@ -1880,12 +1891,18 @@ class GenRSA(object):
         try:
             destroy(priv)
         except:
-            pass
+            try:
+                os.unlink(priv)
+            except:
+                pass
         if pphr:
             try:
                 destroy(pphr)
             except:
-                pass
+                try:
+                    os.unlink(pphr)
+                except:
+                    pass
         try:
             os.unlink(pub)
         except:
@@ -1932,6 +1949,7 @@ class GenRSA(object):
 
         # constant:
         AUTO_PPHR_BITS = 128
+        pphr_out_size = AUTO_PPHR_BITS // 4 + 1  # +1 for '#' in printable_pwd
         RSA_BITS_DEFAULT = 4096
 
         # use args for filenames if given explicitly, ensure uniq matched sets:
@@ -1946,8 +1964,6 @@ class GenRSA(object):
         if args and args.clipboard or not interactive:  # test cov
             try:
                 import _pyperclip
-            except ImportError:
-                fatal('could not import _pyperclip', ImportError)
             except RuntimeError:
                 fatal('_pyperclip import: fail to open display?', RuntimeError)
         pub = abspath(pub)
@@ -1979,17 +1995,19 @@ class GenRSA(object):
                   '\n  or press <return> to auto-generate a passphrase')
             try:
                 import getpass
-                pphr = getpass.getpass('Passphrase: ')
+                pphr = SecStr(getpass.getpass('Passphrase: '))
             except ImportError:
-                pphr = input23('Passphrase (will be displayed): ')
+                pphr = SecStr(input23('Passphrase (will be displayed): '))
+            except ValueError:
+                pphr = ''
         else:
             pphr = ''
         if pphr:
             try:
-                pphr2 = getpass.getpass('same again: ')
+                pphr2 = SecStr(getpass.getpass('same again: '))
             except:
-                pphr2 = input23('same again: ')
-            if pphr != pphr2:
+                pphr2 = SecStr(input23('same again: '))
+            if pphr.str != pphr2.str:
                 print('  > Passphrase mismatch. Exiting. <')
                 return None, None, None
             pphr_auto = False
@@ -1999,9 +2017,9 @@ class GenRSA(object):
             pphr = printable_pwd(AUTO_PPHR_BITS)
             pphr_auto = True
         print('')
-        if pphr and len(pphr) < 16:
+        if pphr and len(pphr.str) < 16:
             print('  > passphrase too short, exiting <')
-            return None, None
+            return None, None, None
         bits = RSA_BITS_DEFAULT
         if interactive:
             b = input23('Enter the key length (2048, 4096, 8192): [%d] ' %
@@ -2028,7 +2046,7 @@ class GenRSA(object):
         msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
         print(msg)
         try:
-            self.generate(pub, priv, pphr, bits)
+            self.generate(pub, priv, pphr.str, bits)
         except KeyboardInterrupt:
             self._cleanup(' > cancelled, exiting <', priv, pub, pphr)
             return None, None, None
@@ -2047,21 +2065,21 @@ class GenRSA(object):
                 try:
                     set_umask()
                     with open(pphr_out, 'wb') as fd:
-                        fd.write(pphr)
+                        fd.write(pphr.str)
                     unset_umask()
                 except:
                     self._cleanup('', priv, pub, pphr)
                 if (not isfile(pphr_out) or
-                        not getsize(pphr_out) == AUTO_PPHR_BITS // 4):
+                        not getsize(pphr_out) == pphr_out_size):
                     self._cleanup(' > save passphrase file failed, exiting <',
-                                  priv, pub, pphr)
-                    return None, None
+                                  priv, pub, pphr_out)
+                    return None, None, None
             elif args and args.clipboard:
-                _pyperclip.copy(pphr)
+                _pyperclip.copy(pphr.str)
                 pphr_msg = ('passphrase:  saved to clipboard only... '
                             'paste it somewhere safe!!\n'
                             '      (It is exactly %d characters long, '
-                            'no end-of-line char)' % (AUTO_PPHR_BITS // 4))
+                            'no end-of-line char)' % (pphr_out_size))
             elif not interactive:
                 # this is for test cov, safe but meaningless for scripted use
                 clip_orig = _pyperclip.paste()
@@ -2069,7 +2087,7 @@ class GenRSA(object):
                 _pyperclip.copy(clip_orig)  # restore contents
                 pphr_msg = 'not interactive; pphr to file'
             else:
-                pphr_msg = 'passphrase:  ' + pphr
+                pphr_msg = 'passphrase:  ' + pphr.str
         else:
             pphr_msg = 'passphrase:  (entered by hand)'
         print(pphr_msg)
@@ -2077,9 +2095,98 @@ class GenRSA(object):
                '  > Do not lose the passphrase! <')
         print(warn_msg)
 
+        del(pphr)
         if not interactive:
             return pub, priv, pphr_out
-        return '\nExit.'
+        return '\nDialog complete.'
+
+
+class SecStr(object):
+    """Class to help mitigate accidental disclosure of sensitive strings.
+
+    Overrides ``__str__`` and ``__repr__``; use ``ss.str`` to get the value.
+
+    Experimental feature: ``ss = SecStr(s); ss.clear()`` will try self-destruct
+    by zero-ing out the value in
+    memory of the string object ``s`; also called by ``del()``.
+    Might be "security theater", but might be better than not trying at all.
+    """
+    class PyStringObject(Structure):
+        _fields_ = [
+            ('ob_refcnt', c_ssize_t),
+            ('ob_type', py_object),
+            ('ob_size', c_ssize_t),
+            ('ob_shash', c_long),
+            ('ob_sstate', c_int),
+            # ob_sval varies in size
+            ]
+
+    def __init__(self, val):
+        self.s_obj = self.PyStringObject.from_address(id(val))
+        if self.s_obj.ob_sstate > 0:
+            raise ValueError("received an interned str, unicode, or non-str")
+        self._val = val
+        self._zeroed = False
+        self._id = id(val)
+
+    @property
+    def str(self):
+        return self._val
+
+    @property
+    def zeroed(self):
+        return self._zeroed
+
+    def __len__(self):
+        return len(self._val)
+
+    def __str__(self):
+        raise RuntimeError('cannot get value via str(), use .str')
+
+    def __repr__(self):
+        return '<instance of %s, zeroed=%s>' % (str(self.__class__), self.zeroed)
+
+    def __del__(self):
+        if hasattr(self, 'clear'):
+            self.zero()
+
+    def _memset0(self):
+        # from http://stackoverflow.com/questions/15581881/ctypes-in-python-crashes-with-memset
+        # http://stackoverflow.com/questions/728164/securely-erasing-password-in-memory-python
+        # "The best you can do is to del password ... so that no references
+        # to the password string object remain. Any solution that purports to
+        # be able to do more than that is only giving you a false sense of
+        # security.... there would still be other copies of the password that
+        # have been created in various string operations."
+
+        # __init__ should prevent this condition, but don't want to seg-fault
+        if self.s_obj.ob_sstate > 0:
+            raise ValueError("cannot zero interned string")
+        self.s_obj.ob_shash = -1  # not hashed yet
+
+        if py64bit:
+            offset = 36  # sizeof(PyStringObject) == 40
+        else:
+            offset = sizeof(self.PyStringObject)  # 20
+        tare = ''.__sizeof__()  # not unicode
+        num_bytes = self._val.__sizeof__() - tare
+        memset(id(self._val) + offset, 0, num_bytes)
+
+    def zero(self):
+        """Try to replace the string in memory with b'\0'.
+
+        Returns self: this allows anon usage like ``SecStr(str_val).clear()``
+        to work (if its not an interned string).
+        """
+        try:
+            self._memset0()
+            self._zeroed = True
+            self._id = None
+        except ValueError:
+            # interned strings cannot be zeroed
+            self._val = b'\0' * len(self)  # different id, help avoid display
+            self._zeroed = False
+        return self
 
 
 def _abspath(filename):
@@ -2184,9 +2291,10 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
 
     # Generate a password (digital envelope "session" key):
     # want printable because its sent to openssl via stdin
-    pwd = printable_pwd(nbits=256)
-    assert not whitespace_re.search(pwd)
-    assert len(pwd) == 64  # hex characters
+    bits = 256
+    pwd = printable_pwd(nbits=bits)
+    assert not whitespace_re.search(pwd.str)
+    assert len(pwd.str.replace('#', '')) == bits // 4  # hex, remove leading '#'
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     cmd_RSA = [openssl, 'rsautl',
@@ -2203,12 +2311,12 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
               '-out', data_enc,
               '-pass', 'stdin']
     try:
-        sys_call(cmd_RSA, stdin=pwd)
-        sys_call(cmd_AES, stdin=pwd)
+        sys_call(cmd_RSA, stdin=pwd.str)
+        sys_call(cmd_AES, stdin=pwd.str)
         # better to return immediately + del(pwd) but using stdin blocks
     finally:
         if 'pwd' in locals():
-            del pwd  # might as well try
+            del pwd  # might as well try; should happen right away anyway
 
     return _abspath(data_enc), _abspath(pwd_rsa)
 
@@ -2286,11 +2394,16 @@ def isinstance_basestring23(duck):
         return False
 
 
-def printable_pwd(nbits=256):
-    """Return a string of hex digits with n random bits, zero-padded.
+def printable_pwd(nbits=256, prefix='#'):
+    """Return a SecStr object of hex digits with n random bits, zero-padded.
+
+    The default prefix ensures that the returned str is not interned by python
     """
-    pwd = hex(random.SystemRandom().getrandbits(nbits))
-    return pwd.strip('L').replace('0x', '', 1).zfill(nbits // 4)
+    val = random.SystemRandom().getrandbits(nbits)
+    len = nbits // 4
+    pwd = SecStr(prefix + hex(val).strip('L').replace('0x', '').zfill(len))
+
+    return pwd
 
 
 def permissions_str(filename):
@@ -2869,6 +2982,45 @@ class Tests(object):
             decrypt(bad_arch, priv1, pphr1)
         '''
 
+    def test_SecStr_printable_pwd(self):
+        # ensure a non-interned string because has '#'
+        s = '#ca6e89'
+        ss = SecStr(s)
+        assert id(s) == ss._id == id(ss._val) == id(ss.str)
+        assert s in ss.str
+        with pytest.raises(RuntimeError):
+            val = "%s" % ss
+        ss.zero()
+        assert ss.str == ss._val == b'\0' * len(s)
+
+        # SecStr should not be iterable:
+        with pytest.raises(TypeError):
+            assert ss[0] == b'\0'
+
+        with pytest.raises(TypeError):
+            ss += 'more string stuff'
+
+        # del or clear should zero the *original* string:
+        s_orig = '#ca6e89'
+        ss = SecStr(s_orig)
+        del(ss)
+        assert s_orig == b'\0' * len(s_orig)
+
+        # interned string or non-string should raise:
+        for s in [u'#ca6e89', 'ca6e89', 123]:
+            with pytest.raises(ValueError):
+                ss = SecStr(s)
+
+        # a printable_pwd should be a SecStr:
+        pwd = printable_pwd(256, '#')
+        assert pwd.str.startswith('#')
+        assert len(pwd.str) == 256 // 4 + 1
+        pwd.zero()
+        assert pwd.zeroed
+        assert pwd.__repr__()
+        assert pwd._id == None
+        assert pwd._val == pwd.str == b'\0' * (256 // 4 + 1)
+
     def test_main(self):
         # similar to test_command_line; this counts towards coverage
 
@@ -3300,22 +3452,24 @@ class Tests(object):
             ENCRYPT(tmp, pub, openssl=OPENSSL + 'xyz')
 
     def test_encrypt_decrypt(self):
-        # test with null-length file, and some content
-        for secretText in ['', 'secret snippet %s' % printable_pwd(128)]:
+        # test with null-length file, and some secret content
+        secret = 'secret snippet %s' % printable_pwd(128, '#').str
+        for secretText in ['', secret]:
             datafile = 'cleartext no unicode.txt'
             with open(datafile, 'wb') as fd:
                 fd.write(secretText)
-            assert getsize(datafile) in [0, 47]
+            assert getsize(datafile) in [0, len(secret)]
 
             testBits = 2048  # fine to test with 1024 and 4096
             pubTmp1 = 'pubkey1 no unicode.pem'
             prvTmp1 = 'prvkey1 no unicode.pem'
             pphr1 = printable_pwd(180)
-            pub1, priv1 = GenRSA().generate(pubTmp1, prvTmp1, pphr1, testBits)
+            pub1, priv1 = GenRSA().generate(pubTmp1, prvTmp1, pphr1.str, testBits)
 
             pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
             prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
-            pphr2_w_spaces = '  ' + printable_pwd(180) + '   '
+            pphr2_spaces = printable_pwd(180)
+            pphr2_w_spaces = copy.copy('  ' + pphr2_spaces.str + '   ')
             pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2,
                                             pphr2_w_spaces, testBits)
 
@@ -3343,7 +3497,7 @@ class Tests(object):
             # test decrypt with GOOD passphrase as STRING:
             assert exists(datafile)
             sf = SecFile(datafile).encrypt(pub1)
-            sf.decrypt(priv1, pphr1)
+            sf.decrypt(priv1, pphr1.str)
             recoveredText = open(sf.file).read()
             # file contents match:
             assert recoveredText == secretText
@@ -3354,7 +3508,7 @@ class Tests(object):
             sf = SecFile(datafile).encrypt(pub1, keep=True)
             pphr1_file = prvTmp1 + '.pphr'
             with open(pphr1_file, 'wb') as fd:
-                fd.write(pphr1)
+                fd.write(pphr1.str)
             sf.decrypt(priv1, pphr1_file)
             recoveredText = open(sf.file).read()
             # file contents match:
@@ -3369,9 +3523,9 @@ class Tests(object):
 
             # a correct-format but wrong priv key should fail:
             sf = SecFile(datafile).encrypt(pub1, keep=True)
-            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr1, testBits)
+            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr1.str, testBits)
             with pytest.raises(PrivateKeyError):
-                sf.decrypt(priv2, pphr1)
+                sf.decrypt(priv2, pphr1.str)
 
             # should refuse-to-encrypt if pub key is too short:
             with pytest.raises(PublicKeyTooShortError):
@@ -3397,7 +3551,9 @@ class Tests(object):
 
         pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
         prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
-        pphr2 = '  ' + printable_pwd(180) + '   '  # spaces in pphr
+        pwd = printable_pwd(180)
+        pphr2 = '  ' + pwd.str + '   '  # spaces in pphr
+        #print pwd, pphr2
         pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr2, 1024)
 
         # Rotate encryption including padding change:
@@ -3927,7 +4083,7 @@ def main():
     elif args.filename == 'genrsa':
         """Walk through key generation on command line.
         """
-        GenRSA().dialog()
+        return GenRSA().dialog()
     elif not isfile(args.filename):
         raise ArgumentError('no such file (requires genrsa, debug, or a file)')
     else:
@@ -4062,6 +4218,9 @@ logging, logging_t0 = set_logging()
 openssl_path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
+
+sys_ex = sys_call(['file', '-L', sys.executable])
+py64bit = '64-bit' in sys_ex or 'x86-64' in sys_ex
 
 # Register the default codec, runs auto-test
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
