@@ -73,6 +73,8 @@ else:
 # other imports in GenRSA.dialog:
 #   import _pyperclip    # if use --clipboard from commandline
 #   import getpass       # for no-display passphrase entry during RSA key-gen
+# getpass module is short; hack to add SecStr (for fewer copies in mem)?
+# http://fossies.org/dox/Python-2.7.5/getpass_8py_source.html
 
 
 # CONSTANTS and INITS ------------ (with code folding) --------------------
@@ -1886,7 +1888,7 @@ class GenRSA(object):
             raise
         return _abspath(pub), _abspath(priv)
 
-    def _cleanup(self, msg, priv, pub, pphr=None):
+    def _cleanup(self, msg, pub, priv, pphr=None):
         print(msg)
         try:
             destroy(priv)
@@ -1908,7 +1910,7 @@ class GenRSA(object):
         except:
             pass
 
-    def dialog(self, interactive=True, out=None):
+    def dialog(self, interactive=True, args=None):
         """Command line dialog to generate an RSA key pair, PEM format.
 
         To launch from the command line::
@@ -1918,65 +1920,55 @@ class GenRSA(object):
         The following will do the same thing, but save the passphrase into a
         file named 'pphr' [or save onto the clipboard]::
 
-            % python pyfilesec.py genrsa --out pphr [--clipboard]
+            % python pyfilesec.py genrsa [--passfile | --clipboard]
 
         And it can be done from a python interpreter shell::
 
             >>> import pyfilesec as pfs
             >>> pfs.genrsa()
 
-        The passphrase will not be printed if it was entered manually. If it is
-        auto-generated, it will be printed or will be saved to a file if option
-        ``--out`` is given. This is the only copy of the passphrase; the
-        key-pair is useless without it (acutally, its worse than useless--you
-        could still encrypt something that you could not decrypt).
+        The passphrase will not be printed if it was entered manually. If it
+        is auto-generated, it will be displayed or saved to a file if option
+        ``--passfile`` is given, or saved to the clipboard if option
+        ``--clipboard`` is given. This is the only copy of the passphrase; the
+        key-pair is useless without it. Actually, its far worse than useless.
+        Its dangerous: you could still encrypt something that you could
+        not decrypt.
 
         Choose from 2048, 4096, or 8192 bits. 1024 is not secure medium-term,
         and 16384 bits is not needed (nor is 8192). A passphrase is required,
-        or one will be auto generated. Ideally, generate a strong passphrase in
-        a password manager (e.g., KeePassX), save there, paste it into the
-        dialog. (It is also possible for pyFileSec to generate a passphrase
-        which you can then paste into a password manager; see the
-        ``--clipboard`` command-line option.)
+        or one will be auto generated. Ideally, generate a strong passphrase
+        in a password manager (e.g., KeePassX), save there, paste it into the
+        dialog.
 
         You may want to generate keys for testing purposes, and then generate
         different keys for actual use.
         """
-        # `interactive=False` is for test coverage, but could be scripted too
-        # will import _pyperclip and copy pphr to clipboard
 
-        #if not args:  # run interactively within python interpreter shell
-
-        # constant:
-        AUTO_PPHR_BITS = 128
-        pphr_out_size = AUTO_PPHR_BITS // 4 + 1  # +1 for '#' in printable_pwd
+        PPHR_BITS_DEFAULT = 128
+        PPHR_OUT_SIZE = PPHR_BITS_DEFAULT // 4 + 1  # +1 for printable_pwd '#'
         RSA_BITS_DEFAULT = 4096
+        if not args:
+            sys.argv = [lib_path, 'genrsa']
+            args = _parse_args()
 
-        # use args for filenames if given explicitly, ensure uniq matched sets:
-        pub = (args and args.pub) or abspath(_uniq_file('pub_RSA.pem'))
-        priv = (args and args.priv) or pub.replace('pub_RSA', 'priv_RSA')
-        if not args or args and args.passfile:
+        # ensure uniq matched sets (pub, priv, pphr):
+        pub = _abspath(_uniq_file(args.pub or 'pub_RSA.pem'))
+        priv = _abspath(args.priv or pub.replace('pub_RSA', 'priv_RSA'))
+        if args.passfile:
             pphr_out = pub.replace('pub_RSA', 'pphr_RSA')  # matched
             pphr_out = os.path.splitext(pphr_out)[0] + '.txt'
         else:
             pphr_out = None
-
-        if args and args.clipboard or not interactive:  # test cov
-            try:
-                import _pyperclip
-            except RuntimeError:
-                fatal('_pyperclip import: fail to open display?', RuntimeError)
-        pub = abspath(pub)
-        priv = abspath(priv)
         if pub == priv:
-            priv += '_priv.pem'
+            priv = splitext(priv)[0] + '_priv.pem'
 
-        msg = '\n%s: RSA key-pair generation dialog\n' % lib_name
+        msg = '\n%s: RSA key-generation dialog\n' % lib_name
         print(msg)
         if (os.path.exists(priv) or
-                args and args.passfile and os.path.exists(pphr_out)):
+                args.passfile and os.path.exists(pphr_out)):
             print('  > output file(s)already exist <\n'
-                   '  > Clean up files and try again. Exiting. <')
+                  '  > Clean up files and try again. Exiting. <')
             return None, None, None
 
         print('Will try to create files:')
@@ -1984,37 +1976,29 @@ class GenRSA(object):
         print(pub_msg)
         priv_msg = '  priv = %s' % priv
         print(priv_msg)
-        if not args:
-            pphr_msg = '  pphr = %s' % pphr_out
-            print(pphr_msg)
-        if args and args.passfile:
+        if args.passfile:
             pphrout_msg = '  pphr = %s' % pphr_out
             print(pphrout_msg)
-        if args and interactive:
+        if interactive:
             print('\nEnter a passphrase for the private key (16 or more chars)'
                   '\n  or press <return> to auto-generate a passphrase')
+            import getpass
             try:
-                import getpass
                 pphr = SecStr(getpass.getpass('Passphrase: '))
-            except ImportError:
-                pphr = SecStr(input23('Passphrase (will be displayed): '))
             except ValueError:
                 pphr = ''
         else:
             pphr = ''
         if pphr:
-            try:
-                pphr2 = SecStr(getpass.getpass('same again: '))
-            except:
-                pphr2 = SecStr(input23('same again: '))
+            pphr2 = SecStr(getpass.getpass('same again: '))
             if pphr.str != pphr2.str:
                 print('  > Passphrase mismatch. Exiting. <')
                 return None, None, None
+            pphr2.zero()
             pphr_auto = False
         else:
-            if args:
-                print('(auto-generating a passphrase)')
-            pphr = printable_pwd(AUTO_PPHR_BITS)
+            print('(auto-generating a passphrase)')
+            pphr = printable_pwd(PPHR_BITS_DEFAULT)
             pphr_auto = True
         print('')
         if pphr and len(pphr.str) < 16:
@@ -2033,14 +2017,14 @@ class GenRSA(object):
         ent_msg = '  entropy: ' + self.check_entropy()
         print(ent_msg)
 
-        nap = (2, 5)[bool(interactive)]  # 5 sec sleep in interactive mode
+        nap = 5  # 5 sec pause to give entropy a chance
         msg = '\nMove the mouse for %ds (to help generate entropy)' % nap
         print(msg)
         sys.stdout.flush()
         try:
             time.sleep(nap)
         except KeyboardInterrupt:
-            self._cleanup(' > cancelled, exiting <', priv, pub, pphr)
+            self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
             return None, None, None
 
         msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
@@ -2048,11 +2032,11 @@ class GenRSA(object):
         try:
             self.generate(pub, priv, pphr.str, bits)
         except KeyboardInterrupt:
-            self._cleanup(' > cancelled, exiting <', priv, pub, pphr)
+            self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
             return None, None, None
         except:
             self._cleanup('\n  > exception in generate(), exiting <',
-                          priv, pub, pphr)
+                          pub, priv, pphr)
             return None, None, None
 
         pub_msg = 'public key:  ' + pub
@@ -2060,7 +2044,7 @@ class GenRSA(object):
         priv_msg = 'private key: ' + priv
         print(priv_msg)
         if pphr_auto:
-            if not args or args and args.passfile:
+            if args.passfile:
                 pphr_msg = 'passphrase:  %s' % pphr_out
                 try:
                     set_umask()
@@ -2068,24 +2052,22 @@ class GenRSA(object):
                         fd.write(pphr.str)
                     unset_umask()
                 except:
-                    self._cleanup('', priv, pub, pphr)
+                    self._cleanup('', pub, priv, pphr)
                 if (not isfile(pphr_out) or
-                        not getsize(pphr_out) == pphr_out_size):
+                        not getsize(pphr_out) == PPHR_OUT_SIZE):
                     self._cleanup(' > save passphrase file failed, exiting <',
-                                  priv, pub, pphr_out)
+                                  pub, priv, pphr_out)
                     return None, None, None
-            elif args and args.clipboard:
+            elif args.clipboard:
+                try:
+                    import _pyperclip
+                except RuntimeError:
+                    fatal("can't use clipboard: no display?", RuntimeError)
                 _pyperclip.copy(pphr.str)
                 pphr_msg = ('passphrase:  saved to clipboard only... '
                             'paste it somewhere safe!!\n'
                             '      (It is exactly %d characters long, '
-                            'no end-of-line char)' % (pphr_out_size))
-            elif not interactive:
-                # this is for test cov, safe but meaningless for scripted use
-                clip_orig = _pyperclip.paste()
-                _pyperclip.copy('test of passphrase to clipboard')
-                _pyperclip.copy(clip_orig)  # restore contents
-                pphr_msg = 'not interactive; pphr to file'
+                            'no end-of-line char)' % PPHR_OUT_SIZE)
             else:
                 pphr_msg = 'passphrase:  ' + pphr.str
         else:
@@ -2098,7 +2080,7 @@ class GenRSA(object):
         del(pphr)
         if not interactive:
             return pub, priv, pphr_out
-        return '\nDialog complete.'
+        print('\nDialog complete.')
 
 
 class SecStr(object):
@@ -3007,7 +2989,8 @@ class Tests(object):
         assert s_orig == b'\0' * len(s_orig)
 
         # interned string or non-string should raise:
-        for s in [u'#ca6e89', 'ca6e89', 123]:
+        # sometimes u'#ca6e89' works, sometimes not
+        for s in [(), 'ca6e89', 123]:
             with pytest.raises(ValueError):
                 ss = SecStr(s)
 
@@ -3399,6 +3382,9 @@ class Tests(object):
         gen._cleanup('test cleanup', pu, pr, 'passphrase')
 
         # the test is that we won't overwrite existing priv
+        # priv comes from _uniq(pub) to preserve matched sets of key files
+        '''
+        priv = _uniq_file(pub)
         with open(priv, 'wb') as fd:
             fd.write('a')
         assert isfile(priv)  # or can't test
@@ -3406,6 +3392,13 @@ class Tests(object):
         args = _parse_args()
         pu, pr, pp = gen.dialog(interactive=False)
         assert (pu, pr) == (None, None)
+        '''
+
+        sys.argv = real_args
+
+    def test_logging(self):
+        global args
+        real_args = sys.argv
 
         sys.argv = [__file__, '--pad', 'no file', '--verbose']
         args = _parse_args()
@@ -4083,7 +4076,8 @@ def main():
     elif args.filename == 'genrsa':
         """Walk through key generation on command line.
         """
-        return GenRSA().dialog()
+        GenRSA().dialog(args=args)
+        sys.exit()
     elif not isfile(args.filename):
         raise ArgumentError('no such file (requires genrsa, debug, or a file)')
     else:
