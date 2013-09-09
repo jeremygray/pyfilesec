@@ -154,45 +154,33 @@ if True:
     class PyFileSecError(Exception):
         """Base exception for pyFileSec errors."""
 
-    class PublicKeyTooShortError(PyFileSecError):
-        '''Error to indicate that a public key is not long enough.'''
+    class EncryptError(PyFileSecError): pass  # failed, or refused to start
 
-    class EncryptError(PyFileSecError):
-        '''Error to indicate that encryption failed, or refused to start.'''
+    class DecryptError(PyFileSecError): pass  # failed, or refused to start
 
-    class DecryptError(PyFileSecError):
-        '''Error to indicate that decryption failed, or refused to start.'''
+    class PublicKeyError(PyFileSecError): pass
 
-    class PublicKeyError(PyFileSecError):
-        '''Error to indicate that public key failed.'''
+    class PublicKeyTooShortError(PyFileSecError): pass
 
-    class PrivateKeyError(PyFileSecError):
-        '''Error to indicate that loading a private key failed.'''
+    class PrivateKeyError(PyFileSecError): pass
 
-    class PassphraseError(PyFileSecError):
-        '''Error to indicate a passphrase error condition.'''
+    class PassphraseError(PyFileSecError): pass
 
-    class SecFileArchiveFormatError(PyFileSecError):
-        '''Error to indicate bad format or file name inside archive file.'''
+    class SecFileArchiveFormatError(PyFileSecError): pass
+
     SecFileFormatError = SecFileArchiveFormatError
 
-    class PaddingError(PyFileSecError):
-        '''Error to indicate bad file padding.'''
+    class PaddingError(PyFileSecError): pass
 
-    class CodecRegistryError(PyFileSecError):
-        '''Error to indicate codec registry problem, e.g., not registered.'''
+    class CodecRegistryError(PyFileSecError): pass # e.g., not registered
 
-    class DestroyError(PyFileSecError):
-        '''Error to indicate secure delete problem, e.g., destroy failed.'''
+    class DestroyError(PyFileSecError): pass  # e.g., destroy failed
 
-    class ArgumentError(PyFileSecError):
-        '''Error to indicate an argument problem, e.g., no file specified.'''
+    class ArgumentError(PyFileSecError): pass  # e.g., no file specified
 
-    class FileNotEncryptedError(PyFileSecError):
-        '''Error to indicate that an encrypted file is required.'''
+    class FileNotEncryptedError(PyFileSecError): pass
 
-    class FileStatusError(PyFileSecError):
-        '''Error to indicate that a require_file status check failed.'''
+    class FileStatusError(PyFileSecError): pass
 
 
 class PFSCodecRegistry(object):
