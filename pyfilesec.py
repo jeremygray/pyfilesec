@@ -2076,7 +2076,7 @@ class SecStr(object):
 
     Overrides ``__str__`` and ``__repr__``; use ``ss.str`` to get the value.
 
-    Experimental feature: ``ss = SecStr(s); ss.clear()`` will try self-destruct
+    Experimental feature: ``ss = SecStr(s); ss.zero()`` will try self-destruct
     by zero-ing out the value in
     memory of the string object ``s`; also called by ``del()``.
     Might be "security theater", but might be better than not trying at all.
@@ -2117,7 +2117,7 @@ class SecStr(object):
         return '<instance of %s, zeroed=%s>' % (str(self.__class__), self.zeroed)
 
     def __del__(self):
-        if hasattr(self, 'clear'):
+        if hasattr(self, 'zero'):
             self.zero()
 
     def _memset0(self):
