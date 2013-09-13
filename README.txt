@@ -18,7 +18,8 @@ that pyFileSec will be more widely useful. For example, command-line options
 make it accessible from non-python or non-open-source programs.
 
 Several truly excellent Python packages are available for encryption. However,
-file security requires more than just good encryption. The main and potentially
+file security requires more than just good encryption, e.g., securely deleting
+a file after encryption. The main and potentially
 unique contribution of pyFileSec is that it aspires to provide cross-platform,
 secure file-management with a low barrier to entry and a stable API going
 forward. These considerations motivate many of the design choices.
@@ -26,7 +27,7 @@ forward. These considerations motivate many of the design choices.
 The main functions provided include encryption (``encrypt``, ``decrypt``,
 ``rotate``) and verification (``sign``, ``verify``). It is also easy to
 obscure file length (``pad``, ``unpad``), securely remove files from disk
-(``destroy``) and inspect meta-data. Large files (tested up to 8G) and
+(``destroy``) and inspect meta-data (``.metadata``). Large files (tested up to 8G) and
 command-line usage are also supported. By default, file permissions are set to
 conservative values (only Mac & linux at this point). Unencrypted files are
 deleted securely after a successful encryption. Multiple hardlinks, version
@@ -45,7 +46,7 @@ without requiring changes to the API.
 
 Bug reports and code contributions are welcome; the project is on github and you
 can contact me there (https://github.com/jeremygray/pyFileSec). For contacting me
-privately, e.g., about security issues, please look for my gmail address at the
+privately, e.g., about security issues, please look for my email address at the
 top of the main code. Help with Windows would be particularly welcome (see the
 issues list).
 

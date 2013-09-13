@@ -300,6 +300,20 @@ noted).
     ``hardlinks`` : count of all hardlinks to the file (int)
         the count includes ``sf.file`` as one link. requires Admin priviledges on Windows.
 
+
+class SecStr()
+================
+
+.. autoclass:: pyfilesec.SecStr
+    :members: zero
+
+SecStr objects have two properties.
+
+    ``str`` : the actual string contained by ``str_obj``. This can be the null string '', or a non-internable string.
+
+    ``zeroed`` : boolean, to indicate whether the string has been zeroed in memory.
+
+
 Class SecFileArchive
 =====================
 
@@ -330,6 +344,7 @@ inspection in archival uses.
 .. autoclass:: pyfilesec.SecFileArchive
     :members:
 
+
 Class RsaKeys
 ==============
 
@@ -357,6 +372,7 @@ with pyFileSec.
 .. autoclass:: pyfilesec.GenRSA
     :members: dialog
 
+
 Class Codec Registry
 =====================
 
@@ -374,9 +390,9 @@ The built-in tests can be run from the command line::
 
 or from within the main directory just::
 
-    $ py.test
+    $ py.test -k-slow
 
-To see log messages during tests::
+To see log messages and gc-debug during tests::
 
     $ python pyfilesec.py debug
 
@@ -388,8 +404,9 @@ messages (e.g., "RSA operation error") because these are logged.
 
 For details of the specific tests, consult the code directly.
 
-Beyond the test-suite
-========================
+
+Performance
+============
 
 Files encrypted on one machine can be decrypted on a different platform. (Not
 tested yet with machines known to be of different endian-ness, however.)

@@ -36,6 +36,8 @@ if sys.version < '2.6':
 import argparse
 from   base64 import b64encode, b64decode
 import copy
+from   ctypes import memset, Structure, py_object  # for SecStr
+from   ctypes import c_long, c_int, c_size_t, sizeof
 from   functools import partial  # for buffered hash digest
 import hashlib
 import json
@@ -49,26 +51,16 @@ import stat
 import subprocess
 import tarfile
 from   tempfile import mkdtemp, NamedTemporaryFile
+import threading
 import time
 
-# for SecStr:
-from   ctypes import memset, Structure, py_object, c_long, c_int, sizeof
-try:
-    from ctypes import c_ssize_t
-except (ImportError, OSError):
-    # import failed on linux (CentOS 6.4, python 2.6.6); ok on mac 10.8, win 7
-    # http://docs.python.org/3.4/library/ctypes.html
-    # get 32/64 bit: file -L `python -c "import sys; print(sys.executable)"`
-
-    c_ssize_t = c_int  # same 32 and 64 bit arch?
-
 if sys.platform == 'win32':
-    get_time = time.clock
     from win32com.shell import shell
     user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
+    get_time = time.clock
 else:
-    get_time = time.time
     user_can_link = True
+    get_time = time.time
 
 # other imports in GenRSA.dialog:
 #   import _pyperclip    # if use --clipboard from commandline
@@ -77,6 +69,7 @@ else:
 # http://fossies.org/dox/Python-2.7.5/getpass_8py_source.html
 
 
+# exec(compile(open('constants.py').read(), 'constants.py', 'exec'))
 # CONSTANTS and INITS ------------ (with code folding) --------------------
 if True:
     # python 3 compatibility:
@@ -350,6 +343,8 @@ class PFSCodecRegistry(object):
 
 
 class _SecFileBase(object):
+    """Class providing helper methods and properties, but not core sec methods.
+    """
     def __init__(self, pub=None, priv=None, pphr=None):
         self.rsakeys = RsaKeys(pub=pub, priv=priv, pphr=pphr)
 
@@ -1130,9 +1125,11 @@ class SecFile(_SecFileBase):
                 if False, unlink the meta file after decrypt
             `keep_enc` :
                 if False, unlink the encrypted file after decryption
-            `dec_method` : (not implemented yet, only one choice)
+            `dec_method` : (not implemented yet, only one choice).
                 name of a decryption method that has been registered in
-                the current ``codec`` (see ``PFSCodecRegistry``)
+                the current ``codec`` (see ``PFSCodecRegistry``).
+                ``None`` will try to use information in the file's meta-data,
+                and will fall through to the default method.
         """
         set_umask()
         name = 'decrypt'
@@ -1879,7 +1876,7 @@ class GenRSA(object):
     def _cleanup(self, msg, pub, priv, pphr=None):
         print(msg)
         try:
-            destroy(priv)
+            SecFile(priv).destroy()
         except:
             try:
                 os.unlink(priv)
@@ -1887,7 +1884,7 @@ class GenRSA(object):
                 pass
         if pphr:
             try:
-                destroy(pphr)
+                SecFile(pphr).destroy()
             except:
                 try:
                     os.unlink(pphr)
@@ -2074,30 +2071,42 @@ class GenRSA(object):
 class SecStr(object):
     """Class to help mitigate accidental disclosure of sensitive strings.
 
-    Overrides ``__str__`` and ``__repr__``; use ``ss.str`` to get the value.
+    Example usage::
 
-    Experimental feature: ``ss = SecStr(s); ss.zero()`` will try self-destruct
-    by zero-ing out the value in
-    memory of the string object ``s`; also called by ``del()``.
-    Might be "security theater", but might be better than not trying at all.
+        pwd = SecStr(password)
+        pwd_hash = some_hash_function(pwd.str)
+        pwd.zero()  # the string `password` is now '\\x00\\x00\\x00...'
+
+    Use ``pwd.str`` to get the value (string); ``str(pwd)`` raises a ValueError.
+
+    ``pwd.zero()`` will replace the value of string ``password`` with 0's to
+    the extent possible. Interned strings (= one character, or alphanumeric)
+    cannot be zeroed, and will raise a ValueError at initialization.
+
+    :Parameters:
+        ``str_obj`` :
+            the string object; cannot have a value that python will intern.
     """
     class PyStringObject(Structure):
         _fields_ = [
-            ('ob_refcnt', c_ssize_t),
+            ('ob_refcnt', c_size_t),
             ('ob_type', py_object),
-            ('ob_size', c_ssize_t),
+            ('ob_size', c_size_t),
             ('ob_shash', c_long),
-            ('ob_sstate', c_int),
+            ('ob_sstate', c_int)
             # ob_sval varies in size
             ]
 
-    def __init__(self, val):
-        self.s_obj = self.PyStringObject.from_address(id(val))
-        if self.s_obj.ob_sstate > 0:
-            raise ValueError("received an interned str, unicode, or non-str")
-        self._val = val
+    def __init__(self, str_obj):
+        self.s_obj = self.PyStringObject.from_address(id(str_obj))
+        if str_obj and self.s_obj.ob_sstate > 0:
+            raise ValueError("interned string (or non-string)")
+        if not str_obj:
+            str_obj = ''
+        self._val = str_obj
+        # del(str_obj.__str__)  # fails, its read-only
         self._zeroed = False
-        self._id = id(val)
+        self._id = id(str_obj)
 
     @property
     def str(self):
@@ -2114,7 +2123,7 @@ class SecStr(object):
         raise RuntimeError('cannot get value via str(), use .str')
 
     def __repr__(self):
-        return '<instance of %s, zeroed=%s>' % (str(self.__class__), self.zeroed)
+        return '<%s instance, zeroed=%s>' % (str(self.__class__), self.zeroed)
 
     def __del__(self):
         if hasattr(self, 'zero'):
@@ -2129,13 +2138,14 @@ class SecStr(object):
         # security.... there would still be other copies of the password that
         # have been created in various string operations."
 
-        # __init__ should prevent this condition, but don't want to seg-fault
+        # __init__ should prevent this, but don't want to seg-fault
         if self.s_obj.ob_sstate > 0:
-            raise ValueError("cannot zero interned string")
+            raise ValueError("cannot zero an interned string")
         self.s_obj.ob_shash = -1  # not hashed yet
 
         if py64bit:
-            offset = 36  # sizeof(PyStringObject) == 40
+            offset = sizeof(self.PyStringObject) - 4
+            # sizeof() == 40 on py64bit; unclear why sizeof() is not 36
         else:
             offset = sizeof(self.PyStringObject)  # 20
         tare = ''.__sizeof__()  # not unicode
@@ -2143,27 +2153,33 @@ class SecStr(object):
         memset(id(self._val) + offset, 0, num_bytes)
 
     def zero(self):
-        """Try to replace the string in memory with b'\0'.
+        """Try to overwrite the whole string in memory with '\\\\x00's.
 
-        Returns self: this allows anon usage like ``SecStr(str_val).clear()``
-        to work (if its not an interned string).
+        Supports anonymous usage: ``SecStr(str_obj).zero()``.
         """
         try:
             self._memset0()
+        except ValueError:
+            del self._val
+            self._val = b'\0' * len(self)  # new / different id
+            self._zeroed = False
+            self._id = id(self._val)
+        else:
             self._zeroed = True
             self._id = None
-        except ValueError:
-            # interned strings cannot be zeroed
-            self._val = b'\0' * len(self)  # different id, help avoid display
-            self._zeroed = False
+
+        if not self._val:
+            self._zeroed = True
         return self
 
 
 def _abspath(filename):
-    """Returns the absolute path (norm-pathed), Capitalize first char (win32)
+    """Returns the absolute path, capitalize drive letter (win32)
     """
     f = os.path.abspath(filename)  # implicitly does normpath too
-    return f[0].capitalize() + f[1:]
+    if sys.platform == 'win32':
+        return f[0].capitalize() + f[1:]
+    return f
 
 
 def command_alias():
@@ -2201,27 +2217,33 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     cmdRSA += [RSA_PADDING, '-decrypt']
 
     # Define command to decrypt the data using pwd:
-    cmdAES = [openssl, 'enc', '-d', '-aes-256-cbc', '-a',
-              '-in', data_enc, '-out', data_dec, '-pass', 'stdin']
+    cmdAES = [openssl, 'enc', '-d', '-aes-256-cbc',
+                '-a',
+                '-in', data_enc,
+                '-out', data_dec,
+                '-pass', 'stdin']
 
     # decrypt pwd (digital envelope "session" key) to RAM using private key
     # then use pwd to decrypt the ciphertext file (data_enc):
     try:
-        pwd, se_RSA = sys_call(cmdRSA, stdin=pphr, stderr=True)
+        pwd, se_RSA = sys_call(cmdRSA, stdin=pphr, stderr=True, sec_str=True)
+        pwd_zero = threading.Timer(0.02, pwd.zero)
+        pwd_zero.start()  # AES decrypt can be slow, best to clear pwd
         ___, se_AES = sys_call(cmdAES, stdin=pwd, stderr=True)
     except KeyboardInterrupt:
         if isfile(data_dec):
-            destroy(data_dec)
+            SecFile(data_dec).destroy()
         fatal('%s: Keyboard interrupt, no decrypt' % name,
               KeyboardInterrupt)
     except:
         if isfile(data_dec):
-            destroy(data_dec)
+            SecFile(data_dec).destroy()
         fatal('%s: Could not decrypt (exception in RSA or AES step)' % name,
                DecryptError)
     finally:
         if 'pwd' in locals():
-            del pwd  # might as well try
+            pwd_zero.cancel()
+            del pwd
 
     # Log any error-ish conditions, avoid false alarms:
     if sys.platform == 'win32':
@@ -2268,18 +2290,18 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     cmd_RSA = [openssl, 'rsautl',
-          '-out', pwd_rsa,
-          '-inkey', pub,
-          '-keyform', 'PEM',
-          '-pubin',
-          RSA_PADDING, '-encrypt']
+                '-out', pwd_rsa,
+                '-inkey', pub,
+                '-keyform', 'PEM',
+                '-pubin',
+                RSA_PADDING, '-encrypt']
 
     # Define command to AES-256-CBC encrypt datafile using the password:
     cmd_AES = [openssl, 'enc', '-aes-256-cbc',
-              '-a', '-salt',
-              '-in', datafile,
-              '-out', data_enc,
-              '-pass', 'stdin']
+                '-a', '-salt',
+                '-in', datafile,
+                '-out', data_enc,
+                '-pass', 'stdin']
     try:
         sys_call(cmd_RSA, stdin=pwd.str)
         sys_call(cmd_AES, stdin=pwd.str)
@@ -2548,24 +2570,35 @@ def sha256_(filename):
     return dgst.hexdigest()
 
 
-def sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
+def sys_call(cmdList, stderr=False, stdin='', ignore_error=False, sec_str=0):
     """Run a system command via subprocess, return stdout [, stderr].
 
     stdin is optional string to pipe in. Will always log a non-empty stderr.
     (stderr is sent to logging.INFO if ignore_error=True).
+
+    sec_str=True will return stdout as a SecStr
     """
     msg = ('', ' (ignore_error=True)')[ignore_error]
     log = (logging.error, logging.info)[ignore_error]
     logging.debug('sys_call%s: %s' % (msg, (' '.join(cmdList))))
 
-    proc = subprocess.Popen(cmdList, stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    so, se = proc.communicate(stdin)
-    so, se = so.strip(), se.strip()
+    proc = subprocess.Popen(cmdList,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+    if hasattr(stdin, 'str'):
+        _so, se = proc.communicate(stdin.str)  # e.g. a pwd
+    else:
+        _so, se = proc.communicate(stdin)
+
+    if sec_str:
+        so = SecStr(_so)  # '' ok
+    else:
+        so = _so.strip()
     if se:
-        log('stderr%s: %s' % (msg, se))
+        log('stderr%s: %s' % (msg, se.strip()))
     if stderr:
-        return so.strip(), se
+        return so, se.strip()
     else:
         return so
 
@@ -2652,9 +2685,6 @@ class Tests(object):
     - hardlinks (fsutil) need admin priv on win32; test links reported = -1
     """
     def setup_class(self):
-        #global OPENSSL
-        #OPENSSL = '/opt/local/bin/openssl'
-
         global codec
         codec = PFSCodecRegistry(default_codec)
 
@@ -2976,9 +3006,13 @@ class Tests(object):
         del(ss)
         assert s_orig == b'\0' * len(s_orig)
 
+        # null string should pass
+        for s in ['', ()]:
+            SecStr(s)
+
         # interned string or non-string should raise:
         # sometimes u'#ca6e89' works, sometimes not
-        for s in [(), 'ca6e89', 123]:
+        for s in ['ca6e89', 123]:
             with pytest.raises(ValueError):
                 ss = SecStr(s)
 
