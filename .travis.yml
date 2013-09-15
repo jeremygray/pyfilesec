@@ -10,18 +10,16 @@ virtualenv:
 before_install:
   - sudo apt-get update -qq
   - echo ${DISTRIB_CODENAME}
-  - travis_retry sudo apt-get update -qq
-  - sudo apt-cache policy           # What is actually available?
+  #- travis_retry sudo apt-get update -qq
+  #- sudo apt-cache policy           # What is actually available?
   # OpenSSL is pre-installed
 install:
   #- if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then pip install -q pytest; fi  # pre-installed
-  #- if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then
-  - pip install -q coveralls; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then pip install -q coveralls; fi
   - if [[ $TRAVIS_PYTHON_VERSION == 2.6 ]]; then pip install -q argparse; fi
 branches:
   only:
     - master
 script: py.test -k-notravis pyfilesec.py
 after_success:
-  #- if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then coveralls; fi
-  - coveralls
+  - if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then coveralls; fi
