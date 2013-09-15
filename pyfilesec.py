@@ -4051,6 +4051,7 @@ class Tests(object):
         dropbox_path = orig_path
 
 
+@pytest.mark.notravis
 @pytest.mark.slow
 class TestAgain(Tests):
     """Same again using another version of OpenSSL

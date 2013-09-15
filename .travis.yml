@@ -1,0 +1,24 @@
+# vim ft=yaml
+# travis-ci.org and coveralls definition for pyFileSec tests
+language: python
+python:
+  - "2.7"
+  - "2.6"
+  # - "3.3"
+virtualenv:
+  system_site_packages: true
+before_install:
+  - sudo apt-get update -qq
+  - echo ${DISTRIB_CODENAME}
+  - travis_retry sudo apt-get update -qq
+  - sudo apt-cache policy           # What is actually available?
+  # OpenSSL is pre-installed
+install:
+  #- if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then pip install -q pytest; fi  # pre-installed
+  - if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then pip install -q coveralls; fi
+branches:
+  only:
+    - master
+script: py.test -k-notravis pyfilesec.py
+after_success:
+  - if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then coveralls; fi
