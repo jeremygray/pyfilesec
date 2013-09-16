@@ -1,3 +1,4 @@
+
 ===========
  pyFileSec
 ===========
@@ -64,6 +65,16 @@ Michael Stone - awesome code review
 
 Sol Simpson - Windows compatibility
 
+Code status (main development branch)
+--------------------------------------
+
+travis-ci.org (master branch):
+
+* .. image:: https://travis-ci.org/jeremygray/pyfilesec.png
+
+coveralls.io (master branch)
+
+* .. image:: https://coveralls.io/r/jeremygray/pyfilesec.png
 
 Milestones
 -----------

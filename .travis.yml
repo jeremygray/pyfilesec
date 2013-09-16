@@ -15,11 +15,11 @@ before_install:
   # OpenSSL is pre-installed
 install:
   #- if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then pip install -q pytest; fi  # pre-installed
-  - if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then pip install -q coveralls; fi
+  - pip install -q coveralls --use-mirrors && export HAS_COVERALLS=1
   - if [[ $TRAVIS_PYTHON_VERSION == 2.6 ]]; then pip install -q argparse; fi
 branches:
   only:
     - master
 script: py.test -k-notravis pyfilesec.py
 after_success:
-  - if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then coveralls; fi
+  - if [[ $HAS_COVERALLS ]]; then coveralls; fi
