@@ -70,11 +70,13 @@ Code status (main development branch)
 
 travis-ci.org (master branch):
 
-* .. image:: https://travis-ci.org/jeremygray/pyfilesec.png
+* .. image:: https://travis-ci.org/jeremygray/pyfilesec.png?branch=master
+    :target: https://travis-ci.org/jeremygray/pyfilesec?branch=master
 
 coveralls.io (master branch)
 
-* .. image:: https://coveralls.io/r/jeremygray/pyfilesec.png
+* .. image:: https://coveralls.io/repos/jeremygray/pyfilesec/badge.png?branch=master
+    :target: https://coveralls.io/r/jeremygray/pyfilesec?branch=master
 
 Milestones
 -----------
