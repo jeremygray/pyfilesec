@@ -6,13 +6,15 @@ python:
 virtualenv:
   system_site_packages: true
 before_install:
-  - openssl version  # OpenSSL is pre-installed
+  - which openssl
+  - /usr/bin/openssl version  # OpenSSL is pre-installed
+  - py.test --version
 install:
   - pip install -q coveralls --use-mirrors && export HAS_COVERALLS=1
   - if [[ $TRAVIS_PYTHON_VERSION == 2.6 ]]; then pip install -q argparse; fi
 branches:
   only:
     - master
-script: py.test -k-notravis --cov pyfilesec
+script: py.test -k-notravis --cov pyfilesec.py
 after_success:
   - if [[ $HAS_COVERALLS ]]; then coveralls; fi
