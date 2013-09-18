@@ -65,19 +65,6 @@ Michael Stone - awesome code review
 
 Sol Simpson - Windows compatibility
 
-Code status (main development branch)
---------------------------------------
-
-travis-ci.org (master branch):
-
-* .. image:: https://travis-ci.org/jeremygray/pyfilesec.png?branch=master
-    :target: https://travis-ci.org/jeremygray/pyfilesec?branch=master
-
-coveralls.io (master branch)
-
-* .. image:: https://coveralls.io/repos/jeremygray/pyfilesec/badge.png?branch=master
-    :target: https://coveralls.io/r/jeremygray/pyfilesec?branch=master
-
 Milestones
 -----------
 
@@ -86,6 +73,14 @@ Milestones
 - 0.4  An alternative encryption backend (possibly pyCrypto and gpg support)
 - 0.5  Windows file-permissions
 
+Dev branch status
+------------------
+
+.. image:: https://travis-ci.org/jeremygray/pyfilesec.png?branch=master
+    :target: https://travis-ci.org/jeremygray/pyfilesec?branch=master
+
+.. image:: https://coveralls.io/repos/jeremygray/pyfilesec/badge.png?branch=master
+    :target: https://coveralls.io/r/jeremygray/pyfilesec?branch=master
 
 See also
 ---------
