@@ -76,10 +76,13 @@ else:
     http://fossies.org/dox/Python-2.7.5/getpass_8py_source.html
 """
 
-# load constants and exception classes from external file:
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__)
+if isfile(lib_path.strip('co')):
+    lib_path = lib_path.strip('co')
 lib_dir = os.path.split(lib_path)[0]
+
+# load constants and exception classes from external file:
 constants = os.path.join(lib_dir, 'constants.py')
 exec(compile(open(constants).read(), 'constants.py', 'exec'))
 
