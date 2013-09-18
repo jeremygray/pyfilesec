@@ -15,6 +15,6 @@ install:
 branches:
   only:
     - master
-script: py.test -k-notravis pyfilesec.py
+script: py.test -k-notravis --cov pyfilesec
 after_success:
   - if [[ $HAS_COVERALLS ]]; then coveralls; fi
