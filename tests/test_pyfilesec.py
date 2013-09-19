@@ -107,8 +107,10 @@ class Tests(object):
 
     def test_constants_imports(self):
         import pyfilesec.constants
+        os.chdir(self.start_dir)
         import _pyperclip
         import _getpass
+        os.chdir(self.tmp)
 
     def test_secfile_base(self):
         test_file = 'tf'
