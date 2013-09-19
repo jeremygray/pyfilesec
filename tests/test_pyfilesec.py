@@ -111,7 +111,7 @@ class Tests(object):
         import which
         os.chdir(self.tmp)
 
-    @pytest.mark.notravis
+    #@pytest.mark.notravis
     def test_imports(self):
         os.chdir(self.start_dir)
         import _pyperclip
@@ -732,6 +732,15 @@ class Tests(object):
                 os.remove(sf.file)
             assert bigfile_size > size
 
+
+    @pytest.mark.slow
+    #@pytest.mark.notravis
+    def test_GenRSA(self):
+        GenRSA().dialog(interactive=False, args=args)
+        sys.argv = [__file__, 'genrsa', '--clipboard']
+        args = _parse_args()
+        GenRSA().dialog(interactive=False, args=args)
+
     @pytest.mark.slow
     def test_GenRSA(self):
         # set sys.argv to test arg usage; similar in test_main()
@@ -743,10 +752,6 @@ class Tests(object):
         sys.argv = [__file__, 'genrsa', '--passfile']
         args = _parse_args()
         pub, priv, pp = genrsa(interactive=False)
-        GenRSA().dialog(interactive=False, args=args)
-        sys.argv = [__file__, 'genrsa', '--clipboard']
-        args = _parse_args()
-        GenRSA().dialog(interactive=False, args=args)
 
         # induce some badness to increase test cov: pub==priv, existing priv:
         sys.argv = [__file__, 'genrsa', '--pub', priv, '--priv', priv]

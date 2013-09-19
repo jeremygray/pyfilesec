@@ -11,6 +11,7 @@ before_install:
   - py.test --version
   - sudo pwd > /home/travis/virtualenv/python2.7_with_system_site_packages/lib/python2.7/site-packages/pyfilesec.pth
   - sudo pwd > /home/travis/virtualenv/python2.6_with_system_site_packages/lib/python2.6/site-packages/pyfilesec.pth
+  - sudo apt-get install xclip
 install:
   - pip install pytest-cov
   - pip install -q coveralls --use-mirrors && export HAS_COVERALLS=1
