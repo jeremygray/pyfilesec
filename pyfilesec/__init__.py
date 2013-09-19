@@ -2727,8 +2727,7 @@ openssl_path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
 
-sys_ex = sys_call(['file', '-L', sys.executable])
-py64bit = '64-bit' in sys_ex or 'x86-64' in sys_ex
+py64bit = (sys.maxsize == 9223372036854775807)
 
 # Register the default codec, runs auto-test
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,

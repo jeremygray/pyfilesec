@@ -24,33 +24,35 @@ clear
 
 # Create a data file with contents:
 echo 'sensitive stuff (e.g., HIPAA-covered info)' > datafile.txt
+echo '% alias pfs=../pyfilesec/__init__.py'
+alias pfs=../pyfilesec/__init__.py
 
 # Pad to change the file size. The new length is reported:
 echo
 echo 'PAD:'
-echo '% python ../pyfilesec.py --pad datafile.txt'
-python ../pyfilesec.py --pad datafile.txt
+echo '% pfs --pad datafile.txt'
+pfs --pad datafile.txt
 # output: 13684
 
 # To encrypt, need an RSA public key, in .pem format. Encrypt returns the
 echo
 echo 'ENCRYPT:'
-echo '% python ../pyfilesec.py --encrypt datafile.txt --pub pub_RSA_demo_only.pem --nometa'
-python ../pyfilesec.py --encrypt datafile.txt --pub pub_RSA_demo_only.pem --nometa
+echo '% pfs --encrypt datafile.txt --pub pub_RSA_demo_only.pem --nometa'
+pfs --encrypt datafile.txt --pub pub_RSA_demo_only.pem --nometa
 
 # The original file is securely deleted by default
 
 # To decrypt, need the matching RSA private key, and its passphrase if any.
 echo
 echo 'DECRYPT:'
-echo '% python ../pyfilesec.py --decrypt --priv priv_RSA_demo_only.pem --pphr pphr_demo_only datafile.txt.enc'
-python ../pyfilesec.py --decrypt --priv priv_RSA_demo_only.pem --pphr pphr_demo_only datafile.enc
+echo '% pfs --decrypt --priv priv_RSA_demo_only.pem --pphr pphr_demo_only datafile.enc'
+pfs --decrypt --priv priv_RSA_demo_only.pem --pphr pphr_demo_only datafile.enc
 
 # The new decrypted plain-text file is still padded. Remove padding.
 echo
 echo 'UNPAD:'
-echo '% python ../pyfilesec.py datafile.txt --unpad'
-python ../pyfilesec.py datafile.txt --unpad
+echo '% pfs datafile.txt --unpad'
+pfs datafile.txt --unpad
 
 echo
 
