@@ -111,7 +111,7 @@ class Tests(object):
         import which
         os.chdir(self.tmp)
 
-    #@pytest.mark.notravis
+    @pytest.mark.notravis
     def test_imports(self):
         os.chdir(self.start_dir)
         import _pyperclip
@@ -734,7 +734,7 @@ class Tests(object):
 
 
     @pytest.mark.slow
-    #@pytest.mark.notravis
+    @pytest.mark.notravis
     def test_GenRSA(self):
         GenRSA().dialog(interactive=False, args=args)
         sys.argv = [__file__, 'genrsa', '--clipboard']
