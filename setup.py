@@ -5,7 +5,7 @@ from distutils.core import setup
 
 setup(
     name='PyFileSec',
-    version='0.2.10alpha',
+    version='0.2.11alpha',
     author='Jeremy R. Gray',
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
@@ -26,7 +26,6 @@ setup(
                  ],
     keywords=['encryption', 'security', 'privacy', 'integrity',
               'human subjects', 'research'],
-    #url='http://pythonhosted.org/pyFileSec', # documentation
     url='https://github.com/jeremygray/pyFileSec', # home-page
     description='File-oriented privacy & integrity management tools',
     long_description=open('README.txt').read(),

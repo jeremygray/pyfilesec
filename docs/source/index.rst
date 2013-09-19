@@ -66,7 +66,7 @@ on your behalf. With encryption, however, it would likely be prohibitively expen
 to hire someone to "break in on your behalf"; hopefully that is not possible,
 even for a well-funded adversary. So it is possible to lose data by trying to secure it.
 
-**Development status:** As of version 0.2.10, the development status is **alpha**,
+**Development status:** The development status is **alpha**,
 meaning that major API changes and bugs are possible. The development emphasis is
 currently on refactoring the code for Python 3.
 Documentation is a work in progress. A few extensions are planned, notably
