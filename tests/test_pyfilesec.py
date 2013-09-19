@@ -105,6 +105,11 @@ class Tests(object):
         return (_abspath(pub), _abspath(priv), bits,
                 (kwnSig0p9p8, kwnSig1p0))
 
+    def test_constants_imports(self):
+        import pyfilesec.constants
+        import _pyperclip
+        import _getpass
+
     def test_secfile_base(self):
         test_file = 'tf'
         with open(test_file, 'wb') as fd:
@@ -175,6 +180,9 @@ class Tests(object):
         good_path = OPENSSL
         with pytest.raises(RuntimeError):
             set_openssl('junk.glop')
+        #with pytest.raises(RuntimeError):
+        #    p = os.path.join(os.path.split(__file__)[0], 'openssl_version_97')
+        #    set_openssl(p)
         set_openssl(good_path)
         if sys.platform in ['win32']:
             # exercise more code by forcing a reconstructon of the .bat files:
@@ -188,6 +196,11 @@ class Tests(object):
         command_alias()
         set_openssl()
         set_destroy()
+        sys.argv = [sys.executable, lib_path, '--verbose']
+        args = _parse_args()
+        logging, log_t0 = set_logging(True)
+        logging.debug('test message')
+
         get_dropbox_path()
 
     def test_SecFile_basics(self):
@@ -301,6 +314,14 @@ class Tests(object):
         sfa.unpack()
         sfa.get_dec_method(codec_registry)
 
+        sfa = SecFileArchive().pack(pub)
+        with open('ttt', 'wb') as fd:
+            fd.write('ttt')
+        with pytest.raises(SecFileArchiveFormatError):
+            s = SecFileArchive('ttt')
+            s.name = 'ttt'
+            s.unpack()
+
         '''
         # test fall-through decryption method:
         with open('abc' + AES_EXT, 'wb') as fd:
@@ -373,20 +394,16 @@ class Tests(object):
         assert pwd._id == None
         assert pwd._val == pwd.str == b'\0' * (256 // 4 + 1)
 
-    @pytest.mark.main
     def test_main(self):
         # similar to test_command_line (those do not count toward coverage)
-
-        # 'debug' can work but leaves debris behind causing other test fails
-        # and gc info gets dumped to screen after py.test
-        # avoid inf loop by disabling test_main in debug (for test in tests:)
-        #sys.argv = [__file__, 'debug']
-        #args = _parse_args()
-        #_main()
 
         sys.argv = [__file__, '--help']
         with pytest.raises(SystemExit):
             args = _parse_args()
+
+        sys.argv = [__file__, 'genrsa', '-a']
+        with pytest.raises(SystemExit):
+            main(_parse_args())
 
         tmp = 'tmp'
         with open(tmp, 'wb') as fd:
@@ -718,6 +735,10 @@ class Tests(object):
         sys.argv = [__file__, 'genrsa', '--passfile']
         args = _parse_args()
         pub, priv, pp = genrsa(interactive=False)
+        GenRSA().dialog(interactive=False, args=args)
+        sys.argv = [__file__, 'genrsa', '--clipboard']
+        args = _parse_args()
+        GenRSA().dialog(interactive=False, args=args)
 
         # induce some badness to increase test cov: pub==priv, existing priv:
         sys.argv = [__file__, 'genrsa', '--pub', priv, '--priv', priv]
@@ -1000,6 +1021,13 @@ class Tests(object):
         sf.decrypt(priv, pphr)
         assert int(sf.permissions) == PERMISSIONS  # restricted
         os.umask(umask_restore)
+
+    def test_rename(self):
+        with open('abc', 'wb') as fd:
+            fd.write('abc')
+        s = SecFile('abc')
+        s.rename('bca')
+        assert isfile('bca')
 
     def test_hmac(self):
         # verify pfs hmac implementation against a widely used example:

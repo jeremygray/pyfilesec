@@ -3,13 +3,7 @@
 Part of the pyFileSec library, Copyright (c) 2013 Jeremy R. Gray.
 """
 
-
-# python 3 compatibility:
-if sys.version < '3.':
-    input23 = raw_input
-else:
-    input23 = input
-
+import re
 
 # Constants: --------------------
 RSA_PADDING = '-oaep'  # actual arg for openssl rsautl in encrypt, decrypt
@@ -33,7 +27,7 @@ LRG_FILE_WARN = 2 ** 24  # 17M; used in tests but not implemented elsewhere
 MAX_FILE_SIZE = 2 ** 33  # 8G; larger likely fine unless pad w/ > 8G pad
 
 # file-length padding:
-PFS_PAD = lib_name + '_padded'  # label = 'file is padded'
+PFS_PAD = 'pyFileSec_padded'  # label = 'file is padded'
 PAD_STR = 'pad='    # label means 'pad length = \d\d\d\d\d\d\d\d\d\d bytes'
 PAD_BYTE = b'\0'    # actual byte to use; value unimportant
 assert not str(PAD_BYTE) in PFS_PAD

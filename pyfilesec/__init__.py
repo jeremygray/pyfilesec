@@ -7,8 +7,8 @@
  # Copyright (c) Jeremy R. Gray, 2013
  # Released under the GPLv3 licence with the additional exemptions that
  # 1) compiling, linking, and/or using OpenSSL are allowed, and
- # 2) the copyright, licence terms, and following disclaimer be included in any
- #    and all derivative work.
+ # 2) the copyright notice, licence terms, and following disclaimer be included
+ #    in any and all derivative work.
 
  # DISCLAIMER: THIS SOFTWARE IS PROVIDED ``AS IS'', WITHOUT REPRESENTATION FROM
  # THE COPYRIGHT HOLDER OR CONTRIBUTORS AS TO ITS FITNESS FOR ANY PURPOSE, AND
@@ -54,6 +54,12 @@ from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
 import time
 
+# python 3 compatibility:
+if sys.version < '3.':
+    input23 = raw_input
+else:
+    input23 = input
+
 if sys.platform == 'win32':
     from win32com.shell import shell
     user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
@@ -67,13 +73,9 @@ else:
 #   import getpass       # for no-display passphrase entry during RSA key-gen
 
 """TO-DO:
-- mkdir tests/, move test classes into files in tests/, exec(constants)
-- get coverage working for coveralls.io
 - add Trent Mick's which.py, use in _pyperclip and set_openssl, set_destroy for
     win32 before falling through to `where` (slow search)
 - move _enc, _dec into files in new dir codec/, sha256() and execfile() them
-- getpass module is short; hack to add SecStr (for fewer copies in mem)?
-    http://fossies.org/dox/Python-2.7.5/getpass_8py_source.html
 """
 
 lib_name = 'pyFileSec'
@@ -2244,10 +2246,10 @@ def get_dropbox_path():
     """
     global dropbox_path
     if dropbox_path is None:
-        if sys.platform != 'win32':
-            host_db = os.path.expanduser('~/.dropbox/host.db')
-        else:
+        if sys.platform == 'win32':
             host_db = os.path.join(os.environ['APPDATA'], 'Dropbox', 'host.db')
+        else:
+            host_db = os.path.expanduser('~/.dropbox/host.db')
         if not exists(host_db):
             logging.info('did not find a Dropbox folder')
             dropbox_path = False
@@ -2371,6 +2373,7 @@ def set_destroy():
         sd_version = sys_call([DESTROY_EXE]).splitlines()[0]
         logging.info('Found ' + sd_version)
         DESTROY_OPTS = ('-q', '-p', '7')
+
     if not isfile(DESTROY_EXE):
         raise NotImplementedError("Can't find a secure file-removal tool")
 
@@ -2380,7 +2383,7 @@ def set_destroy():
     return DESTROY_EXE, DESTROY_OPTS
 
 
-def set_logging():
+def set_logging(verbose=False):
     class _log2stdout(object):
         """Print all logging messages, regardless of log level.
         """
@@ -2398,7 +2401,6 @@ def set_logging():
         error = warning = exp = data = info = debug
 
     logging_t0 = get_time()
-    verbose = args and bool(args.verbose or args.filename == 'debug')
     if not verbose:
         logging = _no_logging()
     else:
@@ -2456,7 +2458,6 @@ def set_openssl(path=None):
                 with open(OPENSSL, 'wb') as fd:
                     fd.write(where_bat)
         logging.info('will use .bat file for OpenSSL: %s' % OPENSSL)
-
     if not isfile(OPENSSL):
         msg = 'Could not find openssl executable, tried: %s' % OPENSSL
         fatal(msg, RuntimeError)
@@ -2589,38 +2590,13 @@ def DEMO_RSA_KEYS(folder=''):
 
 def main(args):
     logging.info("%s with %s" % (lib_name, openssl_version))
-    if args.filename == 'debug':
-        """Run tests with verbose logging; check for memory leaks using gc.
-            $ python pyfilesec.py debug --gc >& saved
-        """
-        global pytest
-        import pytest
-
-        dbg_dir = 'debug_' + lib_name
-        shutil.rmtree(dbg_dir, ignore_errors=True)
-        os.mkdir(dbg_dir)
-        os.chdir(dbg_dir)  # intermediate files get left inside
-        if args.gc:
-            import gc
-            gc.enable()
-            gc.set_debug(gc.DEBUG_LEAK)
-
-        ts = Tests()
-        tests = [t for t in dir(ts) if t.startswith('test_')]
-        for test in tests:
-            try:
-                eval('ts.' + test + '()')
-            except:
-                result = test + ' FAILED'
-                print(result)
-        logging.info("%.4fs for tests" % (get_time() - logging_t0))
-    elif args.filename == 'genrsa':
+    if args.filename == 'genrsa':
         """Walk through key generation on command line.
         """
-        GenRSA().dialog(args=args)
+        GenRSA().dialog(interactive=(not args.autogen), args=args)
         sys.exit()
     elif not isfile(args.filename):
-        raise ArgumentError('no such file (requires genrsa, debug, or a file)')
+        raise ArgumentError('no such file (requires "genrsa" or a filename)')
     else:
         """Call requested method with arguments, return result.
 
@@ -2704,7 +2680,7 @@ def _parse_args():
     parser = argparse.ArgumentParser(
         description='File-oriented privacy & integrity management library.',
         epilog="See http://pythonhosted.org/pyFileSec/")
-    parser.add_argument('filename', help='file (path), "genrsa", or "debug" (no quotes)')
+    parser.add_argument('filename', help='file (path), or "genrsa" (no quotes)')
     parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('--verbose', action='store_true', help='print logging info to stdout', default=False)
     parser.add_argument('--openssl', help='specify path of the openssl binary to use')
@@ -2734,22 +2710,19 @@ def _parse_args():
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
     parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
+    parser.add_argument('-a', '--autogen', action='store_true', help='non-interactive genrsa', default=False)
     parser.add_argument('-N', '--nodate', action='store_true', help='suppress date (meta-data are clear-text)', default=False)
     parser.add_argument('-M', '--nometa', action='store_true', help='suppress all meta-data', default=False)
     parser.add_argument('-k', '--keep', action='store_true', help='do not --destroy plain-text file after --encrypt')
-    parser.add_argument('-g', '--gc', action='store_true', help='debug: use gc.DEBUG_LEAK (garbage collection)', default=False)
 
     return parser.parse_args()
 
 
 # Basic set-up (order matters) ------------------------------------------------
 
-if __name__ == "__main__":
-    args = _parse_args()
-else:
-    args = None
+args = (__name__ == "__main__") and _parse_args()
 
-logging, logging_t0 = set_logging()
+logging, logging_t0 = set_logging(args and bool(args.verbose))
 openssl_path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
@@ -2772,5 +2745,4 @@ finally:
     shutil.rmtree(tmp, ignore_errors=False)
 
 if __name__ == '__main__':
-    result = main(args)
-    print(result)
+    print main(args)
