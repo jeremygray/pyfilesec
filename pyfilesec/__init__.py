@@ -52,7 +52,8 @@ import subprocess
 import tarfile
 from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
-import time
+#import time
+from   which import which, WhichError
 
 # python 3 compatibility:
 if sys.version < '3.':
@@ -60,28 +61,16 @@ if sys.version < '3.':
 else:
     input23 = input
 
-if sys.platform == 'win32':
-    from win32com.shell import shell
-    user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
-    get_time = time.clock
-else:
-    user_can_link = True
-    get_time = time.time
-
 # other imports in GenRSA.dialog:
 #   import _pyperclip    # if use --clipboard from commandline
-#   import getpass       # for no-display passphrase entry during RSA key-gen
+#   import _getpass      # for no-display passphrase entry during RSA key-gen
 
 """TO-DO:
-- add Trent Mick's which.py, use in _pyperclip and set_openssl, set_destroy for
-    win32 before falling through to `where` (slow search)
 - move _enc, _dec into files in new dir codec/, sha256() and execfile() them
 """
 
 lib_name = 'pyFileSec'
-lib_path = abspath(__file__)
-if isfile(lib_path.strip('co')):
-    lib_path = lib_path.strip('co')
+lib_path = abspath(__file__).strip('co')  # .py not .pyc, .pyo
 lib_dir = os.path.split(lib_path)[0]
 
 # load constants and exception classes from external file:
@@ -1618,8 +1607,6 @@ class RsaKeys(object):
                 if 'ENCRYPTED' in line and keytype == 'priv':
                     enc = True
                     return keytype, enc
-                if '-----END' in line and 'KEY-----' in line:
-                    return keytype, enc
         return None, None
 
     def require(self, req):
@@ -1732,6 +1719,7 @@ class GenRSA(object):
     def check_entropy(self):
         """Basic query for some indication that entropy is available.
         """
+        e = '(unknown)'
         if sys.platform == 'darwin':
             # SecurityServer daemon is supposed to ensure entropy is available:
             ps = sys_call(['ps', '-e'])
@@ -1749,8 +1737,6 @@ class GenRSA(object):
             e = 'entropy_avail: ' + avail
             if int(avail) < 50:
                 e += ' (= not so much...)'
-        else:
-            e = '(unknown)'
         return e
 
     def generate(self, pub='pub.pem', priv='priv.pem', pphr=None, bits=4096):
@@ -1786,7 +1772,7 @@ class GenRSA(object):
             raise
         return _abspath(pub), _abspath(priv)
 
-    def _cleanup(self, msg, pub, priv, pphr=None):
+    def _cleanup(self, msg, pub='', priv='', pphr=None):
         print(msg)
         try:
             SecFile(priv).destroy()
@@ -1807,6 +1793,7 @@ class GenRSA(object):
             os.unlink(pub)
         except:
             pass
+        return None, None, None
 
     def dialog(self, interactive=True, args=None):
         """Command line dialog to generate an RSA key pair, PEM format.
@@ -1847,6 +1834,7 @@ class GenRSA(object):
         PPHR_OUT_SIZE = PPHR_BITS_DEFAULT // 4 + 1  # +1 for printable_pwd '#'
         RSA_BITS_DEFAULT = 4096
         if not args:
+            # add default args to locals; simplifies the code below
             sys.argv = [lib_path, 'genrsa']
             args = _parse_args()
 
@@ -1859,7 +1847,7 @@ class GenRSA(object):
         else:
             pphr_out = None
         if pub == priv:
-            priv = splitext(priv)[0] + '_priv.pem'
+            priv = os.path.splitext(priv)[0] + '_priv.pem'
 
         msg = '\n%s: RSA key-generation dialog\n' % lib_name
         print(msg)
@@ -1877,40 +1865,32 @@ class GenRSA(object):
         if args.passfile:
             pphrout_msg = '  pphr = %s' % pphr_out
             print(pphrout_msg)
+        pphr_auto = True
         if interactive:
+            import _getpass
             print('\nEnter a passphrase for the private key (16 or more chars)'
                   '\n  or press <return> to auto-generate a passphrase')
-            import getpass
             try:
-                pphr = SecStr(getpass.getpass('Passphrase: '))
+                pphr = SecStr(_getpass.getpass('Passphrase: '))
             except ValueError:
-                pphr = ''
-        else:
-            pphr = ''
-        if pphr:
-            pphr2 = SecStr(getpass.getpass('same again: '))
-            if pphr.str != pphr2.str:
-                print('  > Passphrase mismatch. Exiting. <')
-                return None, None, None
-            pphr2.zero()
-            pphr_auto = False
-        else:
+                pass  # hit return, == want auto-generate
+            else:
+                pphr_auto = False
+                pphr2 = SecStr(_getpass.getpass('same again: '))
+                if pphr.str != pphr2.str:
+                    return self._cleanup('  > Passphrase mismatch. Exiting. <')
+                pphr2.zero()
+        if pphr_auto:
             print('(auto-generating a passphrase)')
             pphr = printable_pwd(PPHR_BITS_DEFAULT)
-            pphr_auto = True
-        print('')
-        if pphr and len(pphr.str) < 16:
-            print('  > passphrase too short, exiting <')
-            return None, None, None
+        if len(pphr.str) < 16:
+            return self._cleanup('\n  > passphrase too short, exiting <')
         bits = RSA_BITS_DEFAULT
         if interactive:
-            b = input23('Enter the key length (2048, 4096, 8192): [%d] ' %
-                        RSA_BITS_DEFAULT)
-            if b in ['2048', '4096', '8192']:
-                bits = int(b)
+            bits = int(input23('\nKey length (2048, 4096, 8192): [%d] ' %
+                        RSA_BITS_DEFAULT))
         bits_msg = '  using %i' % bits
-        if bits > 4096:
-            bits_msg += '; this will take a minute!'
+        bit = max(bits, RSA_MODULUS_WARN)
         print(bits_msg)
         ent_msg = '  entropy: ' + self.check_entropy()
         print(ent_msg)
@@ -1922,20 +1902,17 @@ class GenRSA(object):
         try:
             time.sleep(nap)
         except KeyboardInterrupt:
-            self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
-            return None, None, None
+            return self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
 
         msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
         print(msg)
         try:
             self.generate(pub, priv, pphr.str, bits)
         except KeyboardInterrupt:
-            self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
-            return None, None, None
+            return self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
         except:
-            self._cleanup('\n  > exception in generate(), exiting <',
+            return self._cleanup('\n  > exception in generate(), exiting <',
                           pub, priv, pphr)
-            return None, None, None
 
         pub_msg = 'public key:  ' + pub
         print(pub_msg)
@@ -1950,17 +1927,18 @@ class GenRSA(object):
                         fd.write(pphr.str)
                     unset_umask()
                 except:
-                    self._cleanup('', pub, priv, pphr)
+                    return self._cleanup('', pub, priv, pphr)
                 if (not isfile(pphr_out) or
                         not getsize(pphr_out) == PPHR_OUT_SIZE):
-                    self._cleanup(' > save passphrase file failed, exiting <',
+                    return self._cleanup(' > failed to save passphrase file <',
                                   pub, priv, pphr_out)
-                    return None, None, None
             elif args.clipboard:
                 try:
                     import _pyperclip
                 except RuntimeError:
                     fatal("can't use clipboard: no display?", RuntimeError)
+                except ImportError:
+                    fatal("can't use clipboard: no xclip / getclip?", ImportError)
                 _pyperclip.copy(pphr.str)
                 pphr_msg = ('passphrase:  saved to clipboard only... '
                             'paste it somewhere safe!!\n'
@@ -1968,6 +1946,7 @@ class GenRSA(object):
                             'no end-of-line char)' % PPHR_OUT_SIZE)
             else:
                 pphr_msg = 'passphrase:  ' + pphr.str
+                pphr_out = pphr.str
         else:
             pphr_msg = 'passphrase:  (entered by hand)'
         print(pphr_msg)
@@ -1978,7 +1957,6 @@ class GenRSA(object):
         del(pphr)
         if not interactive:
             return pub, priv, pphr_out
-        print('\nDialog complete.')
 
 
 class SecStr(object):
@@ -1990,7 +1968,7 @@ class SecStr(object):
         pwd_hash = some_hash_function(pwd.str)
         pwd.zero()  # the string `password` is now '\\x00\\x00\\x00...'
 
-    Use ``pwd.str`` to get the value (string); ``str(pwd)`` raises a ValueError.
+    Use ``pwd.str`` to get the value (string); ``str(pwd)`` raises a ValueError
 
     ``pwd.zero()`` will replace the value of string ``password`` with 0's to
     the extent possible. Interned strings (= one character, or alphanumeric)
@@ -2043,11 +2021,11 @@ class SecStr(object):
             self.zero()
 
     def _memset0(self):
-        # from http://stackoverflow.com/questions/15581881/ctypes-in-python-crashes-with-memset
-        # http://stackoverflow.com/questions/728164/securely-erasing-password-in-memory-python
-        # "The best you can do is to del password ... so that no references
-        # to the password string object remain. Any solution that purports to
-        # be able to do more than that is only giving you a false sense of
+        # from http://stackoverflow.com/questions/15581881/
+        #           ctypes-in-python-crashes-with-memset
+        # and http://stackoverflow.com/questions/728164/
+        #           securely-erasing-password-in-memory-python
+        # beware getting "a false sense of
         # security.... there would still be other copies of the password that
         # have been created in various string operations."
 
@@ -2143,11 +2121,6 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
         pwd_zero = threading.Timer(0.02, pwd.zero)
         pwd_zero.start()  # AES decrypt can be slow, best to clear pwd
         ___, se_AES = sys_call(cmdAES, stdin=pwd, stderr=True)
-    except KeyboardInterrupt:
-        if isfile(data_dec):
-            SecFile(data_dec).destroy()
-        fatal('%s: Keyboard interrupt, no decrypt' % name,
-              KeyboardInterrupt)
     except:
         if isfile(data_dec):
             SecFile(data_dec).destroy()
@@ -2158,11 +2131,8 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
             pwd_zero.cancel()
             del pwd
 
-    # Log any error-ish conditions, avoid false alarms:
-    if sys.platform == 'win32':
-        glop = "Loading 'screen' into random state - done"  # why in se??
-        se_RSA = se_RSA.replace(glop, '')
-    if se_RSA.strip():
+    # Log any error-ish conditions, avoid win32 false alarm:
+    if se_RSA.replace("Loading 'screen' into random state - done", '').strip():
         if 'unable to load Private Key' in se_RSA:
             fatal('%s: unable to load Private Key' % name, PrivateKeyError)
         elif 'RSA operation error' in se_RSA:
@@ -2347,38 +2317,39 @@ def set_umask(new_umask=UMASK):
 
 def set_destroy():
     """Find, set, and report info about secure file removal tool to be used.
-    """
-    if sys.platform in ['darwin']:
-        DESTROY_EXE = sys_call(['which', 'srm'])
-        DESTROY_OPTS = ('-f', '-z', '--medium')  # 7 US DoD compliant passes
-    elif sys.platform.startswith('linux'):
-        DESTROY_EXE = sys_call(['which', 'shred'])
-        DESTROY_OPTS = ('-f', '-u', '-n', '7')
-    elif sys.platform in ['win32']:
-        app_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
-        default = os.path.join(app_lib_dir, '_sdelete.bat')
-        if not isfile(default):
-            guess = sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
-            if not guess.strip().endswith('sdelete.exe'):
-                fatal('Failed to find sdelete.exe. Please install ' +
-                       'under C:\\, run it manually to accept the terms.')
-            bat_template = """@echo off
-                REM  """ + bat_identifier + """ for using sdelete.exe
 
-                START "" /b /wait XSDELETEX %*""".replace('    ', '')
-            bat = bat_template.replace('XSDELETEX', guess)
-            with open(default, 'wb') as fd:
-                fd.write(bat)
-        DESTROY_EXE = default
-        sd_version = sys_call([DESTROY_EXE]).splitlines()[0]
-        logging.info('Found ' + sd_version)
-        DESTROY_OPTS = ('-q', '-p', '7')
+    on win32, use a .bat file.
+    """
+    opts = {'darwin': ('-f', '-z', '--medium'),  # 7 passes
+            'linux2': ('-f', '-u', '-n', '7'),
+            'win32':  ('-q', '-p', '7')}
+    DESTROY_OPTS = opts[sys.platform]
+    try:  # darwin
+        DESTROY_EXE = which('srm')
+    except WhichError:
+        try:  # linux
+            DESTROY_EXE = which('shred')
+        except WhichError:  # win32
+            if not isfile(DESTROY_EXE):  # from constants.py
+                try:
+                    guess = which('sdelete.exe')  # which is fast
+                except WhichError:  # where is slow
+                    guess = sys_call(['where', '/r', 'C:\\', 'sdelete.exe'])
+                    if not guess.endswith('sdelete.exe'):
+                        fatal('Failed to find sdelete.exe. Please install ' +
+                            'under C:\\, run it manually to accept the terms.',
+                            RuntimeError)
+                # bat_template in constants.py
+                bat = sd_bat_template.replace('XSDELETEX', _abspath(guess))
+                with open(DESTROY_EXE, 'wb') as fd:
+                    fd.write(bat)
 
     if not isfile(DESTROY_EXE):
-        raise NotImplementedError("Can't find a secure file-removal tool")
-
+        fatal("Can't find a secure file-removal tool", RuntimeError)
     logging.info('set destroy init: use %s %s' % (DESTROY_EXE,
                                                   ' '.join(DESTROY_OPTS)))
+    sd_version = sys_call([DESTROY_EXE, '--version']).splitlines()[0]
+    logging.info('destroy version: ' + sd_version)
 
     return DESTROY_EXE, DESTROY_OPTS
 
@@ -2407,11 +2378,13 @@ def set_logging(verbose=False):
         msgfmt = "%.4f  " + lib_name + ": %s"
         logging = _log2stdout()
 
-    return logging, logging_t0
+    return logging
 
 
 def set_openssl(path=None):
     """Find, check, set, and report info about the OpenSSL binary to be used.
+
+    On win32, use a .bat file to set openssl environment variable.
     """
     if path:  # command-line arg or parameter
         OPENSSL = path
@@ -2423,41 +2396,25 @@ def set_openssl(path=None):
             logging.warning(msg)
     else:
         # use a bat file for openssl.cfg; create .bat if not found or broken
-        bat_name = '_openssl.bat'
-        sys_app_data = os.environ['APPDATA']
-        if not isdir(sys_app_data):
-            os.mkdir(sys_app_data)
-        app_lib_dir = os.path.join(sys_app_data, split(lib_dir)[-1])
-        if not isdir(app_lib_dir):
-            os.mkdir(app_lib_dir)
-        OPENSSL = os.path.join(app_lib_dir, bat_name)
+        OPENSSL = op_bat_name  # from constants
         if not exists(OPENSSL):
-            logging.info('no working %s file; trying to recreate' % bat_name)
-            openssl_expr = 'XX-OPENSSL_PATH-XX'
-            bat_template = """@echo off
-                REM  """ + bat_identifier + """ for using openssl.exe
-
-                set PATH=""" + openssl_expr + """;%PATH%
-                set OPENSSL_CONF=""" + openssl_expr + """\\openssl.cfg
-                START "" /b /wait openssl.exe %*""".replace('    ', '')
-            default = 'C:\\OpenSSL-Win32\\bin'
-            bat = bat_template.replace(openssl_expr, default)
+            logging.info('no working %s file; trying to recreate' % op_bat_name)
+            bat = op_bat_template.replace(openssl_expr, op_default)
             with open(OPENSSL, 'wb') as fd:
                 fd.write(bat)
             test = sys_call([OPENSSL, 'version'])
             if not test.startswith('OpenSSL'):
                 # locate and cache result, takes 5-6 seconds:
                 cmd = ['where', '/r', 'C:\\', 'openssl.exe']
-                where_out = sys_call(cmd)
-                if not where_out.strip().endswith('openssl.exe'):
+                guess = sys_call(cmd).splitlines()[0]  # take first match
+                if not guess.endswith('openssl.exe'):
                     fatal('Failed to find OpenSSL.exe.\n' +
-                           'Please install under C:\ and try again.')
-                guess = where_out.splitlines()[0]  # take first match
+                           'Please install under C:\ and try again.',
+                           RuntimeError)
                 guess_path = guess.replace(os.sep + 'openssl.exe', '')
-                where_bat = bat_template.replace(openssl_expr, guess_path)
+                where_bat = op_bat_template.replace(openssl_expr, guess_path)
                 with open(OPENSSL, 'wb') as fd:
                     fd.write(where_bat)
-        logging.info('will use .bat file for OpenSSL: %s' % OPENSSL)
     if not isfile(OPENSSL):
         msg = 'Could not find openssl executable, tried: %s' % OPENSSL
         fatal(msg, RuntimeError)
@@ -2709,7 +2666,7 @@ def _parse_args():
     parser.add_argument('-p', '--pphr', help='path to file containing passphrase for private key')
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
     parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
-    parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
+    parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; unpad 0, -1')
     parser.add_argument('-a', '--autogen', action='store_true', help='non-interactive genrsa', default=False)
     parser.add_argument('-N', '--nodate', action='store_true', help='suppress date (meta-data are clear-text)', default=False)
     parser.add_argument('-M', '--nometa', action='store_true', help='suppress all meta-data', default=False)
@@ -2722,7 +2679,7 @@ def _parse_args():
 
 args = (__name__ == "__main__") and _parse_args()
 
-logging, logging_t0 = set_logging(args and bool(args.verbose))
+logging = set_logging(args and bool(args.verbose))
 openssl_path_wanted = args and args.openssl
 OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
@@ -2744,4 +2701,4 @@ finally:
     shutil.rmtree(tmp, ignore_errors=False)
 
 if __name__ == '__main__':
-    print main(args)
+    print(main(args))
