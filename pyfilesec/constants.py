@@ -1,4 +1,4 @@
-"""Constants, initial values, and exception classes.
+"""Constants, initial values, and exception classes (execfile'd).
 
 Part of the pyFileSec library, Copyright (c) 2013 Jeremy R. Gray.
 """

@@ -112,10 +112,13 @@ class Tests(object):
         os.chdir(self.tmp)
 
     @pytest.mark.notravis
-    def test_imports(self):
-        os.chdir(self.start_dir)
+    def test_import_pyperclip(self):
         import _pyperclip
+
+    def test_import_getpass_which(self):
+        os.chdir(self.start_dir)
         import _getpass
+        import which
         os.chdir(self.tmp)
 
     def test_secfile_base(self):
@@ -298,6 +301,13 @@ class Tests(object):
                      pub, '-pubin', '-noout']
         modulus = sys_call(cmdGETMOD).replace('Modulus=', '')
         assert hexdigits_re.match(modulus)
+
+        # test sniff
+        assert RsaKeys().sniff(None) == (None, None)
+        assert RsaKeys().sniff('') == ('(no file)', None)
+        with open('testsniff', 'wb') as fd:
+            fd.write('no key here')
+        assert RsaKeys().sniff('testsniff') == (None, None)
 
     def test_SecFileArchive(self):
         # test getting a name
@@ -732,46 +742,54 @@ class Tests(object):
                 os.remove(sf.file)
             assert bigfile_size > size
 
-
     @pytest.mark.slow
-    @pytest.mark.notravis
     def test_GenRSA(self):
-        GenRSA().dialog(interactive=False, args=args)
+        GenRSA().check_entropy()
+
+        # test dialog as pyfilesec.genrsa()
+        pub, priv, pp = genrsa(interactive=False)
+        assert exists(pub)
+        assert exists(priv)
+        assert len(pp) >= 16
+
         sys.argv = [__file__, 'genrsa', '--clipboard']
         args = _parse_args()
-        GenRSA().dialog(interactive=False, args=args)
+        assert args.clipboard
+        # travis-ci builds on linux, needs xclip, else import will fail
+        try:
+            import _pyperclip
+            GenRSA().dialog(interactive=False, args=args)
+        except ImportError:
+            with pytest.raises(ImportError):
+                GenRSA().dialog(interactive=False, args=args)
 
-    @pytest.mark.slow
-    def test_GenRSA(self):
-        # set sys.argv to test arg usage; similar in test_main()
-
-        gen = GenRSA()
-        gen.check_entropy()
-
-        # test dialog
         sys.argv = [__file__, 'genrsa', '--passfile']
         args = _parse_args()
-        pub, priv, pp = genrsa(interactive=False)
+        assert args.passfile
+        GenRSA().dialog(interactive=False, args=args)
 
-        # induce some badness to increase test cov: pub==priv, existing priv:
-        sys.argv = [__file__, 'genrsa', '--pub', priv, '--priv', priv]
+        # test pub priv name collision
+        sys.argv = [__file__, 'genrsa', '--pub', 'pub', '--priv', 'pub']
         args = _parse_args()
-        pu, pr, pp = gen.dialog(interactive=False)
-        gen._cleanup('test cleanup', pu, pr, pp)
-        gen._cleanup('test cleanup', pu, pr, 'passphrase')
+        assert args.pub == args.priv
+        GenRSA().dialog(interactive=False, args=args)
 
-        # the test is that we won't overwrite existing priv
-        # priv comes from _uniq(pub) to preserve matched sets of key files
-        '''
-        priv = _uniq_file(pub)
-        with open(priv, 'wb') as fd:
-            fd.write('a')
-        assert isfile(priv)  # or can't test
-        sys.argv = [__file__, 'genrsa', '--priv', priv]
+        # test detect existing priv?
+        with open('priv.pem', 'wb') as fd:
+            fd.write('x')
+        assert exists('priv.pem')
+        sys.argv = [__file__, 'genrsa', '--pub', 'pub', '--priv', 'priv.pem']
         args = _parse_args()
-        pu, pr, pp = gen.dialog(interactive=False)
-        assert (pu, pr) == (None, None)
-        '''
+        GenRSA().dialog(interactive=False, args=args)
+
+        # test cleanup
+        pub, priv, pphr = DEMO_RSA_KEYS()
+        GenRSA()._cleanup('test cleanup', pub, priv, pphr)
+        assert not exists(pub)
+        assert not exists(priv)
+        assert not exists(pphr)
+        GenRSA()._cleanup('test cleanup', '', '', '')
+        assert GenRSA()._cleanup('test cleanup', 'x', 'x', 'x') == (None, ) * 3
 
     def test_logging(self):
         sys.argv = [__file__, '--pad', 'no file', '--verbose']
@@ -1408,8 +1426,8 @@ class Tests(object):
         pyfilesec.dropbox_path = orig_path
 
 
-@pytest.mark.notravis
 @pytest.mark.slow
+@pytest.mark.notravis
 class TestAgain(Tests):
     """Same again using another version of OpenSSL
     """

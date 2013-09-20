@@ -1618,8 +1618,6 @@ class RsaKeys(object):
                 if 'ENCRYPTED' in line and keytype == 'priv':
                     enc = True
                     return keytype, enc
-                if '-----END' in line and 'KEY-----' in line:
-                    return keytype, enc
         return None, None
 
     def require(self, req):
@@ -1732,6 +1730,7 @@ class GenRSA(object):
     def check_entropy(self):
         """Basic query for some indication that entropy is available.
         """
+        e = '(unknown)'
         if sys.platform == 'darwin':
             # SecurityServer daemon is supposed to ensure entropy is available:
             ps = sys_call(['ps', '-e'])
@@ -1749,8 +1748,6 @@ class GenRSA(object):
             e = 'entropy_avail: ' + avail
             if int(avail) < 50:
                 e += ' (= not so much...)'
-        else:
-            e = '(unknown)'
         return e
 
     def generate(self, pub='pub.pem', priv='priv.pem', pphr=None, bits=4096):
@@ -1786,7 +1783,7 @@ class GenRSA(object):
             raise
         return _abspath(pub), _abspath(priv)
 
-    def _cleanup(self, msg, pub, priv, pphr=None):
+    def _cleanup(self, msg, pub='', priv='', pphr=None):
         print(msg)
         try:
             SecFile(priv).destroy()
@@ -1807,6 +1804,7 @@ class GenRSA(object):
             os.unlink(pub)
         except:
             pass
+        return None, None, None
 
     def dialog(self, interactive=True, args=None):
         """Command line dialog to generate an RSA key pair, PEM format.
@@ -1847,6 +1845,7 @@ class GenRSA(object):
         PPHR_OUT_SIZE = PPHR_BITS_DEFAULT // 4 + 1  # +1 for printable_pwd '#'
         RSA_BITS_DEFAULT = 4096
         if not args:
+            # add default args to locals; simplifies the code below
             sys.argv = [lib_path, 'genrsa']
             args = _parse_args()
 
@@ -1859,7 +1858,7 @@ class GenRSA(object):
         else:
             pphr_out = None
         if pub == priv:
-            priv = splitext(priv)[0] + '_priv.pem'
+            priv = os.path.splitext(priv)[0] + '_priv.pem'
 
         msg = '\n%s: RSA key-generation dialog\n' % lib_name
         print(msg)
@@ -1877,40 +1876,32 @@ class GenRSA(object):
         if args.passfile:
             pphrout_msg = '  pphr = %s' % pphr_out
             print(pphrout_msg)
+        pphr_auto = True
         if interactive:
+            import _getpass
             print('\nEnter a passphrase for the private key (16 or more chars)'
                   '\n  or press <return> to auto-generate a passphrase')
-            import getpass
             try:
-                pphr = SecStr(getpass.getpass('Passphrase: '))
+                pphr = SecStr(_getpass.getpass('Passphrase: '))
             except ValueError:
-                pphr = ''
-        else:
-            pphr = ''
-        if pphr:
-            pphr2 = SecStr(getpass.getpass('same again: '))
-            if pphr.str != pphr2.str:
-                print('  > Passphrase mismatch. Exiting. <')
-                return None, None, None
-            pphr2.zero()
-            pphr_auto = False
-        else:
+                pass  # hit return, == want auto-generate
+            else:
+                pphr_auto = False
+                pphr2 = SecStr(_getpass.getpass('same again: '))
+                if pphr.str != pphr2.str:
+                    return self._cleanup('  > Passphrase mismatch. Exiting. <')
+                pphr2.zero()
+        if pphr_auto:
             print('(auto-generating a passphrase)')
             pphr = printable_pwd(PPHR_BITS_DEFAULT)
-            pphr_auto = True
-        print('')
-        if pphr and len(pphr.str) < 16:
-            print('  > passphrase too short, exiting <')
-            return None, None, None
+        if len(pphr.str) < 16:
+            return self._cleanup('\n  > passphrase too short, exiting <')
         bits = RSA_BITS_DEFAULT
         if interactive:
-            b = input23('Enter the key length (2048, 4096, 8192): [%d] ' %
-                        RSA_BITS_DEFAULT)
-            if b in ['2048', '4096', '8192']:
-                bits = int(b)
+            bits = int(input23('\nKey length (2048, 4096, 8192): [%d] ' %
+                        RSA_BITS_DEFAULT))
         bits_msg = '  using %i' % bits
-        if bits > 4096:
-            bits_msg += '; this will take a minute!'
+        bit = max(bits, RSA_MODULUS_WARN)
         print(bits_msg)
         ent_msg = '  entropy: ' + self.check_entropy()
         print(ent_msg)
@@ -1922,20 +1913,17 @@ class GenRSA(object):
         try:
             time.sleep(nap)
         except KeyboardInterrupt:
-            self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
-            return None, None, None
+            return self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
 
         msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
         print(msg)
         try:
             self.generate(pub, priv, pphr.str, bits)
         except KeyboardInterrupt:
-            self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
-            return None, None, None
+            return self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
         except:
-            self._cleanup('\n  > exception in generate(), exiting <',
+            return self._cleanup('\n  > exception in generate(), exiting <',
                           pub, priv, pphr)
-            return None, None, None
 
         pub_msg = 'public key:  ' + pub
         print(pub_msg)
@@ -1950,17 +1938,18 @@ class GenRSA(object):
                         fd.write(pphr.str)
                     unset_umask()
                 except:
-                    self._cleanup('', pub, priv, pphr)
+                    return self._cleanup('', pub, priv, pphr)
                 if (not isfile(pphr_out) or
                         not getsize(pphr_out) == PPHR_OUT_SIZE):
-                    self._cleanup(' > save passphrase file failed, exiting <',
+                    return self._cleanup(' > failed to save passphrase file <',
                                   pub, priv, pphr_out)
-                    return None, None, None
             elif args.clipboard:
                 try:
                     import _pyperclip
                 except RuntimeError:
                     fatal("can't use clipboard: no display?", RuntimeError)
+                except ImportError:
+                    fatal("can't use clipboard: no xclip / getclip?", ImportError)
                 _pyperclip.copy(pphr.str)
                 pphr_msg = ('passphrase:  saved to clipboard only... '
                             'paste it somewhere safe!!\n'
@@ -1968,6 +1957,7 @@ class GenRSA(object):
                             'no end-of-line char)' % PPHR_OUT_SIZE)
             else:
                 pphr_msg = 'passphrase:  ' + pphr.str
+                pphr_out = pphr.str
         else:
             pphr_msg = 'passphrase:  (entered by hand)'
         print(pphr_msg)
@@ -1978,7 +1968,6 @@ class GenRSA(object):
         del(pphr)
         if not interactive:
             return pub, priv, pphr_out
-        print('\nDialog complete.')
 
 
 class SecStr(object):
@@ -1990,7 +1979,7 @@ class SecStr(object):
         pwd_hash = some_hash_function(pwd.str)
         pwd.zero()  # the string `password` is now '\\x00\\x00\\x00...'
 
-    Use ``pwd.str`` to get the value (string); ``str(pwd)`` raises a ValueError.
+    Use ``pwd.str`` to get the value (string); ``str(pwd)`` raises a ValueError
 
     ``pwd.zero()`` will replace the value of string ``password`` with 0's to
     the extent possible. Interned strings (= one character, or alphanumeric)
@@ -2043,11 +2032,11 @@ class SecStr(object):
             self.zero()
 
     def _memset0(self):
-        # from http://stackoverflow.com/questions/15581881/ctypes-in-python-crashes-with-memset
-        # http://stackoverflow.com/questions/728164/securely-erasing-password-in-memory-python
-        # "The best you can do is to del password ... so that no references
-        # to the password string object remain. Any solution that purports to
-        # be able to do more than that is only giving you a false sense of
+        # from http://stackoverflow.com/questions/15581881/
+        #           ctypes-in-python-crashes-with-memset
+        # and http://stackoverflow.com/questions/728164/
+        #           securely-erasing-password-in-memory-python
+        # beware getting "a false sense of
         # security.... there would still be other copies of the password that
         # have been created in various string operations."
 
@@ -2709,7 +2698,7 @@ def _parse_args():
     parser.add_argument('-p', '--pphr', help='path to file containing passphrase for private key')
     parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
     parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
-    parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; remove 0, -1')
+    parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; unpad 0, -1')
     parser.add_argument('-a', '--autogen', action='store_true', help='non-interactive genrsa', default=False)
     parser.add_argument('-N', '--nodate', action='store_true', help='suppress date (meta-data are clear-text)', default=False)
     parser.add_argument('-M', '--nometa', action='store_true', help='suppress all meta-data', default=False)
