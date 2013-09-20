@@ -672,6 +672,23 @@ class Tests(object):
         sf = SecFile(tmp2).pad()
         assert sf.size == DEFAULT_PAD_SIZE
 
+        # non-int, negative, or too-large value for pad-len in the file:
+        with open(tmp2, 'wb') as fd:
+            bad_pad_bytes = PAD_STR + "abc0000000"
+            stuff = 'a' * 128  + bad_pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE
+            fd.write(stuff)
+        assert SecFile(tmp2)._pad_len() == 0
+        with open(tmp2, 'wb') as fd:
+            bad_pad_bytes = PAD_STR + "-100000000"
+            stuff = 'a' * 128  + bad_pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE
+            fd.write(stuff)
+        assert SecFile(tmp2)._pad_len() == 0
+        with open(tmp2, 'wb') as fd:
+            bad_pad_bytes = PAD_STR + "1000000000"
+            stuff = 'a' * 128  + bad_pad_bytes + PAD_BYTE + PFS_PAD + PAD_BYTE
+            fd.write(stuff)
+        assert SecFile(tmp2)._pad_len() == 0
+
     def test_signatures(self):
         # sign a known file with a known key. can we get known signature?
         __, kwnPriv, kwnPphr, datum, kwnSigs = self._known_values()

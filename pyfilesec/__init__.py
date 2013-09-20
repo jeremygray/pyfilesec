@@ -52,7 +52,6 @@ import subprocess
 import tarfile
 from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
-#import time
 from   which import which, WhichError
 
 # python 3 compatibility:
@@ -428,13 +427,11 @@ class _SecFileBase(object):
     def _get_permissions(self):
         name = '_get_permissions'
         self._require_file()
-        if sys.platform in ['win32']:
-            perm = -1  # 'win32-not-implemented'
-        else:
+        perm = -1  # 'win32-not-implemented'
+        if not sys.platform in ['win32']:
             perm = int(oct(os.stat(self.file)[stat.ST_MODE])[-3:], 8)
         logging.debug(name + ': %s %s octal' % (self.file, oct(perm)))
-        if args:
-            self.result = oct(perm)
+        self.result = oct(perm)
         return perm
 
     def _set_permissions(self, mode):
@@ -465,13 +462,8 @@ class _SecFileBase(object):
             return 0
         filename = self._require_file()
         if sys.platform == 'win32':
-            if user_can_link:
-                cmd = ('fsutil', 'hardlink', 'list', filename)
-                links = sys_call(cmd)
-                count = len([f for f in links.splitlines() if f.strip()])
-            else:
-                logging.warning('be an Admin to use fsutil.exe (hardlink)')
-                count = -1
+            links = sys_call(['fsutil', 'hardlink', 'list', filename])
+            count = len([f for f in links.splitlines() if f.strip()])
         else:
             count = os.stat(filename)[stat.ST_NLINK]
         return count
@@ -483,11 +475,8 @@ class _SecFileBase(object):
         if not self.file:
             return False
         db_path = get_dropbox_path()
-        if not db_path:
-            inside = False
-        else:
-            inside = (self.file.startswith(db_path + os.sep) or
-                  self.file == db_path)
+        inside = db_path and ((self.file.startswith(db_path + os.sep) or
+                  self.file == db_path))
         not_or_blank = (' not', '')[inside]
         logging.info('%s is%s inside Dropbox' % (self.file, not_or_blank))
 
@@ -892,8 +881,6 @@ class SecFile(_SecFileBase):
         self.result = {'method': name, 'status': 'started'}
         self._require_file(self.is_in_writeable_dir)  # enc file ok, warn
         self.rsakeys.update(pub=pub, req=NEED_PUB)
-        if not self.rsakeys.pub:
-            fatal(name + ': requires a public key', EncryptError)
         logging.debug(name + 'start')
         if self.is_encrypted:
             logging.warning(name + ": file is already encrypted")
@@ -1308,21 +1295,19 @@ class SecFile(_SecFileBase):
             good_sys_call = not err
             # mac srm will warn about multiple links via stderr -> disp unknown
         except OSError as e:
-            good_sys_call = False
-            logging.warning(name + ': %s' % e)
-            logging.warning(name + ': %s' % ' '.join(cmd_Destroy))
+            logging.warning(name + ': %s, %s' % (e, ' '.join(cmd_Destroy)))
 
+        disposition = pfs_UNKNOWN
         if not isfile(target_file):
             disposition = (pfs_UNKNOWN, pfs_DESTROYED)[good_sys_call]
         else:
-            disposition = pfs_UNKNOWN
             logging.error(name + ': falling through to trying 1 pass of zeros')
             with open(target_file, 'wb') as fd:
                 fd.write(chr(0) * getsize(target_file))
-            shutil.rmtree(target_file, ignore_errors=True)
+        shutil.rmtree(target_file, ignore_errors=True)  # should be gone
         if isfile(target_file):  # yikes, its an undead file
-            msg = name + ': %s remains after destroy(), %d bytes'
-            fatal(msg % (target_file, getsize(target_file)), DestroyError)
+            fatal(name + ': %s remains after destroy()' % (target_file,
+                                                           DestroyError))
 
         duration = round(get_time() - destroy_t0, 4)
         self.reset()  # clear everything, including self.result
@@ -1727,7 +1712,7 @@ class GenRSA(object):
             if securityd in ps:
                 e = securityd + ' running   (= good)'
             else:
-                e = ''
+                e = 'securityd NOT running  (= bad)'
             rdrand = sys_call(['sysctl', 'hw.optional.rdrand'])
             e += '\n           rdrand: ' + rdrand
             if rdrand == 'hw.optional.rdrand: 1':
@@ -1918,6 +1903,7 @@ class GenRSA(object):
         print(pub_msg)
         priv_msg = 'private key: ' + priv
         print(priv_msg)
+        pphr_msg = 'passphrase:  (entered by hand)'
         if pphr_auto:
             if args.passfile:
                 pphr_msg = 'passphrase:  %s' % pphr_out
@@ -1947,8 +1933,6 @@ class GenRSA(object):
             else:
                 pphr_msg = 'passphrase:  ' + pphr.str
                 pphr_out = pphr.str
-        else:
-            pphr_msg = 'passphrase:  (entered by hand)'
         print(pphr_msg)
         warn_msg = (' > Keep the private key private! <\n'
                '  > Do not lose the passphrase! <')
@@ -2034,11 +2018,10 @@ class SecStr(object):
             raise ValueError("cannot zero an interned string")
         self.s_obj.ob_shash = -1  # not hashed yet
 
-        if py64bit:
-            offset = sizeof(self.PyStringObject) - 4
+        offset = sizeof(self.PyStringObject) + (0, -4)[py64bit]
+            # 20 for 32-bit python
             # sizeof() == 40 on py64bit; unclear why sizeof() is not 36
-        else:
-            offset = sizeof(self.PyStringObject)  # 20
+
         tare = ''.__sizeof__()  # not unicode
         num_bytes = self._val.__sizeof__() - tare
         memset(id(self._val) + offset, 0, num_bytes)
@@ -2051,10 +2034,11 @@ class SecStr(object):
         try:
             self._memset0()
         except ValueError:
-            del self._val
-            self._val = b'\0' * len(self)  # new / different id
             self._zeroed = False
-            self._id = id(self._val)
+            tmp = b'\0' * len(self)
+            self._id = id(tmp)
+            del self._val
+            self._val = tmp  # new / different id
         else:
             self._zeroed = True
             self._id = None
@@ -2068,9 +2052,7 @@ def _abspath(filename):
     """Returns the absolute path, capitalize drive letter (win32)
     """
     f = os.path.abspath(filename)  # implicitly does normpath too
-    if sys.platform == 'win32':
-        return f[0].capitalize() + f[1:]
-    return f
+    return f[0].capitalize() + f[1:]
 
 
 def command_alias():
@@ -2282,11 +2264,11 @@ def printable_pwd(nbits=256, prefix='#'):
 
 
 def permissions_str(filename):
-    if sys.platform in ['win32']:
-        return 'win32-not-implemented'
-    else:
-        perm = int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
-        return '0o' + oct(perm)[1:]
+    perm = 'win32-not-implemented'
+    if not sys.platform in ['win32']:
+        p = int(oct(os.stat(filename)[stat.ST_MODE])[-3:], 8)
+        perm = '0o' + oct(p)[1:]
+    return perm
 
 
 def secure_rename(src, dest):

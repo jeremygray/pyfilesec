@@ -8,6 +8,7 @@ import re
 import sys
 import time
 
+
 if sys.platform == 'win32':
     from win32com.shell import shell
     user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
@@ -68,19 +69,20 @@ PERMISSIONS = 0o600  # for all SecFiles: no execute, no group, no other
 UMASK = 0o077  # need u+x permission for directories
 old_umask = None  # set as global in set_umask, unset_umask
 
+# do win32 stuff to improve test coverage % when tested on linux:
 # string to help be sure a .bat file belongs to pfs (win32, set_openssl):
 bat_identifier = '-- pyFileSec .bat file --'
-app_lib_dir = ''
+appdata_lib_dir = ''
 if sys.platform == 'win32':
-    app_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
-    if not isdir(app_lib_dir):
-        os.mkdir(app_lib_dir)
-DESTROY_EXE = os.path.join(app_lib_dir, '_sdelete.bat')
+    appdata_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
+    if not isdir(appdata_lib_dir):
+        os.mkdir(appdata_lib_dir)
+DESTROY_EXE = os.path.join(appdata_lib_dir, '_sdelete.bat')
 sd_bat_template = """@echo off
                     REM  """ + bat_identifier + """ for using sdelete.exe
 
                     START "" /b /wait XSDELETEX %*""".replace('    ', '')
-op_bat_name = os.path.join(app_lib_dir, '_openssl.bat')
+op_bat_name = os.path.join(appdata_lib_dir, '_openssl.bat')
 openssl_expr = 'XX-OPENSSL_PATH-XX'
 op_default = 'C:\\OpenSSL-Win32\\bin'
 op_bat_template = """@echo off
