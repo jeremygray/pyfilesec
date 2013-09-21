@@ -142,7 +142,14 @@ class Tests(object):
             assert sf.metadataf == '{}'
         with pytest.raises(ValueError):
             sf._require_file()
+        assert sf.load_metadata() == NO_META_DATA
+
         sf.hardlinks
+        save_val = pyfilesec.user_can_link
+        pyfilesec.user_can_link = False
+        assert sf.hardlinks == -1
+        pyfilesec.user_can_link = save_val
+
         sf.is_in_dropbox
         sf._get_git_info(None)
         sf._get_git_info('.', git='notgit')
@@ -365,15 +372,31 @@ class Tests(object):
         sfa = SecFileArchive()
         sfa.name = 'sfa_name' + ENC_EXT
         aes = 'aes' + AES_EXT
-        #pwd = 'pwd' + RSA_EXT
+        pwd = '..pwd' + RSA_EXT  # bad initial char
         md = 'md' + META_EXT
         bad = md + 'BAD'
-        files = [aes, md, bad]  # omit pwd to test
+        files = [aes, md, pwd, bad]
         for f in files:
             with open(f, 'wb') as fd:
                 fd.write('x')
+        files = [aes, md, bad]
         sfa._make_tar(files, keep=True)
         sfa.unpack()
+
+        bad_files = [aes, md, pwd]
+        sfa = SecFileArchive()
+        sfa.name = 'sfa_name2' + ENC_EXT
+        sfa._make_tar(bad_files, keep=True)
+        with pytest.raises(SecFileFormatError):
+            sfa.unpack()  # triggers _check
+
+        # bad decrypt method from archive:
+        c = PFSCodecRegistry()
+        pub = DEMO_RSA_KEYS()[0]
+        sf = SecFile('ttt').encrypt(pub)
+        sfa = SecFileArchive(arc=sf.file)
+        with pytest.raises(CodecRegistryError):
+            sfa.get_dec_method(c)
 
         '''
         # test fall-through decryption method:
@@ -870,10 +893,12 @@ class Tests(object):
             DECRYPT(enc, pwd, priv, sf.rsakeys.pphr, openssl=None)
         with pytest.raises(RuntimeError):
             DECRYPT(enc, pwd, priv, sf.rsakeys.pphr, openssl=OPENSSL + 'xyz')
-        # TO-DO: various other failure conditions... harder to induce
+
         # bad pwd (use pub to test)
-        with pytest.raises(PrivateKeyError):
+        with pytest.raises(DecryptError):
             DECRYPT(enc, pub, priv, sf.rsakeys.pphr, openssl=OPENSSL)
+
+        # TO-DO: various other decrypt failure conditions... harder to induce
 
         # ----------
         ENCRYPT = codec_registry.get_function('_encrypt_rsa_aes256cbc')
@@ -959,7 +984,7 @@ class Tests(object):
             # a correct-format but wrong priv key should fail:
             sf = SecFile(datafile).encrypt(pub1, keep=True)
             pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr1.str, testBits)
-            with pytest.raises(PrivateKeyError):
+            with pytest.raises(DecryptError):
                 sf.decrypt(priv2, pphr1.str)
 
             # should refuse-to-encrypt if pub key is too short:
@@ -975,6 +1000,19 @@ class Tests(object):
                     sf.encrypt(pub2)
             finally:
                 pyfilesec.RSA_MODULUS_MIN = rsa_mod_orig
+
+            # arrange for a bad session key, should fail to decrypt:
+            pub, priv, pphr = DEMO_RSA_KEYS()
+            sf = SecFile(datafile).encrypt(pub, keep=True)
+            sfa = SecFileArchive(arc=sf.file)
+            sfa.unpack()
+            sf2 = SecFile(datafile).encrypt(pub, keep=True)
+            sfa2 = SecFileArchive(arc=sf2.file)
+            sfa2.unpack()
+            sfa2.pack(files=[sfa2.meta, sfa2.data_aes, sfa.pwd_rsa])
+            sf.set_file(sfa2.name)
+            with pytest.raises(DecryptError):
+                sf.decrypt(priv=priv, pphr=pphr)
 
     def test_rotate(self):
         # Set-up:
@@ -1119,8 +1157,6 @@ class Tests(object):
         tmp = NamedTemporaryFile()
         tmp.write('x')
         secure_rename(tmp.name, 'abc')
-
-
 
     def test_hmac(self):
         # verify pfs hmac implementation against a widely used example:

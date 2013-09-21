@@ -54,18 +54,13 @@ from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
 from   which import which, WhichError
 
-# python 3 compatibility:
-if sys.version < '3.':
-    input23 = raw_input
-else:
-    input23 = input
-
 # other imports in GenRSA.dialog:
 #   import _pyperclip    # if use --clipboard from commandline
 #   import _getpass      # for no-display passphrase entry during RSA key-gen
 
 """TO-DO:
 - move _enc, _dec into files in new dir codec/, sha256() and execfile() them
+- use SecStr consistently throughout: in RsaKeys, generate, etc
 """
 
 lib_name = 'pyFileSec'
@@ -865,7 +860,7 @@ class SecFile(_SecFileBase):
         name = 'encrypt'
         self.result = {'method': name, 'status': 'started'}
         self._require_file(self.is_in_writeable_dir)  # enc file ok, warn
-        self.rsakeys.update(pub=pub, req=NEED_PUB)
+        self.rsakeys.update(pub=pub, req=NEED_PUBK)
         logging.debug(name + 'start')
         if self.is_encrypted:
             logging.warning(name + ": file is already encrypted")
@@ -1106,7 +1101,7 @@ class SecFile(_SecFileBase):
                               pphr=(pphr or self.rsakeys.pphr))
         dec_rsakeys.require(NEED_PRIV)
         enc_rsakeys = RsaKeys(pub=(pub or self.rsakeys.pub))
-        enc_rsakeys.require(NEED_PUB)
+        enc_rsakeys.require(NEED_PUBK)
 
         file_dec = None
         try:
@@ -1182,7 +1177,7 @@ class SecFile(_SecFileBase):
         name = 'verify'
         logging.debug(name + ': start')
         self._require_file()
-        self.rsakeys.update(pub=pub, req=NEED_PUB)
+        self.rsakeys.update(pub=pub, req=NEED_PUBK)
         if not sig:
             fatal('signature required for verify(), as string or filename',
                   AttributeError)
@@ -1244,6 +1239,7 @@ class SecFile(_SecFileBase):
         orig_links = self.hardlinks
         if orig_links > 1:  # -1 is user can't link
             inum = os.stat(target_file)[stat.ST_INO]
+            mount_path = '(unknown)'
             if sys.platform != 'win32':
                 mount_path = abspath(target_file)
                 while not os.path.ismount(mount_path):
@@ -1252,8 +1248,6 @@ class SecFile(_SecFileBase):
                     `find %s -xdev -inum %d`""".replace('    ', '')
                 vals = (target_file, inum, mount_path, inum)
                 logging.warning(msg % vals)
-            else:
-                mount_path = '(unknown)'
 
         cmd_Destroy = (DESTROY_EXE,) + DESTROY_OPTS + (target_file,)
         good_sys_call = False
@@ -1266,6 +1260,7 @@ class SecFile(_SecFileBase):
             if good_sys_call:
                 disposition = pfs_DESTROYED
         else:
+            # last-ditch effort
             logging.error(name + ': falling through to trying 1 pass of zeros')
             with open(target_file, 'wb') as fd:
                 fd.write(chr(0) * getsize(target_file))
@@ -1485,7 +1480,7 @@ class RsaKeys(object):
         Keys should be tested in matched pairs. Includes an actual test of
         encrypt-then-decrypt using the keys with the default codec.
         """
-        self.require(req=NEED_PUB | NEED_PRIV)
+        self.require(req=NEED_PUBK | NEED_PRIV)
         pubk, pub_bits = self.sniff(self.pub)
 
         # compare pub against pub as extracted from priv:
@@ -1502,7 +1497,7 @@ class RsaKeys(object):
         #    fatal('public key too short; no real security below 1024 bits',
         #          PublicKeyTooShortError)
         assert pub_bits >= RSA_MODULUS_MIN
-        if pub_bits < RSA_MODULUS_WARN:
+        if pub_bits < RSA_MODULUS_WRN:
             logging.warning('short RSA key')
 
         # can the new keys be used to enc-dec in the codec?
@@ -1549,11 +1544,11 @@ class RsaKeys(object):
     def require(self, req):
         """Raise error if key requirement(s) ``req`` are not met; assert-like.
 
-        Used by SecFile methods: ``rsakeys.require(req=NEED_PUB | NEED_PRIV)``
+        Used by SecFile methods: ``rsakeys.require(req=NEED_PUBK | NEED_PRIV)``
         reads as ``assert rsakeys.pub and rsakeys.priv`` or raise a tailored
         error, including a missing passphrase if the private key is encrypted.
         """
-        if req & NEED_PUB:
+        if req & NEED_PUBK:
             if not self.pub:
                 fatal('public key required, missing', PublicKeyError)
         if req & NEED_PRIV:
@@ -1588,7 +1583,7 @@ class RsaKeys(object):
                 fatal('bad public key %s' % pub, PublicKeyError)
             if key_len < RSA_MODULUS_MIN:
                 fatal('short public key %s' % pub, PublicKeyTooShortError)
-            if key_len < RSA_MODULUS_WARN:
+            if key_len < RSA_MODULUS_WRN:
                 logging.warning('short public key %s' % pub)
         elif pub is not None:
             fatal('bad public key; expected a string or None', PublicKeyError)
@@ -1699,9 +1694,8 @@ class GenRSA(object):
         try:
             RsaKeys(pub=pub, priv=priv, pphr=pphr).test()
         except:
-            msg = 'new RSA keys failed to validate; removing them'
-            self._cleanup(msg, priv, pub)
-            fatal(msg, RuntimeError)
+            self._cleanup('', priv, pub)
+            fatal('new RSA keys failed to validate; removing them', RuntimeError)
         return _abspath(pub), _abspath(priv)
 
     def _cleanup(self, msg, pub='', priv='', pphr=None):
@@ -1785,9 +1779,8 @@ class GenRSA(object):
         print(msg)
         if (os.path.exists(priv) or
                 args.passfile and os.path.exists(pphr_out)):
-            print('  > output file(s)already exist <\n'
+            return self._cleanup('  > output file(s)already exist <\n'
                   '  > Clean up files and try again. Exiting. <')
-            return None, None, None
 
         print('Will try to create files:')
         pub_msg = '  pub  = %s' % pub
@@ -1803,6 +1796,8 @@ class GenRSA(object):
         bits = RSA_BITS_DEFAULT
         if interactive:
             import _getpass
+            # python 3 compatibility:
+            input23 = (input, raw_input)[sys.version < '3.']
             try:
                 pphr = SecStr(_getpass.getpass('Passphrase: '))
             except ValueError:
@@ -1821,7 +1816,7 @@ class GenRSA(object):
             print('(auto-generating a passphrase)')
             pphr = printable_pwd(PPHR_BITS_DEFAULT)
         bits_msg = '  using %i' % bits
-        bit = max(bits, RSA_MODULUS_WARN)
+        bit = max(bits, RSA_MODULUS_WRN)
         print(bits_msg)
         ent_msg = '  entropy: ' + self.check_entropy()
         print(ent_msg)
@@ -1862,8 +1857,6 @@ class GenRSA(object):
             elif args.clipboard:
                 try:
                     import _pyperclip
-                except ImportError:
-                    fatal("can't use clipboard: no getclip etc?", ImportError)
                 except RuntimeError:
                     fatal("can't use clipboard: no display?", RuntimeError)
                 _pyperclip.copy(pphr.str)
@@ -2054,19 +2047,14 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
             pwd_zero.cancel()
             del pwd
 
-    # Log any error-ish conditions, avoid win32 false alarm:
-    if se_RSA.replace("Loading 'screen' into random state - done", '').strip():
-        if 'unable to load Private Key' in se_RSA:
-            fatal('%s: unable to load Private Key' % name, PrivateKeyError)
-        elif 'RSA operation error' in se_RSA:
-            fatal("%s: can't use Priv Key; wrong key?" % name, PrivateKeyError)
-        else:
-            fatal('%s: Bad decrypt (RSA) %s' % (name, se_RSA), DecryptError)
+    # Log any error-ish conditions:
+    if 'unable to load Private Key' in se_RSA:
+        fatal('%s: unable to load Private Key' % name, PrivateKeyError)
+    se_RSA = se_RSA.replace("Loading 'screen' into random state - done", '').strip()
+    if se_RSA:
+        fatal('%s: Bad decrypt (RSA) %s (wrong key?)' % (name, se_RSA), DecryptError)
     if se_AES:
-        if 'bad decrypt' in se_AES:
-            fatal('%s: openssl bad decrypt (AES step)' % name, DecryptError)
-        else:
-            fatal('%s: Bad decrypt (AES) %s' % (name, se_AES), DecryptError)
+        fatal('%s: Bad decrypt (AES) %s' % (name, se_AES), DecryptError)
 
     return _abspath(data_dec)
 
@@ -2254,7 +2242,8 @@ def set_destroy():
         try:  # linux
             DESTROY_EXE = which('shred')
         except WhichError:  # win32
-            if not isfile(DESTROY_EXE):  # from constants.py
+            DESTROY_EXE = os.path.join(appdata_lib_dir, '_sdelete.bat')
+            if not isfile(DESTROY_EXE):
                 try:
                     guess = which('sdelete.exe')  # which is fast
                 except WhichError:  # where is slow
@@ -2314,16 +2303,16 @@ def set_openssl(path=None):
         OPENSSL = path
         logging.info('Requested openssl executable: ' + OPENSSL)
     elif sys.platform not in ['win32']:
-        OPENSSL = sys_call(['which', 'openssl'])
+        OPENSSL = which('openssl')
         if OPENSSL not in ['/usr/bin/openssl']:
             msg = 'unexpected location for openssl binary: %s' % OPENSSL
             logging.warning(msg)
     else:
-        # use a bat file for openssl.cfg; create .bat if not found or broken
+        # use a bat file to set OPENSSL_CONF; create .bat if not found
         OPENSSL = op_bat_name  # from constants
         if not exists(OPENSSL):
-            logging.info('no working %s file; trying to recreate' % op_bat_name)
-            bat = op_bat_template.replace(openssl_expr, op_default)
+            logging.info('no working %s file; will recreate' % op_bat_name)
+            bat = op_bat_template.replace(op_expr, op_default)
             with open(OPENSSL, 'wb') as fd:
                 fd.write(bat)
             test = sys_call([OPENSSL, 'version'])
@@ -2336,7 +2325,7 @@ def set_openssl(path=None):
                            'Please install under C:\ and try again.',
                            RuntimeError)
                 guess_path = guess.replace(os.sep + 'openssl.exe', '')
-                where_bat = op_bat_template.replace(openssl_expr, guess_path)
+                where_bat = op_bat_template.replace(op_expr, guess_path)
                 with open(OPENSSL, 'wb') as fd:
                     fd.write(where_bat)
     if not isfile(OPENSSL):
@@ -2624,4 +2613,5 @@ finally:
     shutil.rmtree(tmp, ignore_errors=False)
 
 if __name__ == '__main__':
-    print(main(args))
+    result = main(args)
+    print(result)

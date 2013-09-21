@@ -20,17 +20,17 @@ else:
 # Constants: --------------------
 RSA_PADDING = '-oaep'  # actual arg for openssl rsautl in encrypt, decrypt
 
-ENC_EXT = '.enc'  # extension for for tgz of AES, PWD.RSA, META
-AES_EXT = '.aes256'   # extension for AES encrypted data file
-RSA_EXT = '.pwdrsa'   # extension for RSA-encrypted AES-pwd (ciphertext)
-META_EXT = '.meta'    # extension for meta-data
+ENC_EXT = '.enc'     # extension for for tgz of AES, PWD.RSA, META
+AES_EXT = '.aes256'  # extension for AES encrypted data file
+RSA_EXT = '.pwdrsa'  # extension for RSA-encrypted AES-pwd (ciphertext)
+META_EXT = '.meta'   # extension for meta-data
 
 # RSA key
 RSA_MODULUS_MIN = 1024  # threshold to avoid PublicKeyTooShortError
-RSA_MODULUS_WARN = 2048  # threshold to avoid warning about short key
+RSA_MODULUS_WRN = 2048  # threshold to avoid warning about short key
 
-# RsaKeys require()
-NEED_PUB = 1
+# RsaKeys require() codes:
+NEED_PUBK = 1
 NEED_PRIV = 2
 NEED_PPHR = 4
 
@@ -72,28 +72,27 @@ old_umask = None  # set as global in set_umask, unset_umask
 lib_path = os.path.abspath(__file__).strip('co')  # .py not .pyc, .pyo
 lib_dir = os.path.split(lib_path)[0]
 
-# do win32 stuff to improve test coverage % when tested on linux:
-# string to help be sure a .bat file belongs to pfs (win32, set_openssl):
+# for making .bat files for sdelete.exe and openssl.exe:
 bat_identifier = '-- pyFileSec .bat file --'
-appdata_lib_dir = ''
-if sys.platform == 'win32':
-    appdata_lib_dir = os.path.join(os.environ['APPDATA'], os.path.split(lib_dir)[-1])
-    if not os.path.isdir(appdata_lib_dir):
-        os.mkdir(appdata_lib_dir)
-DESTROY_EXE = os.path.join(appdata_lib_dir, '_sdelete.bat')
 sd_bat_template = """@echo off
                     REM  """ + bat_identifier + """ for using sdelete.exe
 
                     START "" /b /wait XSDELETEX %*""".replace('    ', '')
-op_bat_name = os.path.join(appdata_lib_dir, '_openssl.bat')
-openssl_expr = 'XX-OPENSSL_PATH-XX'
+op_expr = 'XX-OPENSSL_PATH-XX'
 op_default = 'C:\\OpenSSL-Win32\\bin'
 op_bat_template = """@echo off
     REM  """ + bat_identifier + """ for using openssl.exe
 
-    set PATH=""" + openssl_expr + """;%PATH%
-    set OPENSSL_CONF=""" + openssl_expr + """\\openssl.cfg
+    set PATH=""" + op_expr + """;%PATH%
+    set OPENSSL_CONF=""" + op_expr + """\\openssl.cfg
     START "" /b /wait openssl.exe %*""".replace('    ', '')
+if sys.platform == 'win32':
+    appdata_lib_dir = os.path.join(os.environ['APPDATA'],
+                                   os.path.split(lib_dir)[-1])
+    if not os.path.isdir(appdata_lib_dir):
+        os.mkdir(appdata_lib_dir)
+
+    op_bat_name = os.path.join(appdata_lib_dir, '_openssl.bat')
 
 
 # Initialize values: --------------------
@@ -102,8 +101,7 @@ dropbox_path = None
 
 # Exception classes: --------------------
 
-class PyFileSecError(Exception):
-    """Base exception for pyFileSec errors."""
+class PyFileSecError(Exception): pass  # Base exception for pyFileSec errors
 
 class EncryptError(PyFileSecError): pass  # failed, or refused to start
 
@@ -117,13 +115,13 @@ class PrivateKeyError(PyFileSecError): pass
 
 class PassphraseError(PyFileSecError): pass
 
-class SecFileArchiveFormatError(PyFileSecError): pass
+class SecFileFormatError(PyFileSecError): pass
 
-SecFileFormatError = SecFileArchiveFormatError
+SecFileArchiveFormatError = SecFileFormatError
 
 class PaddingError(PyFileSecError): pass
 
-class CodecRegistryError(PyFileSecError): pass # e.g., not registered
+class CodecRegistryError(PyFileSecError): pass  # e.g., not registered
 
 class DestroyError(PyFileSecError): pass  # e.g., destroy failed
 
