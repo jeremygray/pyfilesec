@@ -1253,7 +1253,7 @@ class Tests(object):
         cmdLineUnpad = [sys.executable, pathToSelf, datafile, '--pad',
                         '-z', '0', '--verbose']
         outv = sys_call(cmdLineUnpad)
-        assert outv.startswith('0.000')
+        assert outv.startswith('0.0')
         assert lib_name in outv
         assert len(outv) > 1000
         assert len(outv.splitlines()) > 50
