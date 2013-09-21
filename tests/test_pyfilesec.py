@@ -121,7 +121,7 @@ class Tests(object):
         import which
         os.chdir(self.tmp)
 
-    def test_secfile_base(self):
+    def test_SecFileBase(self):
         test_file = 'tf'
         with open(test_file, 'wb') as fd:
             fd.write('a')
@@ -145,6 +145,7 @@ class Tests(object):
         sf.hardlinks
         sf.is_in_dropbox
         sf._get_git_info(None)
+        sf._get_git_info('.', git='notgit')
         sf._get_svn_info(None)
         sf._get_hg_info(None)
 
@@ -163,7 +164,17 @@ class Tests(object):
         sf.metadata
 
         # non-writeable dir:
-        # TO-DO
+        no_write = 'non_writeable_test'
+        os.makedirs(no_write)
+        f = os.path.join(no_write, 'tmp_no_write')
+        with open(f, 'wb') as fd:
+            fd.write('x')
+        sf = SecFile(f)
+        assert sf.is_in_writeable_dir
+        os.chmod(no_write, stat.S_IREAD)
+        assert sf.is_in_writeable_dir == False
+        os.chmod(no_write, stat.S_IRWXU)
+        shutil.rmtree(no_write)
 
         # bad file name
         sf._file = test_file + 'xyz'
@@ -177,6 +188,7 @@ class Tests(object):
         sf.read()
         assert sf.metadata != {}
         assert sf.metadataf != '{}'
+        sf.snippet
 
         # .pem file (warns)
         sf.set_file(pub)
@@ -191,9 +203,9 @@ class Tests(object):
         good_path = OPENSSL
         with pytest.raises(RuntimeError):
             set_openssl('junk.glop')
-        #with pytest.raises(RuntimeError):
-        #    p = os.path.join(os.path.split(__file__)[0], 'openssl_version_97')
-        #    set_openssl(p)
+        with pytest.raises(RuntimeError):
+            p = os.path.join(os.path.split(__file__)[0], 'openssl_version_97')
+            set_openssl(p)
         set_openssl(good_path)
         if sys.platform in ['win32']:
             # exercise more code by forcing a reconstructon of the .bat files:
@@ -222,6 +234,7 @@ class Tests(object):
             fd.write('a')
         sf = SecFile(test_file)
         str(sf)
+        repr(sf)
 
         # encrypt-encrypted warning:
         pub, priv, pphr = self._known_values()[:3]
@@ -264,7 +277,6 @@ class Tests(object):
         shutil.rmtree('.svn')
 
     def test_RsaKeys(self):
-        # placeholder for more tests
         pub, priv, pphr, bits = self._known_values()[:4]
 
         # test individual keys:
@@ -290,16 +302,25 @@ class Tests(object):
 
         # test integrity of the set of keys:
         rk = RsaKeys(pub, priv, pphr).test()
+        rk.sniff(priv)
 
         # same again, no passphrase:
         pub_no, priv_no, bits_no = self._known_values_no_pphr()[:3]
         rk_no = RsaKeys(pub_no, priv_no).test()
 
+        # mismatched pub priv:
+        with pytest.raises(PublicKeyError):
+            rk = RsaKeys(pub, priv_no).test()
+
+        # make short keys, test if pub_bits < RSA_MODULUS_MIN
+        #sys_call([OPENSSL, 'genrsa', '-out', priv, str(RSA_MODULUS_MIN)])
+        #sys_call([OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub])
+        #rk = RsaKeys(pub, priv).test()
+
         # test get_key_length function
         klen = get_key_length(pub)
-        cmdGETMOD = [OPENSSL, 'rsa', '-modulus', '-in',
-                     pub, '-pubin', '-noout']
-        modulus = sys_call(cmdGETMOD).replace('Modulus=', '')
+        cmdMOD = [OPENSSL, 'rsa', '-modulus', '-in', pub, '-pubin', '-noout']
+        modulus = sys_call(cmdMOD).replace('Modulus=', '')
         assert hexdigits_re.match(modulus)
 
         # test sniff
@@ -339,6 +360,20 @@ class Tests(object):
             s = SecFileArchive('ttt')
             s.name = 'ttt'
             s.unpack()
+
+        # construct an archive with a bad file name:
+        sfa = SecFileArchive()
+        sfa.name = 'sfa_name' + ENC_EXT
+        aes = 'aes' + AES_EXT
+        #pwd = 'pwd' + RSA_EXT
+        md = 'md' + META_EXT
+        bad = md + 'BAD'
+        files = [aes, md, bad]  # omit pwd to test
+        for f in files:
+            with open(f, 'wb') as fd:
+                fd.write('x')
+        sfa._make_tar(files, keep=True)
+        sfa.unpack()
 
         '''
         # test fall-through decryption method:
@@ -953,7 +988,6 @@ class Tests(object):
         prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
         pwd = printable_pwd(180)
         pphr2 = '  ' + pwd.str + '   '  # spaces in pphr
-        #print pwd, pphr2
         pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr2, 1024)
 
         # Rotate encryption including padding change:
@@ -1085,6 +1119,8 @@ class Tests(object):
         tmp = NamedTemporaryFile()
         tmp.write('x')
         secure_rename(tmp.name, 'abc')
+
+
 
     def test_hmac(self):
         # verify pfs hmac implementation against a widely used example:

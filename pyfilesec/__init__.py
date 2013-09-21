@@ -163,28 +163,12 @@ class PFSCodecRegistry(object):
                 sf = SecFile(test_file, codec=test_co)
                 sf.encrypt(keep=True, **enc_kwargs)
                 sf.decrypt(**dec_kwargs)
-            except EncryptError:
-                fatal('Codec registration:  Encrypt test failed',
-                      CodecRegistryError)
-            except DecryptError:
-                fatal('Codec registration:  Decrypt test failed',
-                      CodecRegistryError)
             finally:
-                try:
-                    os.unlink(test_file)
-                except:
-                    pass
-                try:
-                    if sf.file:
-                        recovered = open(sf.file, 'rb').read()
-                    os.unlink(sf.file)
-                except:
-                    pass
-            try:
-                assert recovered == test_datum.str
-            except:
-                fatal('Codec registration:  enc-dec self-test failed',
-                      CodecRegistryError)
+                os.unlink(test_file)
+                if sf.file:
+                    recovered = open(sf.file, 'rb').read()
+                os.unlink(sf.file)
+            assert recovered == test_datum.str and 'Codec reg: enc-dec failed'
 
         for key, fxn in list(new_functions.items()):
             try:
@@ -402,6 +386,7 @@ class _SecFileBase(object):
         """
         if hasattr(self, 'meta') and self.meta:
             return json.load(open(self.meta, 'rb'))
+        return NO_META_DATA
 
     @property
     def metadataf(self):
@@ -513,7 +498,7 @@ class _SecFileBase(object):
                     self._get_git_info(self.file),
                     self._get_hg_info(self.file)])
 
-    def _get_git_info(self, path):
+    def _get_git_info(self, path, git='git'):
         """Report whether a directory or file is tracked in a git repo.
 
         Can test any generic filename, not just current file::
@@ -527,11 +512,11 @@ class _SecFileBase(object):
         if not path or not exists(path):
             return False
         try:
-            sys_call(['git'])
+            sys_call([git])
         except OSError:
             # no git, not call-able
             return False
-        cmd = ['git', 'ls-files', abspath(path)]
+        cmd = [git, 'ls-files', abspath(path)]
         is_tracked = bool(sys_call(cmd, ignore_error=True))
 
         logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
@@ -1080,8 +1065,7 @@ class SecFile(_SecFileBase):
 
         return self
 
-    def rotate(self, pub=None, priv=None, pphr=None,
-               hmac_key=None, pad=None, keep_meta=True):
+    def rotate(self, pub=None, priv=None, pphr=None, hmac_key=None, pad=None):
         """Swap old encryption for new: decrypt-then-re-encrypt.
 
         Conceptually there are three separate steps: decrypt with ``priv``
@@ -1109,8 +1093,6 @@ class SecFile(_SecFileBase):
                 passphrase for the private key (as a string, or filename)
             `pub` :
                 path to the new public key to be used for the new encryption.
-            `keep_meta` :
-                if False, unlink the meta file after decrypt
             `hmac_key` :
                 key (string) to use for an HMAC to be saved in the meta-data
         """
@@ -1137,36 +1119,21 @@ class SecFile(_SecFileBase):
             self.set_file(sf.file)  # decrypted file name
 
             logging.debug('rotate self.meta = %s' % self.meta)
-            if isfile(self.meta):
-                try:
-                    md = self.load_metadata()
-                    logging.debug(name + ': read metadata from file')
-                except:
-                    logging.error(name + ': failed to read metadata')
-                    md = self.NO_META_DATA
-            else:
-                logging.debug(name + ': self.meta no such file')
-                md = self.NO_META_DATA
+            md = self.load_metadata()  # get NO_META_DATA if missing
             pad = max(0, pad)  # disallow -1, don't want errors mid-rotate
-            if pad is not None and pad > -1:
+            if pad == 0 or self._ok_to_pad(pad):
                 SecFile(self.file).pad(pad)
             file_dec = self.file  # track file names so can destroy if needed
 
             sf = SecFile(self.file).encrypt(pub=enc_rsakeys.pub, date=True,
                      meta=md, keep=False, hmac_key=hmac_key)
             self.set_file(sf.file)  # newly encrypted file name
-        except FileNotEncryptedError:
-            fatal(name + ': not given an encrypted file',
-                  FileNotEncryptedError)
         finally:
             # generally rotate must not leave any decrypted stuff. exception:
             #   decrypt, destroy orig.enc, *then* get exception --> now what?
             # unlikely situation: require_keys(pub) before starting, if dec
             #   works then directory write permissions are ok
-            if file_dec and isfile(file_dec):
-                SecFile(file_dec).destroy()
-            if hasattr(self, 'meta') and isfile(self.meta):
-                os.unlink(self.meta)  # not sensitive
+            file_dec and isfile(file_dec) and SecFile(file_dec).destroy()
 
         unset_umask()
         self.result.update({'file': self.file,
@@ -1290,24 +1257,19 @@ class SecFile(_SecFileBase):
 
         cmd_Destroy = (DESTROY_EXE,) + DESTROY_OPTS + (target_file,)
         good_sys_call = False
-        try:
-            __, err = sys_call(cmd_Destroy, stderr=True)
-            good_sys_call = not err
-            # mac srm will warn about multiple links via stderr -> disp unknown
-        except OSError as e:
-            logging.warning(name + ': %s, %s' % (e, ' '.join(cmd_Destroy)))
+        __, err = sys_call(cmd_Destroy, stderr=True)
+        good_sys_call = not err
+        # mac srm will warn about multiple links via stderr -> disp unknown
 
         disposition = pfs_UNKNOWN
         if not isfile(target_file):
-            disposition = (pfs_UNKNOWN, pfs_DESTROYED)[good_sys_call]
+            if good_sys_call:
+                disposition = pfs_DESTROYED
         else:
             logging.error(name + ': falling through to trying 1 pass of zeros')
             with open(target_file, 'wb') as fd:
                 fd.write(chr(0) * getsize(target_file))
-        shutil.rmtree(target_file, ignore_errors=True)  # should be gone
-        if isfile(target_file):  # yikes, its an undead file
-            fatal(name + ': %s remains after destroy()' % (target_file,
-                                                           DestroyError))
+            shutil.rmtree(target_file)
 
         duration = round(get_time() - destroy_t0, 4)
         self.reset()  # clear everything, including self.result
@@ -1427,8 +1389,7 @@ class SecFileArchive(_SecFileBase):
                     if f.name[0] in ['.', os.sep] or f.name[1:3] == ':\\']
         tar.close()
         if badNames:
-            fatal('bad/dubious internal file names',
-                   SecFileArchiveFormatError)
+            fatal('bad/dubious internal file names', SecFileArchiveFormatError)
         return True
 
     def unpack(self):
@@ -1466,12 +1427,10 @@ class SecFileArchive(_SecFileBase):
             elif fname.endswith(META_EXT):
                 self.meta = os.path.join(tmp_dir, fname)
             else:
-                fatal(name + ': unexpected file in cipher_text archive',
-                      SecFileArchiveFormatError)
-
+                logging.error(name + ': unexpected file %s in archive' % fname)
+                # seems better to allow unpack to proceed anyway, eg, to rotate
         if not all([self.data_aes, self.pwd_rsa, self.meta]):
-                logging.warn('did not find 3 files in archive %s' %
-                             self.name)
+            logging.error('did not find 3 files in archive %s' % self.name)
         unset_umask()
 
         return self.data_aes, self.pwd_rsa, self.meta
@@ -1528,14 +1487,6 @@ class RsaKeys(object):
         """
         self.require(req=NEED_PUB | NEED_PRIV)
         pubk, pub_bits = self.sniff(self.pub)
-        if pubk != 'pub':
-            fatal('RsaKeys test: pub is not a public key', PublicKeyError)
-        privk, enc = self.sniff(self.priv)
-        if privk != 'priv':
-            fatal('RsaKeys test: priv is not a private key', PrivateKeyError)
-        if enc != bool(self.pphr):
-            fatal('RsaKeys test: no passphrase for encrypted private key',
-                  PassphraseError)
 
         # compare pub against pub as extracted from priv:
         cmdEXTpub = [OPENSSL, 'rsa', '-in', self.priv, '-pubout']
@@ -1546,9 +1497,11 @@ class RsaKeys(object):
         if test_pub not in open(self.pub, 'rb').read():
             fatal('public key not paired with private key', PublicKeyError)
 
-        if pub_bits < RSA_MODULUS_MIN:
-            fatal('public key too short; no real security below 1024 bits',
-                  PublicKeyTooShortError)
+        # .update() will detect and fail before we get here, so use assert:
+        #if pub_bits < RSA_MODULUS_MIN:
+        #    fatal('public key too short; no real security below 1024 bits',
+        #          PublicKeyTooShortError)
+        assert pub_bits >= RSA_MODULUS_MIN
         if pub_bits < RSA_MODULUS_WARN:
             logging.warning('short RSA key')
 
@@ -1586,13 +1539,12 @@ class RsaKeys(object):
                     return keytype, modulus
                 if '-----BEGIN' in line and 'PRIVATE KEY-----' in line:
                     keytype = 'priv'
-                if len(line) >= 64:
-                    enc = False
-                    return keytype, enc  # hit end of header info
+                #if len(line) >= 64:
+                #    enc = False
+                #    return keytype, enc  # hit end of header info
                 if 'ENCRYPTED' in line and keytype == 'priv':
-                    enc = True
-                    return keytype, enc
-        return None, None
+                    return keytype, True
+        return keytype, enc
 
     def require(self, req):
         """Raise error if key requirement(s) ``req`` are not met; assert-like.
@@ -1709,10 +1661,9 @@ class GenRSA(object):
             # SecurityServer daemon is supposed to ensure entropy is available:
             ps = sys_call(['ps', '-e'])
             securityd = sys_call(['which', 'securityd'])  # full path
+            e = 'securityd NOT running  (= bad)'
             if securityd in ps:
                 e = securityd + ' running   (= good)'
-            else:
-                e = 'securityd NOT running  (= bad)'
             rdrand = sys_call(['sysctl', 'hw.optional.rdrand'])
             e += '\n           rdrand: ' + rdrand
             if rdrand == 'hw.optional.rdrand: 1':
@@ -1720,8 +1671,6 @@ class GenRSA(object):
         elif sys.platform.startswith('linux'):
             avail = sys_call(['cat', '/proc/sys/kernel/random/entropy_avail'])
             e = 'entropy_avail: ' + avail
-            if int(avail) < 50:
-                e += ' (= not so much...)'
         return e
 
     def generate(self, pub='pub.pem', priv='priv.pem', pphr=None, bits=4096):
@@ -1741,8 +1690,7 @@ class GenRSA(object):
         sys_call(cmdGEN + [str(bits)], stdin=pphr)
 
         # Extract pub from priv:
-        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv,
-                     '-pubout', '-out', pub]
+        cmdEXTpub = [OPENSSL, 'rsa', '-in', priv, '-pubout', '-out', pub]
         if pphr:
             cmdEXTpub += ['-passin', 'stdin']
         sys_call(cmdEXTpub, stdin=pphr)
@@ -1752,9 +1700,8 @@ class GenRSA(object):
             RsaKeys(pub=pub, priv=priv, pphr=pphr).test()
         except:
             msg = 'new RSA keys failed to validate; removing them'
-            logging.error(msg)
             self._cleanup(msg, priv, pub)
-            raise
+            fatal(msg, RuntimeError)
         return _abspath(pub), _abspath(priv)
 
     def _cleanup(self, msg, pub='', priv='', pphr=None):
@@ -1850,30 +1797,29 @@ class GenRSA(object):
         if args.passfile:
             pphrout_msg = '  pphr = %s' % pphr_out
             print(pphrout_msg)
+        print('\nEnter a passphrase for the private key (16 or more chars)'
+              '\n  or press <return> to auto-generate a passphrase')
         pphr_auto = True
+        bits = RSA_BITS_DEFAULT
         if interactive:
             import _getpass
-            print('\nEnter a passphrase for the private key (16 or more chars)'
-                  '\n  or press <return> to auto-generate a passphrase')
             try:
                 pphr = SecStr(_getpass.getpass('Passphrase: '))
             except ValueError:
                 pass  # hit return, == want auto-generate
             else:
+                if len(pphr.str) < 16:
+                    return self._cleanup('\n  > passphrase too short, exiting <')
                 pphr_auto = False
                 pphr2 = SecStr(_getpass.getpass('same again: '))
                 if pphr.str != pphr2.str:
                     return self._cleanup('  > Passphrase mismatch. Exiting. <')
                 pphr2.zero()
+            bits = int(input23('\nKey length (2048, 4096, 8192): [%d] ' %
+                        RSA_BITS_DEFAULT))
         if pphr_auto:
             print('(auto-generating a passphrase)')
             pphr = printable_pwd(PPHR_BITS_DEFAULT)
-        if len(pphr.str) < 16:
-            return self._cleanup('\n  > passphrase too short, exiting <')
-        bits = RSA_BITS_DEFAULT
-        if interactive:
-            bits = int(input23('\nKey length (2048, 4096, 8192): [%d] ' %
-                        RSA_BITS_DEFAULT))
         bits_msg = '  using %i' % bits
         bit = max(bits, RSA_MODULUS_WARN)
         print(bits_msg)
@@ -1886,16 +1832,14 @@ class GenRSA(object):
         sys.stdout.flush()
         try:
             time.sleep(nap)
-        except KeyboardInterrupt:
+        except:  # eg KeyboardInterrupt
             return self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
 
         msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
         print(msg)
         try:
             self.generate(pub, priv, pphr.str, bits)
-        except KeyboardInterrupt:
-            return self._cleanup(' > cancelled, exiting <', pub, priv, pphr)
-        except:
+        except:  # eg KeyboardInterrupt
             return self._cleanup('\n  > exception in generate(), exiting <',
                           pub, priv, pphr)
 
@@ -1907,13 +1851,10 @@ class GenRSA(object):
         if pphr_auto:
             if args.passfile:
                 pphr_msg = 'passphrase:  %s' % pphr_out
-                try:
-                    set_umask()
-                    with open(pphr_out, 'wb') as fd:
-                        fd.write(pphr.str)
-                    unset_umask()
-                except:
-                    return self._cleanup('', pub, priv, pphr)
+                set_umask()
+                with open(pphr_out, 'wb') as fd:
+                    fd.write(pphr.str)
+                unset_umask()
                 if (not isfile(pphr_out) or
                         not getsize(pphr_out) == PPHR_OUT_SIZE):
                     return self._cleanup(' > failed to save passphrase file <',
@@ -1921,10 +1862,10 @@ class GenRSA(object):
             elif args.clipboard:
                 try:
                     import _pyperclip
+                except ImportError:
+                    fatal("can't use clipboard: no getclip etc?", ImportError)
                 except RuntimeError:
                     fatal("can't use clipboard: no display?", RuntimeError)
-                except ImportError:
-                    fatal("can't use clipboard: no xclip / getclip?", ImportError)
                 _pyperclip.copy(pphr.str)
                 pphr_msg = ('passphrase:  saved to clipboard only... '
                             'paste it somewhere safe!!\n'
@@ -1935,7 +1876,7 @@ class GenRSA(object):
                 pphr_out = pphr.str
         print(pphr_msg)
         warn_msg = (' > Keep the private key private! <\n'
-               '  > Do not lose the passphrase! <')
+            '  > Do not lose the passphrase! <')
         print(warn_msg)
 
         del(pphr)
@@ -2101,10 +2042,10 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     try:
         pwd, se_RSA = sys_call(cmdRSA, stdin=pphr, stderr=True, sec_str=True)
         pwd_zero = threading.Timer(0.02, pwd.zero)
-        pwd_zero.start()  # AES decrypt can be slow, best to clear pwd
+        pwd_zero.start()  # AES decrypt can be minutes, best to clear pwd
         ___, se_AES = sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
-        if isfile(data_dec):
+        if isfile(data_dec) and isfile(data_enc):
             SecFile(data_dec).destroy()
         fatal('%s: Could not decrypt (exception in RSA or AES step)' % name,
                DecryptError)
@@ -2306,6 +2247,7 @@ def set_destroy():
             'linux2': ('-f', '-u', '-n', '7'),
             'win32':  ('-q', '-p', '7')}
     DESTROY_OPTS = opts[sys.platform]
+    global DESTROY_EXE
     try:  # darwin
         DESTROY_EXE = which('srm')
     except WhichError:
@@ -2661,9 +2603,8 @@ def _parse_args():
 
 args = (__name__ == "__main__") and _parse_args()
 
-logging = set_logging(args and bool(args.verbose))
-openssl_path_wanted = args and args.openssl
-OPENSSL, openssl_version = set_openssl(openssl_path_wanted)
+logging = set_logging(args and args.verbose)
+OPENSSL, openssl_version = set_openssl(args and args.openssl)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
 
 py64bit = (sys.maxsize == 9223372036854775807)

@@ -69,13 +69,16 @@ PERMISSIONS = 0o600  # for all SecFiles: no execute, no group, no other
 UMASK = 0o077  # need u+x permission for directories
 old_umask = None  # set as global in set_umask, unset_umask
 
+lib_path = os.path.abspath(__file__).strip('co')  # .py not .pyc, .pyo
+lib_dir = os.path.split(lib_path)[0]
+
 # do win32 stuff to improve test coverage % when tested on linux:
 # string to help be sure a .bat file belongs to pfs (win32, set_openssl):
 bat_identifier = '-- pyFileSec .bat file --'
 appdata_lib_dir = ''
 if sys.platform == 'win32':
-    appdata_lib_dir = os.path.join(os.environ['APPDATA'], split(lib_dir)[-1])
-    if not isdir(appdata_lib_dir):
+    appdata_lib_dir = os.path.join(os.environ['APPDATA'], os.path.split(lib_dir)[-1])
+    if not os.path.isdir(appdata_lib_dir):
         os.mkdir(appdata_lib_dir)
 DESTROY_EXE = os.path.join(appdata_lib_dir, '_sdelete.bat')
 sd_bat_template = """@echo off
