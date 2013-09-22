@@ -61,6 +61,7 @@ from   which import which, WhichError
 """TO-DO:
 - move _enc, _dec into files in new dir codec/, sha256() and execfile() them
 - use SecStr consistently throughout: in RsaKeys, generate, etc
+- rewrite encrypt decrypt to take parameter `engine` or `backend` to accept openssl, gpg, or pycrypto
 """
 
 lib_name = 'pyFileSec'
@@ -148,7 +149,7 @@ class PFSCodecRegistry(object):
         if test_keys:
             enc_kwargs, dec_kwargs = test_keys
             test_co = PFSCodecRegistry({})
-            test_co._functions = new_functions  # splice in, bypass .register
+            test_co._functions = new_functions  # splice in to bypass .register
             test_dir = mkdtemp()
             test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
             test_datum = printable_pwd(64)
@@ -163,7 +164,7 @@ class PFSCodecRegistry(object):
                 if sf.file:
                     recovered = open(sf.file, 'rb').read()
                 os.unlink(sf.file)
-            assert recovered == test_datum.str and 'Codec reg: enc-dec failed'
+            assert recovered == test_datum.str  # 'Codec reg: enc-dec failed'
 
         for key, fxn in list(new_functions.items()):
             try:
@@ -629,7 +630,7 @@ class SecFile(_SecFileBase):
             either be checked after a method call (eg in .rename), or should be
             ensured to be unique before the call.
 
-            the parameter `openssl` should probably be `engine`, in order
+            the parameter `openssl` should probably be `engine` or `backend`, in order
             to support gpg or pycrypto usage. then .encrypt(pub) will call the
             corresponding lib
         '''
@@ -1695,7 +1696,7 @@ class GenRSA(object):
             RsaKeys(pub=pub, priv=priv, pphr=pphr).test()
         except:
             self._cleanup('', priv, pub)
-            fatal('new RSA keys failed to validate; removing them', RuntimeError)
+            fatal('new keys failed to validate; removing them', RuntimeError)
         return _abspath(pub), _abspath(priv)
 
     def _cleanup(self, msg, pub='', priv='', pphr=None):
@@ -1804,11 +1805,11 @@ class GenRSA(object):
                 pass  # hit return, == want auto-generate
             else:
                 if len(pphr.str) < 16:
-                    return self._cleanup('\n  > passphrase too short, exiting <')
+                    return self._cleanup('\n  > Passphrase too short. <')
                 pphr_auto = False
                 pphr2 = SecStr(_getpass.getpass('same again: '))
                 if pphr.str != pphr2.str:
-                    return self._cleanup('  > Passphrase mismatch. Exiting. <')
+                    return self._cleanup('  > Passphrases do not match. <')
                 pphr2.zero()
             bits = int(input23('\nKey length (2048, 4096, 8192): [%d] ' %
                         RSA_BITS_DEFAULT))
@@ -2050,9 +2051,11 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     # Log any error-ish conditions:
     if 'unable to load Private Key' in se_RSA:
         fatal('%s: unable to load Private Key' % name, PrivateKeyError)
-    se_RSA = se_RSA.replace("Loading 'screen' into random state - done", '').strip()
+    glop = "Loading 'screen' into random state - done"
+    se_RSA = se_RSA.replace(glop, '').strip()
     if se_RSA:
-        fatal('%s: Bad decrypt (RSA) %s (wrong key?)' % (name, se_RSA), DecryptError)
+        fatal('%s: Bad decrypt (RSA) %s (wrong key?)' % (name, se_RSA),
+              DecryptError)
     if se_AES:
         fatal('%s: Bad decrypt (AES) %s' % (name, se_AES), DecryptError)
 
@@ -2078,9 +2081,9 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
     # Generate a password (digital envelope "session" key):
     # want printable because its sent to openssl via stdin
     bits = 256
-    pwd = printable_pwd(nbits=bits)
+    pwd = printable_pwd(nbits=bits)  # has leading '#'
     assert not whitespace_re.search(pwd.str)
-    assert len(pwd.str.replace('#', '')) == bits // 4  # hex, remove leading '#'
+    assert len(pwd.str.replace('#', '')) == bits // 4
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     cmd_RSA = [openssl, 'rsautl',
@@ -2550,10 +2553,10 @@ def _parse_args():
     parser = argparse.ArgumentParser(
         description='File-oriented privacy & integrity management library.',
         epilog="See http://pythonhosted.org/pyFileSec/")
-    parser.add_argument('filename', help='file (path), or "genrsa" (no quotes)')
+    parser.add_argument('filename', help='file path, or "genrsa" (no quotes)')
     parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('--verbose', action='store_true', help='print logging info to stdout', default=False)
-    parser.add_argument('--openssl', help='specify path of the openssl binary to use')
+    parser.add_argument('--openssl', help='path of the openssl binary to use')
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-m][-n][-c][-z][-e][-k])')
@@ -2562,7 +2565,7 @@ def _parse_args():
     group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r][-o])')
     group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -s)')
     group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
-    group.add_argument('--unpad', action='store_true', help='remove padding (if any)')
+    group.add_argument('--unpad', action='store_true', help='remove padding')
     group.add_argument('--destroy', action='store_true', help='secure delete')
     group.add_argument('--hardlinks', action='store_true', help='return number of hardlinks to a file', default=False)
     group.add_argument('--tracked', action='store_true', help='return True if file is tracked using git, svn, or hg', default=False)
@@ -2573,11 +2576,11 @@ def _parse_args():
     group2.add_argument('--clipboard', action='store_true', help='genrsa: passphrase placed on clipboard (only)', default=False)
     group2.add_argument('--passfile', action='store_true', help='genrsa: save passphrase to file, name matches keys', default=False)
 
-    parser.add_argument('-o', '--out', help='sign: path name for the generated sig')
+    parser.add_argument('-o', '--out', help='sign: path name for the sig')
     parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
     parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
-    parser.add_argument('-p', '--pphr', help='path to file containing passphrase for private key')
-    parser.add_argument('-c', '--hmac', help='path to file containing hmac key')
+    parser.add_argument('-p', '--pphr', help='path to file with passphrase')
+    parser.add_argument('-c', '--hmac', help='path to file with hmac key')
     parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; unpad 0, -1')
     parser.add_argument('-a', '--autogen', action='store_true', help='non-interactive genrsa', default=False)
@@ -2601,14 +2604,11 @@ py64bit = (sys.maxsize == 9223372036854775807)
 # Register the default codec, runs auto-test
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
-tmp = mkdtemp()
 try:
+    tmp = mkdtemp()
     u, v, p = DEMO_RSA_KEYS(tmp)
     codec_registry = PFSCodecRegistry(default_codec,
-                                      test_keys=(
-                                          {'pub': u},              # enc_kwargs
-                                          {'priv': v, 'pphr': p})  # dec_kwargs
-                                      )
+                        test_keys=({'pub': u}, {'priv': v, 'pphr': p}))
 finally:
     shutil.rmtree(tmp, ignore_errors=False)
 
