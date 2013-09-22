@@ -46,10 +46,9 @@ a robust and easily extensible framework for adding other encryption backends,
 without requiring changes to the API.
 
 Bug reports and code contributions are welcome; the project is on github and you
-can contact me there (https://github.com/jeremygray/pyFileSec). For contacting me
-privately, e.g., about security issues, please look for my email address at the
-top of the main code. Help with Windows would be particularly welcome (see the
-issues list).
+can contact me there.  Help with Windows file permissions would be particularly
+welcome (see the issues list). For contacting me privately, e.g., about security
+issues, please look for my email address at the top of the main code.
 
 Software that includes pyFileSec
 ---------------------------------
@@ -57,10 +56,8 @@ Software that includes pyFileSec
 
 Contributors
 -------------
-Jeremy R. Gray - package author (GPG key D934B0D7)
+Jeremy R. Gray - package creator and maintainer (GPG key D934B0D7)
 
-Thanks to
-----------
 Michael Stone - awesome code review
 
 Sol Simpson - Windows compatibility
@@ -75,6 +72,10 @@ Milestones
 
 Dev branch status
 ------------------
+
+This status information concerns the master branch of the source code on
+github. Pypi releases are made from time to time, based on stable points
+in the development code.
 
 .. image:: https://travis-ci.org/jeremygray/pyfilesec.png?branch=master
     :target: https://travis-ci.org/jeremygray/pyfilesec?branch=master

@@ -7,14 +7,6 @@ Part of the pyFileSec library. Copyright (c) 2013, Jeremy R. Gray
 """
 
 
-import argparse
-import copy
-import os
-from   os.path import abspath, isfile, getsize, isdir, exists, split
-import pytest
-import shutil
-import sys
-
 import pyfilesec
 from   pyfilesec import *
 from   pyfilesec import _abspath, _uniq_file, _parse_args
