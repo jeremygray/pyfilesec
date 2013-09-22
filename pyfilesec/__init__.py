@@ -69,8 +69,8 @@ lib_path = abspath(__file__).strip('co')  # .py not .pyc, .pyo
 lib_dir = os.path.split(lib_path)[0]
 
 # load constants and exception classes from external file:
-constants = os.path.join(lib_dir, 'constants.py')
-exec(compile(open(constants).read(), 'constants.py', 'exec'))
+constants = open(os.path.join(lib_dir, 'constants.py')).read()
+exec(compile(constants, 'constants.py', 'exec'))
 
 
 class PFSCodecRegistry(object):

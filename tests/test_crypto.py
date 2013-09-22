@@ -813,10 +813,11 @@ class TestsCrypto(object):
         cmdLineUnpad = [sys.executable, pathToSelf, datafile, '--pad',
                         '-z', '0', '--verbose']
         outv = sys_call(cmdLineUnpad)
+        # see if there's lots of output, with some plausible detail:
         assert outv.startswith('0.0')
         assert lib_name in outv
-        assert len(outv) > 1000
-        assert len(outv.splitlines()) > 50
+        assert len(outv) > 800
+        assert len(outv.splitlines()) > 40
 
         # Destroy:
         cmdLineDestroy = [sys.executable, pathToSelf, datafile, '--destroy']

@@ -12,7 +12,7 @@ To run the example, just type:
 Command-line:
 The file sh_example.sh illustrates how to use pyFileSec functions from the command line.
 
-    % sh sh_ example.sh
+    % sh sh_example.sh
 
 The same syntax is used to call pyFileSec from within another program that can make
 shell calls. For example, E-Prime can using the function Shell().
@@ -31,11 +31,8 @@ paste into your shell as appropriate (or elsewhere, like a .bash_profile).
 2. The .pem files in the demos/ directory are for demo purposes only, and should
 never be used for anything else (!).
 
-3. You can generate your own keys (.pem files) like this:
-
-    % python /path/to/pyfilesec.py genrsa
-
-This is easier if you have an alias (per Note 1):
+3. You can generate your own keys (.pem files) like this (assuming you have an alias
+per Note 1):
 
     % pfs genrsa
 
