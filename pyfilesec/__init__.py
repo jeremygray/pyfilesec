@@ -1649,6 +1649,54 @@ class GenRSA(object):
     def __init__(self):
         pass
 
+    def demo_rsa_keys(self, folder=''):
+        pub = os.path.join(folder, 'pubkey_demo_only')
+        pubkey = """   !!! DEMO public key do not use; for testing only!!!
+
+            -----BEGIN PUBLIC KEY-----
+            MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC9wLTHLDHvr+g8WAZT77al/dNm
+            uFqFFNcgKGs1JDyN8gkqD6TR+ARa1Q4hJSaW8RUdif6eufrGR3DEhJMlXKh10QXQ
+            z8EUJHtxIrAgRQSUZz73ebeY4kV21jFyEEAyZnpAsXZMssC5BBtctaUYL9GR3bFN
+            yN8lJmBnyTkWmZ+OIwIDAQAB
+            -----END PUBLIC KEY-----
+            """.replace('    ', '')
+        if not isfile(pub):
+            with open(pub, 'w+b') as fd:
+                fd.write(pubkey)
+
+        priv = os.path.join(folder, 'privkey_demo_only')
+        privkey = """   !!! DEMO private key do not use; for testing only!!!
+
+            -----BEGIN RSA PRIVATE KEY-----
+            Proc-Type: 4,ENCRYPTED
+            DEK-Info: DES-EDE3-CBC,CAE91148C704A765
+
+            F2UT1W+Xkeux69BbesjG+xIsNtEMs3Nc6i72nrj1OZ7WKBb0keDE3Rin0sdkXzy0
+            asbiIAA4fccew0/Wn7rq1v2mOdxgZTGheIDKP7kcPW//jF/XBIrbs0zH3bB9Wztp
+            IOfb5YPV/BlPtec/Eniaj5xcWK/UGzebT/ela4f8OjiurIDJxW02XOwN4T6mA55m
+            rNxorDmdvt0CmGSZlG8b9nB9XdFSCnBnD1s1l0MwZYHgiBFZ4R8A6mPJPpUFeZcX
+            S1l3ty87hU0DcJr0tCwjGV6Ghh7B17+LBWa4Vj4Z+q5yHdYeKj29IIFLvzbvj5Hs
+            aMwpFKhiofNVJvTrsZep7ZbGJleTP3wxhlcbK5WY+tL34dHsxGhP0h2VrVESIQN2
+            HJj/QfCP8p65Jii1YGlp7SqzQXEt+aoOzbIAPrr0fAtZjWIOsB6imAbloP0kLi96
+            9nsB9PKARxZagbe9d4ewLs6Uu0cprw63LUb1r10dx5J22XE84zYTInN1qXeHz1U5
+            eSCD6L17f9Ff31Lo4oRITJv4ksZvJRyIRBCubjgaOT5utXo722Df7LsqIzYNC3Ow
+            RQRhwISo/AMWvHPRwNnt6ZanzZMc0dUQl36d7Di+lJCTxNRJkPG80UzyULGmnSjT
+            v0bA3mUT7/yZUjdXZ1V4zFvkRRXh2wsPkX8UVvvcA+qhbYpE5ChHj7km/ZrS+66x
+            L+LTRq7fsv8V21phcofbxZaQfKIO4FeeGnE+v14H2bDKkf7rop4PhDV0E4obCFT3
+            THSOgTQAWEWjOU/IwlgOwRz5pM6xV0RmAa7b5uovheI=
+            -----END RSA PRIVATE KEY-----
+            """.replace('    ', '')
+        if not isfile(priv):
+            with open(priv, 'wb') as fd:
+                fd.write(privkey)
+
+        pphr = os.path.join(folder, 'pphr_demo_only')
+        p = "337876469593251699797157678785713755296571899138117259"
+        if not isfile(pphr):
+            with open(pphr, 'wb') as fd:
+                fd.write(p)
+        return _abspath(pub), _abspath(priv), _abspath(pphr)
+
     def check_entropy(self):
         """Basic query for some indication that entropy is available.
         """
@@ -1858,8 +1906,8 @@ class GenRSA(object):
             elif args.clipboard:
                 try:
                     import _pyperclip
-                except RuntimeError:
-                    fatal("can't use clipboard: no display?", RuntimeError)
+                except (ImportError, RuntimeError):
+                    fatal("can't import clipboard: no display?", RuntimeError)
                 _pyperclip.copy(pphr.str)
                 pphr_msg = ('passphrase:  saved to clipboard only... '
                             'paste it somewhere safe!!\n'
@@ -2412,55 +2460,6 @@ def unset_umask():
     return reverted_umask
 
 
-def DEMO_RSA_KEYS(folder=''):
-    pub = os.path.join(folder, 'pubkey_demo_only')
-    pubkey = """   !!! DEMO public key do not use; for testing only!!!
-
-        -----BEGIN PUBLIC KEY-----
-        MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC9wLTHLDHvr+g8WAZT77al/dNm
-        uFqFFNcgKGs1JDyN8gkqD6TR+ARa1Q4hJSaW8RUdif6eufrGR3DEhJMlXKh10QXQ
-        z8EUJHtxIrAgRQSUZz73ebeY4kV21jFyEEAyZnpAsXZMssC5BBtctaUYL9GR3bFN
-        yN8lJmBnyTkWmZ+OIwIDAQAB
-        -----END PUBLIC KEY-----
-        """.replace('    ', '')
-    if not isfile(pub):
-        with open(pub, 'w+b') as fd:
-            fd.write(pubkey)
-
-    priv = os.path.join(folder, 'privkey_demo_only')
-    privkey = """   !!! DEMO private key do not use; for testing only!!!
-
-        -----BEGIN RSA PRIVATE KEY-----
-        Proc-Type: 4,ENCRYPTED
-        DEK-Info: DES-EDE3-CBC,CAE91148C704A765
-
-        F2UT1W+Xkeux69BbesjG+xIsNtEMs3Nc6i72nrj1OZ7WKBb0keDE3Rin0sdkXzy0
-        asbiIAA4fccew0/Wn7rq1v2mOdxgZTGheIDKP7kcPW//jF/XBIrbs0zH3bB9Wztp
-        IOfb5YPV/BlPtec/Eniaj5xcWK/UGzebT/ela4f8OjiurIDJxW02XOwN4T6mA55m
-        rNxorDmdvt0CmGSZlG8b9nB9XdFSCnBnD1s1l0MwZYHgiBFZ4R8A6mPJPpUFeZcX
-        S1l3ty87hU0DcJr0tCwjGV6Ghh7B17+LBWa4Vj4Z+q5yHdYeKj29IIFLvzbvj5Hs
-        aMwpFKhiofNVJvTrsZep7ZbGJleTP3wxhlcbK5WY+tL34dHsxGhP0h2VrVESIQN2
-        HJj/QfCP8p65Jii1YGlp7SqzQXEt+aoOzbIAPrr0fAtZjWIOsB6imAbloP0kLi96
-        9nsB9PKARxZagbe9d4ewLs6Uu0cprw63LUb1r10dx5J22XE84zYTInN1qXeHz1U5
-        eSCD6L17f9Ff31Lo4oRITJv4ksZvJRyIRBCubjgaOT5utXo722Df7LsqIzYNC3Ow
-        RQRhwISo/AMWvHPRwNnt6ZanzZMc0dUQl36d7Di+lJCTxNRJkPG80UzyULGmnSjT
-        v0bA3mUT7/yZUjdXZ1V4zFvkRRXh2wsPkX8UVvvcA+qhbYpE5ChHj7km/ZrS+66x
-        L+LTRq7fsv8V21phcofbxZaQfKIO4FeeGnE+v14H2bDKkf7rop4PhDV0E4obCFT3
-        THSOgTQAWEWjOU/IwlgOwRz5pM6xV0RmAa7b5uovheI=
-        -----END RSA PRIVATE KEY-----
-        """.replace('    ', '')
-    if not isfile(priv):
-        with open(priv, 'wb') as fd:
-            fd.write(privkey)
-
-    pphr = os.path.join(folder, 'pphr_demo_only')
-    p = "337876469593251699797157678785713755296571899138117259"
-    if not isfile(pphr):
-        with open(pphr, 'wb') as fd:
-            fd.write(p)
-    return _abspath(pub), _abspath(priv), _abspath(pphr)
-
-
 def main(args):
     logging.info("%s with %s" % (lib_name, openssl_version))
     if args.filename == 'genrsa':
@@ -2606,7 +2605,7 @@ default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
 try:
     tmp = mkdtemp()
-    u, v, p = DEMO_RSA_KEYS(tmp)
+    u, v, p = GenRSA().demo_rsa_keys(tmp)
     codec_registry = PFSCodecRegistry(default_codec,
                         test_keys=({'pub': u}, {'priv': v, 'pphr': p}))
 finally:

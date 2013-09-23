@@ -228,7 +228,7 @@ class TestsCrypto(object):
                 pyfilesec.RSA_MODULUS_MIN = rsa_mod_orig
 
             # arrange for a bad session key, should fail to decrypt:
-            pub, priv, pphr = DEMO_RSA_KEYS()
+            pub, priv, pphr = GenRSA().demo_rsa_keys()
             sf = SecFile(datafile).encrypt(pub, keep=True)
             sfa = SecFileArchive(arc=sf.file)
             sfa.unpack()
@@ -295,7 +295,7 @@ class TestsCrypto(object):
 
         # bad decrypt method from archive:
         c = PFSCodecRegistry()
-        pub = DEMO_RSA_KEYS()[0]
+        pub = GenRSA().demo_rsa_keys()[0]
         sf = SecFile('ttt').encrypt(pub)
         sfa = SecFileArchive(arc=sf.file)
         with pytest.raises(CodecRegistryError):
@@ -467,8 +467,8 @@ class TestsCrypto(object):
         try:
             import _pyperclip
             GenRSA().dialog(interactive=False, args=args)
-        except ImportError:
-            with pytest.raises(ImportError):
+        except (RuntimeError, ImportError):
+            with pytest.raises(RuntimeError):
                 GenRSA().dialog(interactive=False, args=args)
 
         sys.argv = [__file__, 'genrsa', '--passfile']
@@ -491,7 +491,7 @@ class TestsCrypto(object):
         GenRSA().dialog(interactive=False, args=args)
 
         # test cleanup
-        pub, priv, pphr = DEMO_RSA_KEYS()
+        pub, priv, pphr = GenRSA().demo_rsa_keys()
         GenRSA()._cleanup('test cleanup', pub, priv, pphr)
         assert not exists(pub)
         assert not exists(priv)
@@ -848,7 +848,7 @@ def _known_values(folder='.'):
     This is a WEAK key, 1024 bits, for testing ONLY.
     """
     bits = '1024'
-    pub, priv, pphr = DEMO_RSA_KEYS(folder)
+    pub, priv, pphr = GenRSA().demo_rsa_keys(folder)
 
     kwnSig0p9p8 = (  # openssl 0.9.8r
         "dNF9IudjTjZ9sxO5P07Kal9FkY7hCRJCyn7IbebJtcEoVOpuU5Gs9pSngPnDvFE"
