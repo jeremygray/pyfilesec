@@ -211,15 +211,16 @@ terminal or command prompt) and then:
   >>> import pyfilesec as pfs
   >>> pfs.command_alias()
 
-This will print aliases for bash, csh/tcsh, and DOS. Copy and paste into your
+This will print aliases for bash, csh / tcsh, and DOS. Copy and paste into your
 shell as appropriate (or paste elsewhere, like a ~/.bash_profile).
 
 A demos/ directory is in the same directory as pyfilesec.py, and has usage
-examples for python scripting ``example_1.py``, and for command-line / shell scripting
-``example_2.sh``.
+examples for python scripting ``py_example.py``, and for command-line / shell
+scripting ``sh_example.sh``.
 
-A guide ``readme.txt`` has basic instructions on how to
-generate an RSA key-pair using pyFileSec; any valid .pem format key-pair will work.
+A guide ``readme.txt`` has basic instructions on how to generate an RSA key-pair
+using pyFileSec. Ideally, any valid .pem format key-pair should work; to date
+this has only been tested with keys generated using OpenSSL.
 
 
 API
@@ -231,7 +232,7 @@ Details about command-line syntax can be obtained using the usual ``--help`` opt
 
     % python pyfilesec.py --help
 
-.. note:: Any references to 'clear text' or 'plain text' simply mean an unencrypted file. It could be a binary file. There is no requirement that it be text.
+.. note:: Any references to 'clear text' or 'plain text' simply mean an unencrypted file. It could be a binary file, or an encrypted file that is to be encrypted a second time. There is no requirement that it be text.
 
 The main class of interest is SecFile, described next. Three other classes are used
 internally, and so are also described here for completeness. There should be

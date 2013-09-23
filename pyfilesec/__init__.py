@@ -1929,17 +1929,30 @@ class GenRSA(object):
 class SecStr(object):
     """Class to help mitigate accidental disclosure of sensitive strings.
 
-    Example usage::
+    A SecStr "hardens" the string: normal string representations are disabled.
+    Fewer copies will be left in memory, and there is less chance of the value
+    swapping out to disk (and so being preserved indefinitely). A SecStr does
+    not truly secure the string in a strong sense, most notably because it does
+    not prevent copies being made. It is almost unavoidable to make copies when
+    doing anything useful with the string.
 
-        pwd = SecStr(password)
-        pwd_hash = some_hash_function(pwd.str)
-        pwd.zero()  # the string `password` is now '\\x00\\x00\\x00...'
+    If ``pwd`` is a ``SecStr`` instance, use ``.str`` to get the string value;
+    ``str(pwd)`` raises a ValueError.
 
-    Use ``pwd.str`` to get the value (string); ``str(pwd)`` raises a ValueError
-
-    ``pwd.zero()`` will replace the value of string ``password`` with 0's to
+    ``pwd.zero()`` will replace the value of the string with 0's in memory to
     the extent possible. Interned strings (= one character, or alphanumeric)
     cannot be zeroed, and will raise a ValueError at initialization.
+
+    Example usage::
+
+        >>> password = 'abc$dfg%#'
+        >>> pwd = SecStr(password)
+        >>> print pwd.str
+        abc$dfg%#
+        >>> pwd.zero()
+        <<class 'pyfilesec.SecStr'> instance, zeroed=True>
+        >>> password
+        '\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00'
 
     :Parameters:
         ``str_obj`` :

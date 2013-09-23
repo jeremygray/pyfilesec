@@ -1,10 +1,14 @@
 Version 0.2 (alpha status)
 ==========================
 
-Available in repository (github.com/jeremygray/pyfilesec):
+The latest dev branch is always available at github.com/jeremygray/pyfilesec
+
+Available as a package (pypi.python.org/pypi/pyFileSec/):
 v0.2.11alpha
 ---------------------
-* ADDED class SecStr to better manage sensitive strings like passwords
+* ADDED class SecStr to better manage sensitive strings (passwords)
+* IMPROVED test infrastructure, including more tests, travis-ci, and coveralls.io
+* BF many small bugfixes and improvements
 
 v0.2.10alpha
 ---------------------
@@ -20,7 +24,6 @@ v0.2.02
 * IMPROVED documentation
 * CHANGED API: `old` removed from decrypt, `pub`/`priv` order switched for rotate, `npub` -> `pub` for rotate
 
-Available as a package (pypi.python.org/pypi/pyFileSec/):
 v0.2.01
 ---------------------
 * BF appdata path on win32
