@@ -1,2 +1,13 @@
-include *.txt *.rst
+include *.txt *.rst *.py
+recursive-include demos *
+recursive-include tests *.py openssl_version_97
+recursive-include pyfilesec *.py
+
 recursive-include docs *.txt *.rst
+recursive-include docs/source/API *
+recursive-include docs/source/_static *
+recursive-include docs/source/_templates *.html
+
+prune docs/build
+prune notes.py
+prune release.txt

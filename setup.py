@@ -5,11 +5,12 @@ from distutils.core import setup
 
 setup(
     name='PyFileSec',
-    version='0.2.11alpha',
+    version='0.2.12alpha',
     author='Jeremy R. Gray',
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
-    py_modules=['pyfilesec'],
+    packages=['pyfilesec'],
+    # py_modules=['pyfilesec'],
     classifiers=['Development Status :: 3 - Alpha',
                  'Programming Language :: Python :: 2.6',
                  'Programming Language :: Python :: 2.7',
@@ -28,5 +29,5 @@ setup(
               'human subjects', 'research'],
     url='https://github.com/jeremygray/pyFileSec', # home-page
     description='File-oriented privacy & integrity management tools',
-    long_description=open('README.txt').read(),
+    long_description=open('README.rst').read(),
 )
