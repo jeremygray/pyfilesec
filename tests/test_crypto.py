@@ -829,7 +829,7 @@ class TestsCrypto(object):
 
 @pytest.mark.slow
 @pytest.mark.notravis
-class TestCryptoUsingAnotherOpenSSL(TestsCrypto):
+class xxxTestCryptoUsingAnotherOpenSSL(TestsCrypto):
     def setup_class(self):
         set_openssl('/opt/local/bin/openssl')
 

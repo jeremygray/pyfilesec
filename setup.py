@@ -1,7 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from distutils.core import setup
+from distutils.core import setup, Command
+
+class PyTest(Command):
+    user_options = []
+    def initialize_options(self):
+        pass
+    def finalize_options(self):
+        pass
+    def run(self):
+        import sys,subprocess
+        errno = subprocess.call([sys.executable, 'runtests.py'])
+        raise SystemExit(errno)
 
 setup(
     name='PyFileSec',
@@ -11,6 +22,7 @@ setup(
     maintainer='Jeremy R. Gray',
     packages=['pyfilesec'],
     # py_modules=['pyfilesec'],
+    cmdclass = {'test': PyTest},
     classifiers=['Development Status :: 3 - Alpha',
                  'Programming Language :: Python :: 2.6',
                  'Programming Language :: Python :: 2.7',
