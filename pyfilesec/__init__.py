@@ -1843,7 +1843,7 @@ class GenRSA(object):
               '\n  or press <return> to auto-generate a passphrase')
         pphr_auto = True
         bits = RSA_BITS_DEFAULT
-        if interactive:
+        if interactive:  # pragma: no cover
             import _getpass
             # python 3 compatibility:
             input23 = (input, raw_input)[sys.version < '3.']
@@ -2273,7 +2273,7 @@ def secure_rename(src, dest):
         dest = _uniq_file(dest)
     try:
         os.rename(src, dest)
-    except OSError:
+    except OSError:  # pragma: no cover
         # e.g., if /tmp is on another disk partition can't just rename
         shutil.copy(src, dest)
         demolished = SecFile(src).destroy().result
@@ -2321,7 +2321,7 @@ def set_destroy():
                 with open(DESTROY_EXE, 'wb') as fd:
                     fd.write(bat)
 
-    if not isfile(DESTROY_EXE):
+    if not isfile(DESTROY_EXE):  # pragma: no cover
         fatal("Can't find a secure file-removal tool", RuntimeError)
     logging.info('set destroy init: use %s %s' % (DESTROY_EXE,
                                                   ' '.join(DESTROY_OPTS)))
@@ -2368,7 +2368,7 @@ def set_openssl(path=None):
         logging.info('Requested openssl executable: ' + OPENSSL)
     elif sys.platform not in ['win32']:
         OPENSSL = which('openssl')
-        if OPENSSL not in ['/usr/bin/openssl']:
+        if OPENSSL not in ['/usr/bin/openssl']:  # pragma: no cover
             msg = 'unexpected location for openssl binary: %s' % OPENSSL
             logging.warning(msg)
     else:
@@ -2475,7 +2475,7 @@ def unset_umask():
 
 def main(args):
     logging.info("%s with %s" % (lib_name, openssl_version))
-    if args.filename == 'genrsa':
+    if args.filename == 'genrsa':  # pragma: no cover
         """Walk through key generation on command line.
         """
         GenRSA().dialog(interactive=(not args.autogen), args=args)
@@ -2624,6 +2624,6 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=False)
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     result = main(args)
     print(result)
