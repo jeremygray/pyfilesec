@@ -43,7 +43,6 @@ import hashlib
 import json
 import os
 from   os.path import abspath, isfile, getsize, isdir, dirname, exists, split
-import pytest
 import random
 import re
 import shutil

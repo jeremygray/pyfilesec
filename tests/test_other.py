@@ -7,6 +7,7 @@ Part of the pyFileSec library. Copyright (c) 2013, Jeremy R. Gray
 """
 
 
+import pytest
 import pyfilesec
 from   pyfilesec import *
 from   pyfilesec import _abspath, _uniq_file, _parse_args
