@@ -52,7 +52,7 @@ issues, please look for my email address at the top of the main code.
 
 Software that includes pyFileSec
 ---------------------------------
-- PsychoPy, as of v1.79.00 (forthcoming)
+- PsychoPy (v1.79.00+)
 
 Contributors
 -------------
@@ -65,7 +65,6 @@ Sol Simpson - Windows compatibility
 Milestones
 -----------
 
-- 0.2  class SecFile (available in v0.2.10alpha)
 - 0.3  Python 3 (2to3 mostly passes now)
 - 0.4  An alternative encryption backend (possibly pyCrypto and gpg support)
 - 0.5  Windows file-permissions
@@ -88,4 +87,3 @@ See also
 
 - pyCrypto, M2Crypto, pyOpenSSL - broad crypto packages, few sys-admin features
 - pycogworks.crypto - similar audience as pyfilesec, no file encryption
-- Ephemeral - encrypted temporary files
