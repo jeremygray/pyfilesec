@@ -4,6 +4,11 @@ Version 0.2 (alpha status)
 The latest dev branch is always available at github.com/jeremygray/pyfilesec
 
 Available as a package (pypi.python.org/pypi/pyFileSec/):
+v0.2.13
+---------------------
+* FIX pytest import not needed except for tests
+* BF pyperclip per upstream patch
+
 v0.2.12alpha
 ---------------------
 * FIX errors in 0.2.11 release (move to package, no longer a module)

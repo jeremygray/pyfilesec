@@ -16,12 +16,11 @@ class PyTest(Command):
 
 setup(
     name='PyFileSec',
-    version='0.2.12alpha',
+    version='0.2.13',
     author='Jeremy R. Gray',
     author_email='jrgray@gmail.com',
     maintainer='Jeremy R. Gray',
     packages=['pyfilesec'],
-    # py_modules=['pyfilesec'],
     cmdclass = {'test': PyTest},
     classifiers=['Development Status :: 3 - Alpha',
                  'Programming Language :: Python :: 2.6',
