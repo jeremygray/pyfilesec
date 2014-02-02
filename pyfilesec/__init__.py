@@ -64,7 +64,7 @@ from   which import which, WhichError
 """
 
 lib_name = 'pyFileSec'
-lib_path = abspath(__file__).strip('co')  # .py not .pyc, .pyo
+lib_path = abspath(__file__).rstrip('co')  # .py not .pyc, .pyo
 lib_dir = os.path.split(lib_path)[0]
 
 # load constants and exception classes from external file:
