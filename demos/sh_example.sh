@@ -12,7 +12,7 @@ echo 'Example 2: pyfilesec.SecFile command-line usage'
 echo
 echo 'This demo should be run from within the pyfilesec/demos/ directory, or files will not be found.'
 echo
-echo 'A shell command in printed (preceeded by a prompt %), then its ouput.'
+echo 'Shell commands are printed (preceeded by a prompt %), then their ouput.'
 echo
 /bin/echo -n "  --> Hit return to continue (or Ctrl-C to quit): "
 read dummy_var
