@@ -4,6 +4,7 @@ LICENSE.txt
 README.rst
 _getpass.py
 _pyperclip.py
+runtests.py
 setup.py
 which.py
 demos/pphr_demo_only
