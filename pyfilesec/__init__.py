@@ -57,6 +57,11 @@ from   which import which, WhichError
 #   import _pyperclip    # if use --clipboard from commandline
 #   import _getpass      # for no-display passphrase entry during RSA key-gen
 
+if sys.version < '3':
+    read_mode = 'rU'  # univeral newlines, for cross-platform transparency
+else:
+    read_mode = 'r'  # 3.x file open does universal newlines by default
+
 """TO-DO:
 - move _enc, _dec into files in new dir codec/, sha256() and execfile() them
 - use SecStr consistently throughout: in RsaKeys, generate, etc
@@ -308,15 +313,15 @@ class _SecFileBase(object):
         """Return lines from self.file as a string; 0 means all lines.
         """
         if not self.file:
-            return '(no file)'
+            return ''
 
         if int(lines) < 1:
-            contents = open(self.file, 'rb').read()  # all
+            contents = open(self.file, read_mode).read()  # all
         else:
             if self.is_encrypted:
-                contents = open(self.file, 'rb').read(lines * 60)  # .tgz file
+                contents = open(self.file, read_mode).read(lines * 60)  # .tgz file
             else:
-                contents = ''.join(open(self.file, 'rb').readlines()[:lines])
+                contents = ''.join(open(self.file, read_mode).readlines()[:lines])
         if self.is_encrypted:
             return b64encode(contents)
         return contents
@@ -2610,7 +2615,7 @@ logging = set_logging(args and args.verbose)
 OPENSSL, openssl_version = set_openssl(args and args.openssl)
 DESTROY_EXE, DESTROY_OPTS = set_destroy()
 
-py64bit = (sys.maxsize == 9223372036854775807)
+py64bit = bool(sys.maxsize == 2 ** 63 - 1)
 
 # Register the default codec, runs auto-test
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
