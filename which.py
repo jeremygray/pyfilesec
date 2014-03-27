@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 # Copyright (c) 2002-2007 ActiveState Software Inc.
 # See LICENSE.txt for license details.
 # Author:
@@ -54,6 +55,9 @@ of where the match was found. For example:
     from PATH element 0
     from HKLM\SOFTWARE\...\perl.exe
 """
+
+# Jeremy Gray, March 2014
+# run 2to3, tweak code: aim for the same code to work under python 2.7 and 3.3+
 
 _cmdlnUsage = """
     Show the full path of commands.
@@ -113,13 +117,17 @@ def _getRegisteredExecutable(exeName):
     if sys.platform.startswith('win'):
         if os.path.splitext(exeName)[1].lower() != '.exe':
             exeName += '.exe'
-        import _winreg
+        # JRG: add try-except:
+        try:
+            import _winreg as winreg
+        except ImportError:
+            import winreg
         try:
             key = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" +\
                   exeName
-            value = _winreg.QueryValue(_winreg.HKEY_LOCAL_MACHINE, key)
+            value = winreg.QueryValue(winreg.HKEY_LOCAL_MACHINE, key)
             registered = (value, "from HKLM\\"+key)
-        except _winreg.error:
+        except winreg.error:
             pass
         if registered and not os.path.exists(registered[0]):
             registered = None
@@ -272,7 +280,7 @@ def which(command, path=None, verbose=0, exts=None):
     If no match is found for the command, a WhichError is raised.
     """
     try:
-        match = whichgen(command, path, verbose, exts).next()
+        match = next(whichgen(command, path, verbose, exts))
     except StopIteration:
         raise WhichError("Could not find '%s' on the path." % command)
     return match
@@ -319,7 +327,9 @@ def main(argv):
             print(_cmdlnUsage)
             return 0
         elif opt in ('-V', '--version'):
-            print("which %s" % __version__)
+            # JRG: tweak print for python 2 and 3 support:
+            msg = "which %s" % __version__
+            print(msg)
             return 0
         elif opt in ('-a', '--all'):
             all = 1
@@ -347,7 +357,9 @@ def main(argv):
         nmatches = 0
         for match in whichgen(arg, path=altpath, verbose=verbose, exts=exts):
             if verbose:
-                print("%s (%s)" % match)
+                # JRG: tweak print for python 2 and 3 support:
+                msg = "%s (%s)" % match
+                print(msg)
             else:
                 print(match)
             nmatches += 1
