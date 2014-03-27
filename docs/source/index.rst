@@ -1,5 +1,5 @@
 
-:mod:`pyFileSec` File-oriented privacy and integrity management tools *(alpha)*
+:mod:`pyFileSec` File-oriented privacy and integrity management tools *(beta)*
 
 .. toctree::
    :maxdepth: 2
@@ -66,11 +66,11 @@ on your behalf. With encryption, however, it would likely be prohibitively expen
 to hire someone to "break in on your behalf"; hopefully that is not possible,
 even for a well-funded adversary. So it is possible to lose data by trying to secure it.
 
-**Development status:** The development status is **alpha**,
-meaning that major API changes and bugs are possible. The development emphasis is
+**Development status:** The development status is **beta**,
+meaning that minor API changes and bugs are possible. The development emphasis is
 currently on refactoring the code for Python 3.
 Documentation is a work in progress. A few extensions are planned, notably
-alternative encryption backends (likely pycrypto and gpg) and using zip for
+alternative encryption backends (likely gpg support) and using zip for
 archives. File
 permissions on Windows needs work.
 
@@ -82,7 +82,7 @@ Contact by private email is preferred for anything sensitive.
 Principles and Approach
 ------------------------
 
-Using public-key encryption allows a non-secret "password" (the public key) to
+Using public-key (specifically RSA) encryption allows a non-secret "password" (the public key) to
 be distributed and used for encryption, with no need for the non-shared private key
 to be involved in the encryption process. This logically separates encryption from
 decryption, which in turn allows their physical separation. This separability
@@ -99,7 +99,7 @@ on external implementations. In particular, cryptographic operations use
 OpenSSL (see openssl.org), using its implementation of RSA and AES. These ciphers
 are industry standards and can be very secure when used correctly. The effective
 weak link is almost certainly not cryptographic but rather in how the encryption
-key(s) are handled, which depends mostly on  you (the user), including what happens
+key(s) are handled, which depends mostly on you (the user), including what happens
 during key generation, storage, and backup. If your keys are bad or compromised,
 the encryption strength is basically irrelevant. The strength of the lock on your
 front door is irrelevant if you make a habit of leaving the key under the doormat.

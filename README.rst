@@ -36,9 +36,9 @@ control, and Dropbox folders are detected and reported.
 
 pyFileSec provides the class ``SecFile``, which is designed to be easy to use::
 
-    >>> import pyfilesec as pfs
-    >>> sf = pfs.SecFile('data.txt')
-    >>> sf.encrypt(path_to_pubkey)
+    >>> from pyfilesec import SecFile
+    >>> sf = SecFile('path/to/data.txt')
+    >>> sf.encrypt('path/to/pubkey.pem')
 
 Public-key (asymmetric) encryption is used for security and flexibility,
 currently relying on calls to OpenSSL for all cryptography. The aim is to provide
