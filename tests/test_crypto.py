@@ -140,7 +140,7 @@ class TestsCrypto(object):
 
     def test_encrypt_decrypt(self):
         # test with null-length file, and some secret content
-        secret = 'secret snippet %s' % printable_pwd(128, '#').str
+        secret = 'secret snippet %s' % printable_pwd(128, '#')
         for secretText in ['', secret]:
             datafile = 'cleartext no unicode.txt'
             with open(datafile, 'wb') as fd:
@@ -151,12 +151,12 @@ class TestsCrypto(object):
             pubTmp1 = 'pubkey1 no unicode.pem'
             prvTmp1 = 'prvkey1 no unicode.pem'
             pphr1 = printable_pwd(180)
-            pub1, priv1 = GenRSA().generate(pubTmp1, prvTmp1, pphr1.str, testBits)
+            pub1, priv1 = GenRSA().generate(pubTmp1, prvTmp1, pphr1, testBits)
 
             pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
             prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
             pphr2_spaces = printable_pwd(180)
-            pphr2_w_spaces = copy.copy('  ' + pphr2_spaces.str + '   ')
+            pphr2_w_spaces = copy.copy('  ' + pphr2_spaces + '   ')
             pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2,
                                             pphr2_w_spaces, testBits)
 
@@ -184,7 +184,7 @@ class TestsCrypto(object):
             # test decrypt with GOOD passphrase as STRING:
             assert exists(datafile)
             sf = SecFile(datafile).encrypt(pub1)
-            sf.decrypt(priv1, pphr1.str)
+            sf.decrypt(priv1, pphr1)
             recoveredText = open(sf.file).read()
             # file contents match:
             assert recoveredText == secretText
@@ -195,7 +195,7 @@ class TestsCrypto(object):
             sf = SecFile(datafile).encrypt(pub1, keep=True)
             pphr1_file = prvTmp1 + '.pphr'
             with open(pphr1_file, 'wb') as fd:
-                fd.write(pphr1.str)
+                fd.write(pphr1)
             sf.decrypt(priv1, pphr1_file)
             recoveredText = open(sf.file).read()
             # file contents match:
@@ -210,9 +210,9 @@ class TestsCrypto(object):
 
             # a correct-format but wrong priv key should fail:
             sf = SecFile(datafile).encrypt(pub1, keep=True)
-            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr1.str, testBits)
+            pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr1, testBits)
             with pytest.raises(DecryptError):
-                sf.decrypt(priv2, pphr1.str)
+                sf.decrypt(priv2, pphr1)
 
             # should refuse-to-encrypt if pub key is too short:
             with pytest.raises(PublicKeyTooShortError):
@@ -511,7 +511,7 @@ class TestsCrypto(object):
         pubTmp2 = 'pubkey2 no unicode.pem   '  # trailing whitespace in
         prvTmp2 = 'prvkey2 no unicode.pem   '  # file names
         pwd = printable_pwd(180)
-        pphr2 = '  ' + pwd.str + '   '  # spaces in pphr
+        pphr2 = '  ' + pwd + '   '  # spaces in pphr
         pub2, priv2 = GenRSA().generate(pubTmp2, prvTmp2, pphr2, 1024)
 
         # Rotate encryption including padding change:

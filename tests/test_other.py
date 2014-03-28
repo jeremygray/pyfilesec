@@ -38,6 +38,7 @@ class TestBasics(object):
         os.chdir(self.start_dir)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    '''
     def test_SecStr_printable_pwd(self):
         # ensure a non-interned string because has '#'
         s = '#ca6e89'
@@ -81,6 +82,7 @@ class TestBasics(object):
         assert pwd.__repr__()
         assert pwd._id == None
         assert pwd._val == pwd.str == b'\0' * (256 // 4 + 1)
+    '''
 
     @pytest.mark.notravis
     def test_import_pyperclip(self):

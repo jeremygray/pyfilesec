@@ -302,19 +302,6 @@ noted).
         the count includes ``sf.file`` as one link. requires Admin privileges on Windows.
 
 
-class SecStr()
-================
-
-.. autoclass:: pyfilesec.SecStr
-    :members: zero
-
-SecStr objects have two properties.
-
-    ``str`` : the actual string contained by ``str_obj``. This can be the null string '', or a non-internable string.
-
-    ``zeroed`` : boolean, to indicate whether the string has been zeroed in memory.
-
-
 Class SecFileArchive
 =====================
 

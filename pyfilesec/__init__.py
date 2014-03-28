@@ -42,8 +42,6 @@ else:
 import argparse
 from   base64 import b64encode, b64decode
 import copy
-from   ctypes import memset, Structure, py_object  # for SecStr
-from   ctypes import c_long, c_int, c_size_t, sizeof
 from   functools import partial  # for buffered hash digest
 import hashlib
 import json
@@ -65,8 +63,7 @@ from   which import which, WhichError
 
 """TO-DO:
 - move _enc, _dec into files in new dir codec/, sha256() and execfile() them
-- use SecStr consistently throughout: in RsaKeys, generate, etc
-- rewrite encrypt decrypt to take parameter `engine` or `backend` to accept openssl, gpg, or pycrypto
+- rewrite encrypt decrypt to take parameter `engine` or `backend` to accept openssl, gpg
 """
 
 lib_name = 'pyFileSec'
@@ -159,7 +156,7 @@ class PFSCodecRegistry(object):
             test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
             test_datum = printable_pwd(64)
             with open(test_file, 'wb') as fd:
-                fd.write(test_datum.str)
+                fd.write(test_datum)
             try:
                 sf = SecFile(test_file, codec=test_co)
                 sf.encrypt(keep=True, **enc_kwargs)
@@ -169,7 +166,7 @@ class PFSCodecRegistry(object):
                 if sf.file:
                     recovered = open(sf.file, 'rb').read()
                 os.unlink(sf.file)
-            assert recovered == test_datum.str  # 'Codec reg: enc-dec failed'
+            assert recovered == test_datum  # 'Codec reg: enc-dec failed'
 
         for key, fxn in list(new_functions.items()):
             try:
@@ -370,7 +367,7 @@ class _SecFileBase(object):
         writeable = True
         try:
             tmp = printable_pwd(32)
-            test_name = os.path.join(directory, tmp.str)
+            test_name = os.path.join(directory, tmp)
             open(test_name, 'wb')
         except IOError as e:
             if e.errno == os.errno.EACCES:
@@ -798,7 +795,7 @@ class SecFile(_SecFileBase):
             if overwrite > 0:
                 for i in range(7):
                     fd.seek(filelen - overwrite)
-                    fd.write(printable_pwd(overwrite * 4).str)
+                    fd.write(printable_pwd(overwrite * 4))
             # trim the padding length info
             fd.truncate(new_length)
         logging.info(name + ': truncated the file to remove padding')
@@ -1853,15 +1850,15 @@ class GenRSA(object):
             # python 3 compatibility:
             input23 = (input, raw_input)[sys.version < '3.']
             try:
-                pphr = SecStr(_getpass.getpass('Passphrase: '))
+                pphr = _getpass.getpass('Passphrase: ')
             except ValueError:
                 pass  # hit return, == want auto-generate
             else:
-                if len(pphr.str) < 16:
+                if len(pphr) < 16:
                     return self._cleanup('\n  > Passphrase too short. <')
                 pphr_auto = False
-                pphr2 = SecStr(_getpass.getpass('same again: '))
-                if pphr.str != pphr2.str:
+                pphr2 = _getpass.getpass('same again: ')
+                if pphr != pphr2:
                     return self._cleanup('  > Passphrases do not match. <')
                 pphr2.zero()
             bits = int(input23('\nKey length (2048, 4096, 8192): [%d] ' %
@@ -1887,7 +1884,7 @@ class GenRSA(object):
         msg = '\nGenerating RSA keys (using %s)\n' % openssl_version
         print(msg)
         try:
-            self.generate(pub, priv, pphr.str, bits)
+            self.generate(pub, priv, pphr, bits)
         except:  # eg KeyboardInterrupt
             return self._cleanup('\n  > exception in generate(), exiting <',
                           pub, priv, pphr)
@@ -1902,7 +1899,7 @@ class GenRSA(object):
                 pphr_msg = 'passphrase:  %s' % pphr_out
                 set_umask()
                 with open(pphr_out, 'wb') as fd:
-                    fd.write(pphr.str)
+                    fd.write(pphr)
                 unset_umask()
                 if (not isfile(pphr_out) or
                         not getsize(pphr_out) == PPHR_OUT_SIZE):
@@ -1913,14 +1910,14 @@ class GenRSA(object):
                     import _pyperclip
                 except (ImportError, RuntimeError):
                     fatal("can't import clipboard: no display?", RuntimeError)
-                _pyperclip.copy(pphr.str)
+                _pyperclip.copy(pphr)
                 pphr_msg = ('passphrase:  saved to clipboard only... '
                             'paste it somewhere safe!!\n'
                             '      (It is exactly %d characters long, '
                             'no end-of-line char)' % PPHR_OUT_SIZE)
             else:
-                pphr_msg = 'passphrase:  ' + pphr.str
-                pphr_out = pphr.str
+                pphr_msg = 'passphrase:  ' + pphr
+                pphr_out = pphr
         print(pphr_msg)
         warn_msg = (' > Keep the private key private! <\n'
             '  > Do not lose the passphrase! <')
@@ -1930,8 +1927,9 @@ class GenRSA(object):
         if not interactive:
             return pub, priv, pphr_out
 
-
-class SecStr(object):
+# not implemented; revisit after port to python3:
+'''
+class _SecStr(object):
     """Class to help mitigate accidental disclosure of sensitive strings.
 
     A SecStr "hardens" the string: normal string representations are disabled.
@@ -2047,6 +2045,7 @@ class SecStr(object):
         if not self._val:
             self._zeroed = True
         return self
+'''
 
 
 def _abspath(filename):
@@ -2100,9 +2099,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     # decrypt pwd (digital envelope "session" key) to RAM using private key
     # then use pwd to decrypt the ciphertext file (data_enc):
     try:
-        pwd, se_RSA = sys_call(cmdRSA, stdin=pphr, stderr=True, sec_str=True)
-        pwd_zero = threading.Timer(0.02, pwd.zero)
-        pwd_zero.start()  # AES decrypt can be minutes, best to clear pwd
+        pwd, se_RSA = sys_call(cmdRSA, stdin=pphr, stderr=True)
         ___, se_AES = sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
         if isfile(data_dec) and isfile(data_enc):
@@ -2111,7 +2108,6 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
                DecryptError)
     finally:
         if 'pwd' in locals():
-            pwd_zero.cancel()
             del pwd
 
     # Log any error-ish conditions:
@@ -2148,8 +2144,8 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
     # want printable because its sent to openssl via stdin
     bits = 256
     pwd = printable_pwd(nbits=bits)  # has leading '#'
-    assert not whitespace_re.search(pwd.str)
-    assert len(pwd.str.replace('#', '')) == bits // 4
+    assert not whitespace_re.search(pwd)
+    assert len(pwd.replace('#', '')) == bits // 4
 
     # Define command to RSA-PUBKEY-encrypt the pwd, save ciphertext to file:
     cmd_RSA = [openssl, 'rsautl',
@@ -2166,8 +2162,8 @@ def _encrypt_rsa_aes256cbc(datafile, pub, openssl=None):
                 '-out', data_enc,
                 '-pass', 'stdin']
     try:
-        sys_call(cmd_RSA, stdin=pwd.str)
-        sys_call(cmd_AES, stdin=pwd.str)
+        sys_call(cmd_RSA, stdin=pwd)
+        sys_call(cmd_AES, stdin=pwd)
         # better to return immediately + del(pwd) but using stdin blocks
     finally:
         if 'pwd' in locals():
@@ -2250,13 +2246,13 @@ def isinstance_basestring23(duck):
 
 
 def printable_pwd(nbits=256, prefix='#'):
-    """Return a SecStr object of hex digits with n random bits, zero-padded.
-
-    The default prefix ensures that the returned str is not interned by python
+    """Return hex digits with n random bits, zero-padded.
     """
+    # default prefix ensures that the returned str is not interned by python
+
     val = random.SystemRandom().getrandbits(nbits)
     len = nbits // 4
-    pwd = SecStr(prefix + hex(val).strip('L').replace('0x', '').zfill(len))
+    pwd = prefix + hex(val).strip('L').replace('0x', '').zfill(len)
 
     return pwd
 
@@ -2421,14 +2417,14 @@ def sha256_(filename):
     return dgst.hexdigest()
 
 
-def sys_call(cmdList, stderr=False, stdin='', ignore_error=False, sec_str=0):
+def sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
     """Run a system command via subprocess, return stdout [, stderr].
 
     stdin is optional string to pipe in. Will always log a non-empty stderr.
     (stderr is sent to logging.INFO if ignore_error=True).
-
-    sec_str=True will return stdout as a SecStr
     """
+    #sec_str=True will return stdout as a SecStr
+
     msg = ('', ' (ignore_error=True)')[ignore_error]
     log = (logging.error, logging.info)[ignore_error]
     logging.debug('sys_call%s: %s' % (msg, (' '.join(cmdList))))
@@ -2437,15 +2433,9 @@ def sys_call(cmdList, stderr=False, stdin='', ignore_error=False, sec_str=0):
                             stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE)
-    if hasattr(stdin, 'str'):
-        _so, se = proc.communicate(stdin.str)  # e.g. a pwd
-    else:
-        _so, se = proc.communicate(stdin)
+    _so, se = proc.communicate(stdin)
 
-    if sec_str:
-        so = SecStr(_so)  # '' ok
-    else:
-        so = _so.strip()
+    so = _so.strip()
     if se:
         log('stderr%s: %s' % (msg, se.strip()))
     if stderr:

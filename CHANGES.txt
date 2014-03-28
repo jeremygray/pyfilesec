@@ -1,7 +1,13 @@
-Version 0.2 (alpha status)
+Version 0.2 (beta status)
 ==========================
 
 The latest dev branch is always available at github.com/jeremygray/pyfilesec
+
+v0.2.14
+---------------------
+* CHANGE to beta status
+* REVERT class SecStr removed; may reintroduce after moving to python3
+* some prep work for python3
 
 Available as a package (pypi.python.org/pypi/pyFileSec/):
 v0.2.13

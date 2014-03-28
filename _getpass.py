@@ -13,10 +13,7 @@ On the Mac EasyDialogs.AskPassword is used, if available.
 #          Guido van Rossum (Windows support and cleanup)
 #          Gregory P. Smith (tty support & GetPassWarning)
 
-# Jeremy R. Gray (add SecStr to _raw_input)
-
 import os, sys, warnings
-from pyfilesec import SecStr
 __all__ = ["getpass","getuser","GetPassWarning"]
 
 class GetPassWarning(UserWarning): pass
@@ -101,7 +98,7 @@ def win_getpass(prompt='Password: ', stream=None):
             pw = pw + c
     msvcrt.putch('\r')
     msvcrt.putch('\n')
-    return SecStr(pw)
+    return pw
 
 
 def fallback_getpass(prompt='Password: ', stream=None):
@@ -110,7 +107,7 @@ def fallback_getpass(prompt='Password: ', stream=None):
     if not stream:
         stream = sys.stderr
     print >>stream, "Warning: Password input may be echoed."
-    return SecStr(_raw_input(prompt, stream))
+    return _raw_input(prompt, stream)
 
 
 def _raw_input(prompt="", stream=None, input=None):
@@ -125,11 +122,11 @@ def _raw_input(prompt="", stream=None, input=None):
         stream.write(prompt)
         stream.flush()
     # NOTE: The Python C API calls flockfile() (and unlock) during readline.
-    sec_line = SecStr(input.readline())
-    if not sec_line.str:
+    sec_line = input.readline()
+    if not sec_line:
         raise EOFError
-    if sec_line.str[-1] == '\n':
-        sec_line = SecStr(sec_line.str[:-1])
+    if sec_line[-1] == '\n':
+        sec_line = sec_line.str[:-1]
     return sec_line
 
 
