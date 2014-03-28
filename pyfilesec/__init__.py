@@ -33,6 +33,12 @@ import sys
 if sys.version < '2.6':
     raise RuntimeError('Requires python 2.6 or higher')
 
+PY3 = sys.version > '3'
+if PY3:
+    read_mode = 'r'  # 3.x file open does universal newlines by default
+else:
+    read_mode = 'rU'  # univeral newlines, for cross-platform transparency
+
 import argparse
 from   base64 import b64encode, b64decode
 import copy
@@ -56,11 +62,6 @@ from   which import which, WhichError
 # other imports in GenRSA.dialog:
 #   import _pyperclip    # if use --clipboard from commandline
 #   import _getpass      # for no-display passphrase entry during RSA key-gen
-
-if sys.version < '3':
-    read_mode = 'rU'  # univeral newlines, for cross-platform transparency
-else:
-    read_mode = 'r'  # 3.x file open does universal newlines by default
 
 """TO-DO:
 - move _enc, _dec into files in new dir codec/, sha256() and execfile() them
