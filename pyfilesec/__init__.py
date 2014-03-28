@@ -4,7 +4,7 @@
 """pyFileSec: File-oriented privacy & integrity management tools
 """
 
- # Copyright (c) Jeremy R. Gray, 2013
+ # Copyright (c) Jeremy R. Gray, 2013-2014
  # Released under the GPLv3 licence with the additional exemptions that
  # 1) compiling, linking, and/or using OpenSSL are allowed, and
  # 2) the copyright notice, licence terms, and following disclaimer be included
@@ -24,7 +24,7 @@
  # DAMAGES.
 
 
-__version__ = '0.2.13'
+__version__ = '0.2.14'
 __author__ = 'Jeremy R. Gray'
 __contact__ = 'jrgray@gmail.com'
 
