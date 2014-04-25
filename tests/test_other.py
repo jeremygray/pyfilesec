@@ -12,8 +12,23 @@ import pyfilesec
 from   pyfilesec import *
 from   pyfilesec import _abspath, _uniq_file, _parse_args
 
-from test_crypto import _known_values
+def _known_values(folder='.'):
+    """Return tmp files with known keys, data, signature for testing.
+    This is a WEAK key, 1024 bits, for testing ONLY.
+    """
+    bits = '1024'
+    pub, priv, pphr = GenRSA().demo_rsa_keys(folder)
 
+    kwnSig0p9p8 = (  # openssl 0.9.8r
+        "dNF9IudjTjZ9sxO5P07Kal9FkY7hCRJCyn7IbebJtcEoVOpuU5Gs9pSngPnDvFE"
+        "2BILvwRFCGq30Ehnhm8USZ1zc5m2nw6S97LFPNFepnB6h+575OHfHX6Eaothpcz"
+        "BK+91UMVId13iTu9d1HaGgHriK6BcasSuN0iTfvbvnGc4=")
+    kwnSig1p0 = (   # openssl 1.0.1e or 1.0.0-fips
+        "eWv7oIGw9hnWgSmicFxakPOsxGMeEh8Dxf/HlqP0aSX+qJ8+whMeJ3Ol7AgjsrN"
+        "mfk//J4mywjLeBp5ny5BBd15mDeaOLn1ETmkiXePhomQiGAaynfyQfEOw/F6/Ux"
+        "03rlYerys2Cktgpya8ezxbOwJcOCnHKydnf1xkGDdFywc=")
+    return (_abspath(pub), _abspath(priv), _abspath(pphr),
+            bits, (kwnSig0p9p8, kwnSig1p0))
 
 class TestBasics(object):
     """Test suite for noncrypto.
@@ -102,7 +117,7 @@ class TestBasics(object):
 
     def test_SecFileBase(self):
         test_file = 'tf'
-        with open(test_file, 'wb') as fd:
+        with open(test_file, write_mode) as fd:
             fd.write('a')
         sf = SecFile(test_file)  # inherits from _SecFileBase
         sf.openssl = OPENSSL
@@ -153,7 +168,7 @@ class TestBasics(object):
         no_write = 'non_writeable_test'
         os.makedirs(no_write)
         f = os.path.join(no_write, 'tmp_no_write')
-        with open(f, 'wb') as fd:
+        with open(f, write_mode) as fd:
             fd.write('x')
         sf = SecFile(f)
         assert sf.is_in_writeable_dir

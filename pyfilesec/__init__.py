@@ -25,8 +25,7 @@
 
 
 __version__ = '0.2.14'
-__author__ = 'Jeremy R. Gray'
-__contact__ = 'jrgray@gmail.com'
+__author__ = 'Jeremy R. Gray <jrgray@gmail.com>'
 
 
 import sys
@@ -38,6 +37,7 @@ if PY3:
     read_mode = 'r'  # 3.x file open does universal newlines by default
 else:
     read_mode = 'rU'  # univeral newlines, for cross-platform transparency
+write_mode = 'w'
 
 import argparse
 from   base64 import b64encode, b64decode
@@ -69,6 +69,17 @@ from   which import which, WhichError
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__).rstrip('co')  # .py not .pyc, .pyo
 lib_dir = os.path.split(lib_path)[0]
+
+'''
+ENCODING = 'UTF-8'
+def _b(val):
+    """Return bytes or str depending on Py3 or Py2; used in constants.py
+    """
+    if PY3 and type(val) == str:
+        return bytes(val, ENCODING)
+    else:
+        return val
+'''
 
 # load constants and exception classes from external file:
 constants = open(os.path.join(lib_dir, 'constants.py')).read()
@@ -155,7 +166,7 @@ class PFSCodecRegistry(object):
             test_dir = mkdtemp()
             test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
             test_datum = printable_pwd(64)
-            with open(test_file, 'wb') as fd:
+            with open(test_file, write_mode) as fd:
                 fd.write(test_datum)
             try:
                 sf = SecFile(test_file, codec=test_co)
@@ -164,7 +175,7 @@ class PFSCodecRegistry(object):
             finally:
                 os.unlink(test_file)
                 if sf.file:
-                    recovered = open(sf.file, 'rb').read()
+                    recovered = open(sf.file, read_mode).read()
                 os.unlink(sf.file)
             assert recovered == test_datum  # 'Codec reg: enc-dec failed'
 
@@ -286,8 +297,8 @@ class _SecFileBase(object):
             self.permissions = PERMISSIONS  # changes permissions on disk
         else:
             raise OSError('no such file %s' % self._file)
-        if (os.path.splitext(self._file)[1] == '.pem' or
-            'PUBLIC KEY' in open(infile, 'rb').read()):
+        if os.path.splitext(self._file)[1] == '.pem' : #or
+            #'PUBLIC KEY' in open(infile, 'rb').read()):
             logging.warning('infile looks like a public key')
 
     def set_file_time(self, new_time=None):
@@ -314,10 +325,13 @@ class _SecFileBase(object):
             return ''
 
         if int(lines) < 1:
-            contents = open(self.file, read_mode).read()  # all
+            #if self.is_encrypted:
+            #    contents = open(self.file, 'rb').read()
+            #else:
+                contents = open(self.file, read_mode).read()  # all
         else:
             if self.is_encrypted:
-                contents = open(self.file, read_mode).read(lines * 60)  # .tgz file
+                contents = open(self.file, 'rb').read(lines * 60)  # .tgz file
             else:
                 contents = ''.join(open(self.file, read_mode).readlines()[:lines])
         if self.is_encrypted:
@@ -368,7 +382,7 @@ class _SecFileBase(object):
         try:
             tmp = printable_pwd(32)
             test_name = os.path.join(directory, tmp)
-            open(test_name, 'wb')
+            open(test_name, write_mode)
         except IOError as e:
             if e.errno == os.errno.EACCES:
                 writeable = False
@@ -383,7 +397,7 @@ class _SecFileBase(object):
         """Read meta-data file, return it as a dict.
         """
         if hasattr(self, 'meta') and self.meta:
-            return json.load(open(self.meta, 'rb'))
+            return json.load(open(self.meta, read_mode))
         return NO_META_DATA
 
     @property
@@ -901,7 +915,7 @@ class SecFile(_SecFileBase):
                                      enc_method, date, hmac_key, note)
             meta.update(md)
         metafile = os.path.split(self.file)[1] + META_EXT
-        with open(metafile, 'wb') as fd:
+        with open(metafile, write_mode) as fd:
             json.dump(meta, fd)
 
         # Bundle the files: (cipher text, rsa pwd, meta-data) --> data.enc
@@ -1167,7 +1181,7 @@ class SecFile(_SecFileBase):
                        'file': self.file}
         if out:
             out = _uniq_file(out)
-            with open(out, 'wb') as fd:
+            with open(out, write_mode) as fd:
                 fd.write(self.result['sig'])
             self.result.update({'out': out})
         return self
@@ -1265,7 +1279,7 @@ class SecFile(_SecFileBase):
         else:
             # last-ditch effort
             logging.error(name + ': falling through to trying 1 pass of zeros')
-            with open(target_file, 'wb') as fd:
+            with open(target_file, write_mode) as fd:
                 fd.write(chr(0) * getsize(target_file))
             shutil.rmtree(target_file)
 
@@ -1492,7 +1506,7 @@ class RsaKeys(object):
             cmdEXTpub += ['-passin', 'stdin']
         test_pub = sys_call(cmdEXTpub, stdin=self.pphr)
         # user might have comment or extra stuff in self.pub, so use 'in'
-        if test_pub not in open(self.pub, 'rb').read():
+        if test_pub not in open(self.pub, read_mode).read():
             fatal('public key not paired with private key', PublicKeyError)
 
         # .update() will detect and fail before we get here, so use assert:
@@ -1529,7 +1543,7 @@ class RsaKeys(object):
             return '(no file)', None
 
         keytype = enc = None
-        with open(key, 'rb') as fd:
+        with open(key, read_mode) as fd:
             for line in iter(partial(fd.readline), b''):
                 if '-----BEGIN' in line and 'PUBLIC KEY-----' in line:
                     keytype = 'pub'
@@ -1576,7 +1590,7 @@ class RsaKeys(object):
         """Get pub from self or from param, set as needed
         """
         if isinstance_basestring23(pub):
-            if exists(pub) and 'PUBLIC KEY' in open(pub, 'rb').read():
+            if exists(pub) and 'PUBLIC KEY' in open(pub, read_mode).read():
                 self._pub = _abspath(pub)
             else:
                 fatal('bad public key %s' % pub, PublicKeyError)
@@ -1599,7 +1613,7 @@ class RsaKeys(object):
         self.priv_requires_pphr = False
         if isinstance_basestring23(priv):
             if exists(priv):  # is_file
-                contents = open(priv, 'rb').read()  # better to sniff...
+                contents = open(priv, read_mode).read()  # better to sniff...
                 if 'PRIVATE KEY' in contents:
                     self._priv = _abspath(priv)
                 else:
@@ -1663,7 +1677,7 @@ class GenRSA(object):
             -----END PUBLIC KEY-----
             """.replace('    ', '')
         if not isfile(pub):
-            with open(pub, 'w+b') as fd:
+            with open(pub, write_mode) as fd:
                 fd.write(pubkey)
 
         priv = os.path.join(folder, 'privkey_demo_only')
@@ -1689,14 +1703,14 @@ class GenRSA(object):
             -----END RSA PRIVATE KEY-----
             """.replace('    ', '')
         if not isfile(priv):
-            with open(priv, 'wb') as fd:
+            with open(priv, write_mode) as fd:
                 fd.write(privkey)
 
         pphr = os.path.join(folder, 'pphr_demo_only')
-        p = "337876469593251699797157678785713755296571899138117259"
+        pp = "337876469593251699797157678785713755296571899138117259"
         if not isfile(pphr):
-            with open(pphr, 'wb') as fd:
-                fd.write(p)
+            with open(pphr, write_mode) as fd:
+                fd.write(pp)
         return _abspath(pub), _abspath(priv), _abspath(pphr)
 
     def check_entropy(self):
@@ -1898,7 +1912,7 @@ class GenRSA(object):
             if args.passfile:
                 pphr_msg = 'passphrase:  %s' % pphr_out
                 set_umask()
-                with open(pphr_out, 'wb') as fd:
+                with open(pphr_out, write_mode) as fd:
                     fd.write(pphr)
                 unset_umask()
                 if (not isfile(pphr_out) or
@@ -2200,7 +2214,7 @@ def get_dropbox_path():
             logging.info('did not find a Dropbox folder')
             dropbox_path = False
         else:
-            db_path_b64 = open(host_db, 'rb').readlines()[1]  # second line
+            db_path_b64 = open(host_db, read_mode).readlines()[1]  # second line
             db_path = b64decode(db_path_b64.strip())
             dropbox_path = _abspath(db_path)
             logging.info('found Dropbox folder %s' % dropbox_path)
@@ -2319,7 +2333,7 @@ def set_destroy():
                             RuntimeError)
                 # bat_template in constants.py
                 bat = sd_bat_template.replace('XSDELETEX', _abspath(guess))
-                with open(DESTROY_EXE, 'wb') as fd:
+                with open(DESTROY_EXE, write_mode) as fd:
                     fd.write(bat)
 
     if not isfile(DESTROY_EXE):  # pragma: no cover
@@ -2378,7 +2392,7 @@ def set_openssl(path=None):
         if not exists(OPENSSL):
             logging.info('no working %s file; will recreate' % op_bat_name)
             bat = op_bat_template.replace(op_expr, op_default)
-            with open(OPENSSL, 'wb') as fd:
+            with open(OPENSSL, write_mode) as fd:
                 fd.write(bat)
             test = sys_call([OPENSSL, 'version'])
             if not test.startswith('OpenSSL'):
@@ -2391,7 +2405,7 @@ def set_openssl(path=None):
                            RuntimeError)
                 guess_path = guess.replace(os.sep + 'openssl.exe', '')
                 where_bat = op_bat_template.replace(op_expr, guess_path)
-                with open(OPENSSL, 'wb') as fd:
+                with open(OPENSSL, write_mode) as fd:
                     fd.write(where_bat)
     if not isfile(OPENSSL):
         msg = 'Could not find openssl executable, tried: %s' % OPENSSL
@@ -2436,10 +2450,11 @@ def sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
     _so, se = proc.communicate(stdin)
 
     so = _so.strip()
+    se = se.strip()
     if se:
-        log('stderr%s: %s' % (msg, se.strip()))
+        log('stderr%s: %s' % (msg, se))
     if stderr:
-        return so, se.strip()
+        return so, se
     else:
         return so
 

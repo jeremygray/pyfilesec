@@ -42,7 +42,7 @@ class TestsCrypto(object):
             RsaKeys(pub=priv)
         with pytest.raises(PassphraseError):
             RsaKeys(pub, priv).test()
-        with open('bad_pub', 'wb') as fd:
+        with open('bad_pub', write_mode) as fd:
             fd.write('PUBLIC KEY')
         with pytest.raises(PublicKeyError):
             RsaKeys('bad_pub')
@@ -84,7 +84,7 @@ class TestsCrypto(object):
         # test sniff
         assert RsaKeys().sniff(None) == (None, None)
         assert RsaKeys().sniff('') == ('(no file)', None)
-        with open('testsniff', 'wb') as fd:
+        with open('testsniff', write_mode) as fd:
             fd.write('no key here')
         assert RsaKeys().sniff('testsniff') == (None, None)
 
@@ -92,7 +92,7 @@ class TestsCrypto(object):
         with pytest.raises(SecFileFormatError):
             SecFile('.dot_file')
         test_file = 'tf'
-        with open(test_file, 'wb') as fd:
+        with open(test_file, write_mode) as fd:
             fd.write('a')
         sf = SecFile(test_file)
         str(sf)
@@ -120,7 +120,7 @@ class TestsCrypto(object):
         #shutil.rmtree('.svn')  # not yet
 
         # rotate unencrypted file:
-        with open(test_file, 'wb') as fd:
+        with open(test_file, write_mode) as fd:
             fd.write('a')
         sf = SecFile(test_file)
         with pytest.raises(FileNotEncryptedError):
@@ -143,7 +143,7 @@ class TestsCrypto(object):
         secret = 'secret snippet %s' % printable_pwd(128, '#')
         for secretText in ['', secret]:
             datafile = 'cleartext no unicode.txt'
-            with open(datafile, 'wb') as fd:
+            with open(datafile, write_mode) as fd:
                 fd.write(secretText)
             assert getsize(datafile) in [0, len(secret)]
 
@@ -194,7 +194,7 @@ class TestsCrypto(object):
             # test decrypt with GOOD passphrase in a FILE:
             sf = SecFile(datafile).encrypt(pub1, keep=True)
             pphr1_file = prvTmp1 + '.pphr'
-            with open(pphr1_file, 'wb') as fd:
+            with open(pphr1_file, write_mode) as fd:
                 fd.write(pphr1)
             sf.decrypt(priv1, pphr1_file)
             recoveredText = open(sf.file).read()
@@ -245,9 +245,9 @@ class TestsCrypto(object):
         # test getting a name
         SecFileArchive(files=None)
         # default get a name from one of the files in paths:
-        with open('abc' + AES_EXT, 'wb') as fd:
+        with open('abc' + AES_EXT, write_mode) as fd:
             fd.write('abc')
-        with open('abc' + RSA_EXT, 'wb') as fd:
+        with open('abc' + RSA_EXT, write_mode) as fd:
             fd.write('abc')
         SecFileArchive(files=['abc' + RSA_EXT, 'abc' + AES_EXT])
         with pytest.raises(AttributeError):
@@ -265,7 +265,7 @@ class TestsCrypto(object):
         sfa.get_dec_method(codec_registry)
 
         sfa = SecFileArchive().pack(pub)
-        with open('ttt', 'wb') as fd:
+        with open('ttt', write_mode) as fd:
             fd.write('ttt')
         with pytest.raises(SecFileArchiveFormatError):
             s = SecFileArchive('ttt')
@@ -281,7 +281,7 @@ class TestsCrypto(object):
         bad = md + 'BAD'
         files = [aes, md, pwd, bad]
         for f in files:
-            with open(f, 'wb') as fd:
+            with open(f, write_mode) as fd:
                 fd.write('x')
         files = [aes, md, bad]
         sfa._make_tar(files, keep=True)
@@ -304,11 +304,11 @@ class TestsCrypto(object):
 
         '''
         # test fall-through decryption method:
-        with open('abc' + AES_EXT, 'wb') as fd:
+        with open('abc' + AES_EXT, write_mode) as fd:
             fd.write('abc')
-        with open('abc' + RSA_EXT, 'wb') as fd:
+        with open('abc' + RSA_EXT, write_mode) as fd:
             fd.write('abc')
-        with open('abc' + META_EXT, 'wb') as fd:
+        with open('abc' + META_EXT, write_mode) as fd:
             fd.write(str(NO_META_DATA))
         #assert exists(datafile)
         sf = SecFileArchive(paths=['abc' + AES_EXT,
@@ -318,7 +318,7 @@ class TestsCrypto(object):
 
         # test missing enc-method in meta-data
         md = 'md'
-        with open(md, 'wb') as fd:
+        with open(md, write_mode) as fd:
             fd.write(log_metadata(NO_META_DATA))
         dec_method = _get_dec_method(md, 'unknown')
         assert dec_method == '_decrypt_rsa_aes256cbc'
@@ -342,7 +342,7 @@ class TestsCrypto(object):
             main(_parse_args())
 
         tmp = 'tmp'
-        with open(tmp, 'wb') as fd:
+        with open(tmp, write_mode) as fd:
             fd.write('a')
 
         sys.argv = [__file__, '--pad', '-z', '0', tmp]
@@ -364,7 +364,7 @@ class TestsCrypto(object):
         sys.argv = [__file__, '--sign', tmp,
                     '--priv', priv, '--pphr', pphr, '--out', 'sig.cmdline']
         outs = main(_parse_args())
-        contents = open(outs['out'], 'rb').read()
+        contents = open(outs['out'], read_mode).read()
         if openssl_version < 'OpenSSL 1.0':
             assert "mrKDFi4NrfJVTm+RLB+dHuSHNImUl9" in outs['sig']
             assert "mrKDFi4NrfJVTm+RLB+dHuSHNImUl9" in contents
@@ -405,7 +405,7 @@ class TestsCrypto(object):
         # sign a known file with a known key. can we get known signature?
         __, kwnPriv, kwnPphr, datum, kwnSigs = _known_values()
         kwnData = 'knwSig'
-        with open(kwnData, 'wb+') as fd:
+        with open(kwnData, write_mode) as fd:
             fd.write(datum)
         sf = SecFile(kwnData).sign(priv=kwnPriv, pphr=kwnPphr)
         sig1 = sf.result['sig']
@@ -419,7 +419,7 @@ class TestsCrypto(object):
         outfile = 'sig.out'
         sf.sign(priv=kwnPriv, pphr=kwnPphr, out=outfile)
         assert sf.result['out'] == outfile
-        assert open(outfile, 'rb').read() in kwnSigs
+        assert open(outfile, read_mode).read() in kwnSigs
 
     @pytest.mark.slow
     def test_big_file(self):
@@ -437,7 +437,7 @@ class TestsCrypto(object):
             try:
                 orig = 'bigfile.zeros'
                 enc = 'bigfile' + ENC_EXT
-                with open(orig, 'wb') as fd:
+                with open(orig, write_mode) as fd:
                     for i in range(count):
                         fd.write(zeros)
                 # not much faster at least for LRG_FILE_WARN:
@@ -484,7 +484,7 @@ class TestsCrypto(object):
         GenRSA().dialog(interactive=False, args=args)
 
         # test detect existing priv?
-        with open('priv.pem', 'wb') as fd:
+        with open('priv.pem', write_mode) as fd:
             fd.write('x')
         assert exists('priv.pem')
         sys.argv = [__file__, 'genrsa', '--pub', 'pub', '--priv', 'priv.pem']
@@ -504,7 +504,7 @@ class TestsCrypto(object):
         # Set-up:
         secretText = 'secret snippet %.6f' % get_time()
         datafile = 'file to rotate.txt'
-        with open(datafile, 'w+b') as fd:
+        with open(datafile, write_mode) as fd:
             fd.write(secretText)
         pub1, priv1, pphr1, testBits = _known_values()[:4]
 
@@ -543,7 +543,7 @@ class TestsCrypto(object):
     def test_misc_crypto(self):
         secretText = 'secret snippet %.6f' % get_time()
         datafile = 'cleartext unicode.txt'
-        with open(datafile, 'w+b') as fd:
+        with open(datafile, write_mode) as fd:
             fd.write(secretText)
         pub1, priv1, pphr1, testBits = _known_values()[:4]
 
@@ -593,9 +593,9 @@ class TestsCrypto(object):
             4wIDAQAB
             -----END PUBLIC KEY-----
             """.replace('    ', '')
-        with open(pub, 'wb') as fd:
+        with open(pub, write_mode) as fd:
             fd.write(pub_stuff)
-        assert open(pub, 'rb').read() == pub_stuff
+        assert open(pub, read_mode).read() == pub_stuff
         priv = 'priv_8192.pem'
         priv_stuff = """-----BEGIN RSA PRIVATE KEY-----
             Proc-Type: 4,ENCRYPTED
@@ -700,18 +700,18 @@ class TestsCrypto(object):
             mJWmxViCU7FxHvp3v8XT0yuQIPQBjNEbSvYVbt7ZebQjj7clExjvCRt4QxfAIJ9Q
             -----END RSA PRIVATE KEY-----
             """.replace('    ', '')
-        with open(priv, 'wb') as fd:
+        with open(priv, write_mode) as fd:
             fd.write(priv_stuff)
-        assert open(priv, 'rb').read() == priv_stuff
+        assert open(priv, read_mode).read() == priv_stuff
         pphr = 'pphr_8192'
         pphr_stuff = '149acf1a8c196eeb5cdba121567e670b'
-        with open(pphr, 'wb') as fd:
+        with open(pphr, write_mode) as fd:
             fd.write(pphr_stuff)
-        assert open(pphr, 'rb').read() == pphr_stuff
+        assert open(pphr, read_mode).read() == pphr_stuff
 
         secretText = 'secret.txt'
         datafile = secretText  # does double duty as file name and contents
-        with open(datafile, 'wb') as fd:
+        with open(datafile, write_mode) as fd:
             fd.write(secretText)
 
         sf = SecFile(datafile)
@@ -725,7 +725,7 @@ class TestsCrypto(object):
         value = "The quick brown fox jumps over the lazy dog"
         hm = 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
         tmp = 'hmac_test no unicode'
-        with open(tmp, 'wb+') as fd:
+        with open(tmp, write_mode) as fd:
             fd.write(value)
         hmac_openssl = hmac_sha256(key, tmp)
         # openssl 1.0.x returns this:
@@ -742,7 +742,7 @@ class TestsCrypto(object):
 
         datafile = 'cleartext no unicode.txt'
         secretText = 'secret snippet %.6f' % get_time()
-        with open(datafile, 'wb') as fd:
+        with open(datafile, write_mode) as fd:
             fd.write(secretText)
         pub1, priv1, pphr1 = _known_values()[:3]
         pathToSelf = lib_path
@@ -793,7 +793,7 @@ class TestsCrypto(object):
         assert out['verified']  # need both sign and verify to work
 
         # Pad, unpad:
-        with open(datafile, 'wb') as fd:
+        with open(datafile, write_mode) as fd:
             fd.write(secretText)
         orig_size = getsize(datafile)
         cmdLinePad = [sys.executable, pathToSelf, datafile, '--pad']
@@ -874,7 +874,7 @@ def _known_values_no_pphr(folder='.'):
         -----END PUBLIC KEY-----
         """.replace('    ', '')
     if not isfile(pub):
-        with open(pub, 'wb') as fd:
+        with open(pub, write_mode) as fd:
             fd.write(pubkey)
     priv = os.path.join(folder, 'privKnown_no_pphr')
     privkey = """-----BEGIN RSA PRIVATE KEY-----
@@ -894,7 +894,7 @@ def _known_values_no_pphr(folder='.'):
         -----END RSA PRIVATE KEY-----
         """.replace('    ', '')
     if not isfile(priv):
-        with open(priv, 'wb') as fd:
+        with open(priv, write_mode) as fd:
             fd.write(privkey)
     kwnSig0p9p8 = (  # openssl 0.9.8r
         "")
