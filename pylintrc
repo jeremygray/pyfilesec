@@ -1,0 +1,19 @@
+[BASIC]
+good-names=i,j,k,__,so,se
+#max-line-length=80
+
+[DESIGN]
+max-args=14
+
+[FORMAT]
+indent-string='    '
+
+[MESSAGES CONTROL]
+# Disable the following PyLint messages:
+# C0103 - invalid * name
+# C0325 - superfluous parens (want for python3 compat) 
+# W0142 - Used * or ** magic
+disable=C0103,C0111,W0142,C0325
+
+[REPORTS]
+include-ids=yes

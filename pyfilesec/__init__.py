@@ -55,6 +55,7 @@ import subprocess
 import tarfile
 from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
+import time
 from   which import which, WhichError
 
 # other imports in GenRSA.dialog:
@@ -81,9 +82,129 @@ def _b(val):
         return val
 '''
 
-# load constants and exception classes from external file:
-constants = open(os.path.join(lib_dir, 'constants.py')).read()
-exec(compile(constants, 'constants.py', 'exec'))
+
+if sys.platform == 'win32':
+    from win32com.shell import shell  # pylint: disable=F0401
+    user_can_link = shell.IsUserAnAdmin()  # for fsutil hardlink
+    get_time = time.clock
+else:
+    user_can_link = True
+    get_time = time.time
+
+# Constants: --------------------
+RSA_PADDING = '-oaep'  # actual arg for openssl rsautl in encrypt, decrypt
+
+ENC_EXT = '.enc'     # extension for for tgz of AES, PWD.RSA, META
+AES_EXT = '.aes256'  # extension for AES encrypted data file
+RSA_EXT = '.pwdrsa'  # extension for RSA-encrypted AES-pwd (ciphertext)
+META_EXT = '.meta'   # extension for meta-data
+
+# RSA key
+RSA_MODULUS_MIN = 1024  # threshold to avoid PublicKeyTooShortError
+RSA_MODULUS_WRN = 2048  # threshold to avoid warning about short key
+
+# RsaKeys require() codes:
+NEED_PUBK = 1
+NEED_PRIV = 2
+NEED_PPHR = 4
+
+# warn that operations will take a while, check disk space, ...
+LRG_FILE_WARN = 2 ** 24  # 17M; used in tests but not implemented elsewhere
+MAX_FILE_SIZE = 2 ** 33  # 8G; larger likely fine unless pad w/ > 8G pad
+
+# file-length padding:
+PFS_PAD = 'pyFileSec_padded'  # label = 'file is padded'
+PAD_STR = 'pad='    # label means 'pad length = \d\d\d\d\d\d\d\d\d\d bytes'
+PAD_BYTE = b'\0'    # actual byte to use; value unimportant
+assert not str(PAD_BYTE) in PFS_PAD
+assert len(PAD_BYTE) == 1
+PAD_LEN = len(PAD_STR + PFS_PAD) + 10 + 2  # len of info about padding
+    # 10 = # digits in max file size, also works for 4G files
+    # 2 = # extra bytes, one at end, one between PAD_STR and PFS_PAD labels
+PAD_MIN = 128  # minimum length in bytes post-padding
+DEFAULT_PAD_SIZE = 16384  # default resulting file size
+
+# used if user suppresses the date; will sort before a numerical date:
+DATE_UNKNOWN = '(date-time suppressed)'
+NO_META_DATA = {'meta-data %s' % DATE_UNKNOWN: {'meta-data': False}}
+METADATA_NOTE_MAX_LEN = 120
+
+whitespace_re = re.compile('\s')
+hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
+
+# destroy() return codes:
+destroy_code = {1: 'secure deleted', 0: 'unlinked', -1: 'unknown'}
+pfs_DESTROYED = 1
+pfs_UNLINKED = 0
+pfs_UNKNOWN = -1
+
+# SecFile.file permissions:
+PERMISSIONS = 0o600  # for all SecFiles: no execute, no group, no other
+UMASK = 0o077  # need u+x permission for directories
+old_umask = None  # set as global in set_umask, unset_umask
+
+lib_path = os.path.abspath(__file__).strip('co')  # .py not .pyc, .pyo
+lib_dir = os.path.split(lib_path)[0]
+
+# for making .bat files for sdelete.exe and openssl.exe:
+bat_identifier = '-- pyFileSec .bat file --'
+sd_bat_template = """@echo off
+                    REM  """ + bat_identifier + """ for using sdelete.exe
+
+                    START "" /b /wait XSDELETEX %*""".replace('    ', '')
+op_expr = 'XX-OPENSSL_PATH-XX'
+op_default = 'C:\\OpenSSL-Win32\\bin'
+op_bat_template = """@echo off
+    REM  """ + bat_identifier + """ for using openssl.exe
+
+    set PATH=""" + op_expr + """;%PATH%
+    set OPENSSL_CONF=""" + op_expr + """\\openssl.cfg
+    START "" /b /wait openssl.exe %*""".replace('    ', '')
+if sys.platform == 'win32':
+    appdata_lib_dir = os.path.join(os.environ['APPDATA'],
+                                   os.path.split(lib_dir)[-1])
+    if not os.path.isdir(appdata_lib_dir):
+        os.mkdir(appdata_lib_dir)
+
+    op_bat_name = os.path.join(appdata_lib_dir, '_openssl.bat')
+
+
+# Initialize values: --------------------
+dropbox_path = None
+
+
+# Exception classes: --------------------
+if True:
+    # pylint: disable=C0111,C0321
+    class PyFileSecError(Exception): pass  # Base exception for pyFileSec errors
+
+    class EncryptError(PyFileSecError): pass  # failed, or refused to start
+
+    class DecryptError(PyFileSecError): pass  # failed, or refused to start
+
+    class PublicKeyError(PyFileSecError): pass
+
+    class PublicKeyTooShortError(PyFileSecError): pass
+
+    class PrivateKeyError(PyFileSecError): pass
+
+    class PassphraseError(PyFileSecError): pass
+
+    class SecFileFormatError(PyFileSecError): pass
+
+    SecFileArchiveFormatError = SecFileFormatError
+
+    class PaddingError(PyFileSecError): pass
+
+    class CodecRegistryError(PyFileSecError): pass  # e.g., not registered
+
+    class DestroyError(PyFileSecError): pass  # e.g., destroy failed
+
+    class ArgumentError(PyFileSecError): pass  # e.g., no file specified
+
+    class FileNotEncryptedError(PyFileSecError): pass
+
+    class FileStatusError(PyFileSecError): pass
 
 
 class PFSCodecRegistry(object):
@@ -297,8 +418,8 @@ class _SecFileBase(object):
             self.permissions = PERMISSIONS  # changes permissions on disk
         else:
             raise OSError('no such file %s' % self._file)
-        if os.path.splitext(self._file)[1] == '.pem' : #or
-            #'PUBLIC KEY' in open(infile, 'rb').read()):
+        if (os.path.splitext(self._file)[1] == '.pem' or
+            'PUBLIC KEY' in open(infile, read_mode).read()):
             logging.warning('infile looks like a public key')
 
     def set_file_time(self, new_time=None):
@@ -325,15 +446,13 @@ class _SecFileBase(object):
             return ''
 
         if int(lines) < 1:
-            #if self.is_encrypted:
-            #    contents = open(self.file, 'rb').read()
-            #else:
-                contents = open(self.file, read_mode).read()  # all
+            contents = open(self.file, read_mode).read()  # all
         else:
             if self.is_encrypted:
-                contents = open(self.file, 'rb').read(lines * 60)  # .tgz file
+                contents = open(self.file, read_mode).read(lines * 60)
             else:
-                contents = ''.join(open(self.file, read_mode).readlines()[:lines])
+                _ = open(self.file, read_mode).readlines()[:lines]
+                contents = ''.join(_)
         if self.is_encrypted:
             return b64encode(contents)
         return contents
@@ -652,7 +771,7 @@ class SecFile(_SecFileBase):
         '''
 
         # sets self.rsakeys:
-        _SecFileBase.__init__(self, pub=pub, priv=priv, pphr=pphr)
+        super(SecFile, self).__init__(pub=pub, priv=priv, pphr=pphr)
         self.set_file(infile)
         if not codec:
             codec = codec_registry  # default codec
@@ -1327,6 +1446,8 @@ class SecFileArchive(_SecFileBase):
     def __init__(self, name='', files=None, arc=None, keep=True):
         """
         """
+        super(SecFileArchive, self).__init__()
+
         # init must not create any temp files if paths=None
         if files and isinstance_basestring23(files):
             files = tuple(files)
@@ -2114,7 +2235,7 @@ def _decrypt_rsa_aes256cbc(data_enc, pwd_rsa, priv, pphr=None, openssl=None):
     # then use pwd to decrypt the ciphertext file (data_enc):
     try:
         pwd, se_RSA = sys_call(cmdRSA, stdin=pphr, stderr=True)
-        ___, se_AES = sys_call(cmdAES, stdin=pwd, stderr=True)
+        __, se_AES = sys_call(cmdAES, stdin=pwd, stderr=True)
     except:
         if isfile(data_dec) and isfile(data_enc):
             SecFile(data_dec).destroy()
@@ -2572,6 +2693,8 @@ def _parse_args():
         will get a logging.warning()
     currently not possible to register a new enc/dec method via command line
     """
+    #  pylint: disable=C0301
+
     parser = argparse.ArgumentParser(
         description='File-oriented privacy & integrity management library.',
         epilog="See http://pythonhosted.org/pyFileSec/")
