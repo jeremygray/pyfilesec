@@ -372,29 +372,46 @@ class TestBasics(object):
             sf.encrypt(pub1, meta='junk', keep=True)
 
     def test_max_size_limit(self):
-        # manual test: works with an actual 1G (MAX_FILE_SIZE) file as well
+        # avoid large files at encrypt() or pad(), others ok
+        # manually tested: works with an actual large file as well
         MAX_restore = pyfilesec.MAX_FILE_SIZE
         pyfilesec.MAX_FILE_SIZE = 2 ** 8  # fake, to test if hit the limit
-        tmpmax = 'maxsize.txt'
-        with open(tmpmax, 'w+b') as fd:
+        over_max = 'maxsize_plus1.txt'
+        with open(over_max, write_mode) as fd:
             fd.write(b'a' * (pyfilesec.MAX_FILE_SIZE + 1))  # ensure too large
 
-        with pytest.raises(FileStatusError):
-            sf = SecFile(tmpmax)
+        # test whether invoking encrypt/decrypt checks file size appropriately:
+        pub, priv, pphr = _known_values()[:3]
+
+        # no error to set a large file--might be an encrypted file:
+        sf = SecFile(over_max)
+        # yes error if try to encrypt it:
+        with pytest.raises(ValueError):
+            sf.encrypt(pub)
+
+        # yes ValueError if try to pad it: (PaddingError if just under max)
         pyfilesec.MAX_FILE_SIZE += 2
-        sf = SecFile(tmpmax)
+        sf = SecFile(over_max)
         with pytest.raises(ValueError):
             sf.pad(pyfilesec.MAX_FILE_SIZE + 1)
-        pyfilesec.MAX_FILE_SIZE = getsize(tmpmax) - 2
-        with pytest.raises(ValueError):
-            hmac_sha256('key', tmpmax)
+
+        # a file that goes over max size duing encryption should still decrypt:
+        at_max = 'maxsize.txt'
+        msg = b'a' * (pyfilesec.MAX_FILE_SIZE)
+        with open(at_max, write_mode) as fd:
+            fd.write(msg)
+        sf = SecFile(at_max)
+        sf.encrypt(pub)
+        assert sf.size > pyfilesec.MAX_FILE_SIZE
+        sf.decrypt(priv, pphr=pphr)
+        assert open(sf.file, read_mode).read() == msg
 
         pyfilesec.MAX_FILE_SIZE = MAX_restore
 
     def test_compressability(self):
         # idea: check that encrypted is not compressable, cleartext is
         datafile = 'test_size'
-        with open(datafile, 'wb') as fd:
+        with open(datafile, write_mode) as fd:
             fd.write(b'1')
         size_orig = getsize(datafile)
         assert size_orig == 1
@@ -423,7 +440,7 @@ class TestBasics(object):
         filename = 'umask_test no unicode'
         pub, priv, pphr = _known_values()[:3]
         umask_restore = os.umask(0o002)  # need permissive to test
-        with open(filename, 'wb') as fd:
+        with open(filename, write_mode) as fd:
             fd.write(b'\0')
         assert permissions_str(filename) == '0o664'  # permissive to test
         sf = SecFile(filename)

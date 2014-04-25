@@ -384,7 +384,7 @@ class _SecFileBase(object):
 
     @property
     def size(self):
-        self._require_file()
+        self._require_file(check_size=False)
         return getsize(self.file)
 
     def reset(self):
@@ -463,7 +463,7 @@ class _SecFileBase(object):
         """
         return self.read(1).strip()[:60]
 
-    def _require_file(self, status=None):
+    def _require_file(self, status=None, check_size=True):
         """Return the filename, raise error if missing, no file, or too large.
         """
         logging.debug('_require_file: current %s' % self.file)
@@ -474,15 +474,15 @@ class _SecFileBase(object):
         if status is not None and not status:
             fatal('_require_file: bad status', FileStatusError)
         # use getsize because self.size calls _require_file() --> recursion
-        if getsize(self._file) > MAX_FILE_SIZE:
+        if check_size and getsize(self._file) > MAX_FILE_SIZE:
             fatal("file too large (max size %d bytes)" % MAX_FILE_SIZE,
-                  FileStatusError)
+                  ValueError)
         return self.file
 
-    def _require_enc_file(self, status=None):
+    def _require_enc_file(self, status=None, check_size=False):
         """Returns a SecFileArchive, or fails
         """
-        self._require_file(status)
+        self._require_file(status, check_size=check_size)
         if self.is_not_encrypted:
             fatal('Require an encrypted file.', FileNotEncryptedError)
         return SecFileArchive(self.file)
@@ -542,7 +542,7 @@ class _SecFileBase(object):
 
     def _get_permissions(self):
         name = '_get_permissions'
-        self._require_file()
+        self._require_file(check_size=False)
         perm = -1  # 'win32-not-implemented'
         if not sys.platform in ['win32']:
             perm = int(oct(os.stat(self.file)[stat.ST_MODE])[-3:], 8)
@@ -552,7 +552,7 @@ class _SecFileBase(object):
 
     def _set_permissions(self, mode):
         name = '_set_permissions'
-        self._require_file()
+        self._require_file(check_size=False)
         if sys.platform not in ['win32']:
             os.chmod(self.file, mode)
         else:
@@ -576,7 +576,7 @@ class _SecFileBase(object):
             return -1
         if not self.file:
             return 0
-        filename = self._require_file()
+        filename = self._require_file(check_size=False)
         if sys.platform == 'win32':
             links = sys_call(['fsutil', 'hardlink', 'list', filename])
             count = len([f for f in links.splitlines() if f.strip()])
@@ -622,7 +622,7 @@ class _SecFileBase(object):
         Only approximate: the directory might be versioned, but not this file;
         or versioned with git but git is not call-able.
         """
-        self._require_file()
+        self._require_file(check_size=False)
         logging.debug('trying to detect version control (svn, git, hg)')
 
         return any([self._get_svn_info(self.file),
@@ -913,7 +913,7 @@ class SecFile(_SecFileBase):
         """
         name = 'unpad'
         self.result = {'method': name, 'status': 'started'}
-        filename = self._require_file()
+        filename = self._require_file(check_size=False)
         logging.debug(name + ': start, file="%s"' % filename)
         filelen = getsize(filename)
         pad_count = self._pad_len()
@@ -1141,7 +1141,8 @@ class SecFile(_SecFileBase):
         self.result = {'method': name, 'status': 'started'}
         logging.debug(name + 'start')
         arch_enc = self._require_enc_file(self.is_not_in_dropbox &
-                                          self.is_in_writeable_dir)
+                                          self.is_in_writeable_dir,
+                                          check_size=False)
         self.rsakeys.update(priv=priv, pphr=pphr, req=NEED_PRIV)
         if self.is_tracked:
             logging.warning(name + ': file exposed to version control')
@@ -1281,7 +1282,7 @@ class SecFile(_SecFileBase):
         """
         name = 'sign'
         logging.debug(name + ': start')
-        self._require_file()
+        self._require_file(check_size=False)
         self.rsakeys.update(priv=priv, pphr=pphr, req=NEED_PRIV)
         sig_out = self.file + '.sig'
 
@@ -1312,7 +1313,7 @@ class SecFile(_SecFileBase):
         """
         name = 'verify'
         logging.debug(name + ': start')
-        self._require_file()
+        self._require_file(check_size=False)
         self.rsakeys.update(pub=pub, req=NEED_PUBK)
         if not sig:
             fatal('signature required for verify(), as string or filename',
@@ -1363,7 +1364,7 @@ class SecFile(_SecFileBase):
         name = 'destroy'
         logging.debug(name + ': start')
         self.result = None
-        target_file = self._require_file()
+        target_file = self._require_file(check_size=False)
 
         if self.is_in_dropbox:
             logging.error(name + ": in dropbox; can't secure delete remotely")
@@ -1421,7 +1422,7 @@ class SecFile(_SecFileBase):
     def rename(self, new_name):
         """Change the name of the file on the file system.
         """
-        self._require_file()
+        self._require_file(check_size=False)
         result = secure_rename(self.file, new_name)
         if result['status'] == 'good':
             self.set_file(result['new_name'])  # can be changed to ensure uniq
@@ -2361,8 +2362,8 @@ def hmac_sha256(key, filename):
     """
     if not key:
         return None
-    if getsize(filename) > MAX_FILE_SIZE:
-        fatal('hmac_sha256: file too large (> max file size)')
+    #if getsize(filename) > MAX_FILE_SIZE:
+    #    fatal('hmac_sha256: file too large (> max file size)')
     cmd_HMAC = [OPENSSL, 'dgst', '-sha256', '-hmac', key, filename]
     hmac_openssl = sys_call(cmd_HMAC)
 
