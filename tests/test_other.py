@@ -103,12 +103,6 @@ class TestBasics(object):
     def test_import_pyperclip(self):
         import _pyperclip
 
-    def test_constants_imports(self):
-        import pyfilesec.constants
-        os.chdir(self.start_dir)
-        import which
-        os.chdir(self.tmp)
-
     def test_import_getpass_which(self):
         os.chdir(self.start_dir)
         import _getpass
