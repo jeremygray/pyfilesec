@@ -739,18 +739,24 @@ class TestsCrypto(object):
 
     @pytest.mark.commandline
     def test_command_line(self):
-        # send encrypt and decrypt commands via command line
+        """test command line usage with lib_path == path to invoke pyfilesec"""
 
+        # minimal test of args via commandline: recover --version via stderr
+        cmdLineCmd = [sys.executable, lib_path, '--version']
+        _, ver = sys_call(cmdLineCmd, stderr=True)
+        # can be coverage warnings in stderr as well, so take first line:
+        assert ver.splitlines()[0] == pyfilesec.__version__
+
+        # send encrypt and decrypt commands via command line
         datafile = 'cleartext no unicode.txt'
         secretText = 'secret snippet %.6f' % get_time()
         with open(datafile, write_mode) as fd:
             fd.write(secretText)
         pub1, priv1, pphr1 = _known_values()[:3]
-        pathToSelf = lib_path
         datafile = _abspath(datafile)
 
         # Encrypt:
-        cmdLineCmd = [sys.executable, pathToSelf, datafile, '--encrypt',
+        cmdLineCmd = [sys.executable, lib_path, datafile, '--encrypt',
                       '--pub', pub1, '--keep', '--openssl=' + OPENSSL]
         oute = sys_call(cmdLineCmd)
         assert 'cipher_text' in oute
@@ -758,7 +764,7 @@ class TestsCrypto(object):
         assert isfile(enc['cipher_text'])
 
         # Decrypt:
-        cmdLineCmd = [sys.executable, pathToSelf,
+        cmdLineCmd = [sys.executable, lib_path,
                       enc['cipher_text'], '--decrypt', '--keep',
                       '--priv', priv1, '--pphr', pphr1, '--openssl=' + OPENSSL]
         outd = sys_call(cmdLineCmd)
@@ -769,24 +775,24 @@ class TestsCrypto(object):
         assert recoveredText == secretText  # need both enc and dec to work
 
         # Rotate:
-        assert (isfile(enc['cipher_text']) and
-            enc['cipher_text'].endswith(ENC_EXT))  # need --keep in d
-        cmdLineRotate = [sys.executable, pathToSelf,
+        ciph = enc['cipher_text']
+        assert (isfile(ciph) and ciph.endswith(ENC_EXT))  # need --keep in d
+        cmdLineRotate = [sys.executable, lib_path,
                          enc['cipher_text'], '--rotate',
                         '--pub', pub1, '--priv', priv1, '--pphr', pphr1,
-                        '-z', str(getsize(enc['cipher_text']) * 2)]
+                        '-z', str(getsize(ciph) * 2)]
         outr = sys_call(cmdLineRotate)  # dict as a string
         assert 'rotate' in outr and 'good' in outr
         rot = eval(outr)
         assert isfile(rot['file'])
 
         # Sign and Verify (target = the file from rot):
-        cmdLineSign = [sys.executable, pathToSelf, rot['file'], '--sign',
+        cmdLineSign = [sys.executable, lib_path, rot['file'], '--sign',
                       '--priv', priv1, '--pphr', pphr1, '--out', 'sig.out']
         outs = sys_call(cmdLineSign)
         assert 'sig' in outs
         sig = eval(outs)
-        cmdLineVerify = [sys.executable, pathToSelf, rot['file'], '--verify',
+        cmdLineVerify = [sys.executable, lib_path, rot['file'], '--verify',
                       '--pub', pub1, '--sig', sig['out']]
         outv = sys_call(cmdLineVerify)
         assert 'verified' in outv
@@ -797,7 +803,7 @@ class TestsCrypto(object):
         with open(datafile, write_mode) as fd:
             fd.write(secretText)
         orig_size = getsize(datafile)
-        cmdLinePad = [sys.executable, pathToSelf, datafile, '--pad']
+        cmdLinePad = [sys.executable, lib_path, datafile, '--pad']
         outp = sys_call(cmdLinePad)
         assert "'method': 'pad'" in outp
         assert "'size': %d" % DEFAULT_PAD_SIZE in outp
@@ -805,14 +811,14 @@ class TestsCrypto(object):
         assert getsize(datafile) == DEFAULT_PAD_SIZE
 
         # more coverage
-        cmdLineUnpad = [sys.executable, pathToSelf, datafile, '--pad',
+        cmdLineUnpad = [sys.executable, lib_path, datafile, '--pad',
                         '-z', '0']
         outunp = sys_call(cmdLineUnpad)
         assert 'padding' in outunp
         out = eval(outunp)
         assert out['padding'] == None
 
-        cmdLineUnpad = [sys.executable, pathToSelf, datafile, '--pad',
+        cmdLineUnpad = [sys.executable, lib_path, datafile, '--pad',
                         '-z', '0', '--verbose']
         outv = sys_call(cmdLineUnpad)
         # see if there's lots of output, with some plausible detail:
@@ -822,13 +828,14 @@ class TestsCrypto(object):
         assert len(outv.splitlines()) > 40
 
         # Destroy:
-        cmdLineDestroy = [sys.executable, pathToSelf, datafile, '--destroy']
+        cmdLineDestroy = [sys.executable, lib_path, datafile, '--destroy']
         outx = sys_call(cmdLineDestroy)
         if 'disposition' in outx:
             out = eval(outx)
         assert out['disposition'] == destroy_code[pfs_DESTROYED]
 
 
+# this messes up coverage for coveralls.io, even when marked notravis
 @pytest.mark.altopenssl
 @pytest.mark.slow
 @pytest.mark.notravis

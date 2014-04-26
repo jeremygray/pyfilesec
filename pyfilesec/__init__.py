@@ -799,10 +799,9 @@ class SecFile(_SecFileBase):
 
         To make unpadding easier and more robust (and enable human inspection),
         the end bytes provide the number of padding bytes that were added, plus
-        an identifier. 10 digits is not hard-coded as 10, but as the length of
-        ``str(max_file_size)``, where the ``max_file_size`` constant is 8G by
-        default. This means that any changes to the max file size constant can
-        thus cause pad / unpad failures across versions.
+        an identifier. NB: 10 digits is not hard-coded as 10, but as
+        ``len(str(max_file_size))``, where the ``max_file_size`` is 8G.
+        Changes to the max file size could cause pad / unpad failures.
 
         Special ``size`` values:
 
@@ -2438,7 +2437,6 @@ def set_destroy():
                         fatal('Failed to find sdelete.exe. Please install ' +
                             'under C:\\, run it manually to accept the terms.',
                             RuntimeError)
-                # bat_template in constants.py
                 bat = sd_bat_template.replace('XSDELETEX', _abspath(guess))
                 with open(DESTROY_EXE, write_mode) as fd:
                     fd.write(bat)
@@ -2495,7 +2493,7 @@ def set_openssl(path=None):
             logging.warning(msg)
     else:
         # use a bat file to set OPENSSL_CONF; create .bat if not found
-        OPENSSL = op_bat_name  # from constants
+        OPENSSL = op_bat_name
         if not exists(OPENSSL):
             logging.info('no working %s file; will recreate' % op_bat_name)
             bat = op_bat_template.replace(op_expr, op_default)
@@ -2690,10 +2688,10 @@ def _parse_args():
     parser.add_argument('--openssl', help='path of the openssl binary to use')
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-m][-n][-c][-z][-e][-k])')
-    group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v [-d][-r])')
-    group.add_argument('--rotate', action='store_true', help='rotate the encryption (-v -U [-V][-r][-R][-z][-e][-c])')
-    group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-r][-o])')
+    group.add_argument('--encrypt', action='store_true', help='encrypt with RSA + AES256 (-u [-c][-z][-k])')
+    group.add_argument('--decrypt', action='store_true', help='use private key to decrypt (-v)[-p]')
+    group.add_argument('--rotate', action='store_true', help='rotate the encryption (-u -v [-p][-c])')
+    group.add_argument('--sign', action='store_true', help='sign file / make signature (-v [-p][-o])')
     group.add_argument('--verify', action='store_true', help='verify a signature using public key (-u -s)')
     group.add_argument('--pad', action='store_true', help='obscure file length by padding with bytes ([-z])')
     group.add_argument('--unpad', action='store_true', help='remove padding')
@@ -2707,12 +2705,12 @@ def _parse_args():
     group2.add_argument('--clipboard', action='store_true', help='genrsa: passphrase placed on clipboard (only)', default=False)
     group2.add_argument('--passfile', action='store_true', help='genrsa: save passphrase to file, name matches keys', default=False)
 
-    parser.add_argument('-o', '--out', help='sign: path name for the sig')
-    parser.add_argument('-u', '--pub', help='path to public key (.pem file)')
-    parser.add_argument('-v', '--priv', help='path to private key (.pem file)')
-    parser.add_argument('-p', '--pphr', help='path to file with passphrase')
-    parser.add_argument('-c', '--hmac', help='path to file with hmac key')
-    parser.add_argument('-s', '--sig', help='path to signature file (required input for --verify)')
+    parser.add_argument('-o', '--out', help='sign: output path name for the signature')
+    parser.add_argument('-u', '--pub', help='path to file containing public key (.pem file)')
+    parser.add_argument('-v', '--priv', help='path to file containing private key (.pem file)')
+    parser.add_argument('-p', '--pphr', help='path to file containing a passphrase for private key')
+    parser.add_argument('-c', '--hmac', help='path to file containing a hmac key')
+    parser.add_argument('-s', '--sig', help='path to file containing a signature (required input for --verify)')
     parser.add_argument('-z', '--size', type=int, help='bytes for --pad, min 128, default 16384; unpad 0, -1')
     parser.add_argument('-a', '--autogen', action='store_true', help='non-interactive genrsa', default=False)
     parser.add_argument('-N', '--nodate', action='store_true', help='suppress date (meta-data are clear-text)', default=False)
