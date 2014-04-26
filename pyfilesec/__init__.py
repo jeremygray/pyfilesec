@@ -56,32 +56,14 @@ import tarfile
 from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
 import time
-from   which import which, WhichError
 
-# other imports in GenRSA.dialog:
-#   import _pyperclip    # if use --clipboard from commandline
-#   import _getpass      # for no-display passphrase entry during RSA key-gen
-
-"""TO-DO:
-- move _enc, _dec into files in new dir codec/, sha256() and execfile() them
-- rewrite encrypt decrypt to take parameter `engine` or `backend` to accept openssl, gpg
-"""
+# directory lib/ has: which, _getpass, _pyperclip
+sys.path.insert(0, dirname(abspath('__file__')) + os.sep + 'lib')
+from which import which, WhichError
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__).rstrip('co')  # .py not .pyc, .pyo
-lib_dir = os.path.split(lib_path)[0]
-
-'''
-ENCODING = 'UTF-8'
-def _b(val):
-    """Return bytes or str depending on Py3 or Py2; used in constants.py
-    """
-    if PY3 and type(val) == str:
-        return bytes(val, ENCODING)
-    else:
-        return val
-'''
-
+lib_dir = dirname(lib_path)
 
 if sys.platform == 'win32':
     from win32com.shell import shell  # pylint: disable=F0401

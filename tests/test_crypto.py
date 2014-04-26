@@ -737,6 +737,7 @@ class TestsCrypto(object):
         # test of hmac file MAX_SIZE is in test_max_size_limit
         assert hmac_sha256(None, tmp) is None
 
+    @pytest.mark.commandline
     def test_command_line(self):
         # send encrypt and decrypt commands via command line
 
