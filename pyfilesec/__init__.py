@@ -57,8 +57,8 @@ from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
 import time
 
-# directory lib/ has: which, _getpass, _pyperclip
-sys.path.insert(0, dirname(abspath('__file__')) + os.sep + 'lib')
+# higher directory has: which, _getpass, _pyperclip
+sys.path.insert(0, dirname(abspath('__file__')))
 from which import which, WhichError
 
 lib_name = 'pyFileSec'
@@ -1972,15 +1972,18 @@ class GenRSA(object):
             except ValueError:
                 pass  # hit return, == want auto-generate
             else:
-                if len(pphr) < 16:
+                if 0 < len(pphr) < 16:
                     return self._cleanup('\n  > Passphrase too short. <')
-                pphr_auto = False
-                pphr2 = _getpass.getpass('same again: ')
-                if pphr != pphr2:
-                    return self._cleanup('  > Passphrases do not match. <')
-                pphr2.zero()
-            bits = int(input23('\nKey length (2048, 4096, 8192): [%d] ' %
-                        RSA_BITS_DEFAULT))
+                elif len(pphr) > 0:
+                    pphr_auto = False
+                    pphr2 = _getpass.getpass('same again: ')
+                    if pphr != pphr2:
+                        return self._cleanup('  > Passphrases do not match. <')
+            b = input23('\nKey length (2048, 4096, 8192): [%d] ' %
+                        RSA_BITS_DEFAULT)
+            if b:
+                bits = int(b)
+
         if pphr_auto:
             print('(auto-generating a passphrase)')
             pphr = printable_pwd(PPHR_BITS_DEFAULT)

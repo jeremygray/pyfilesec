@@ -126,7 +126,7 @@ def _raw_input(prompt="", stream=None, input=None):
     if not sec_line:
         raise EOFError
     if sec_line[-1] == '\n':
-        sec_line = sec_line.str[:-1]
+        sec_line = sec_line[:-1]
     return sec_line
 
 
