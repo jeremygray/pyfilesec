@@ -15,7 +15,6 @@ demos/readme.txt
 demos/sh_example.sh
 docs/source/index.rst
 pyfilesec/__init__.py
-pyfilesec/constants.py
 tests/__init__.py
 tests/openssl_version_97
 tests/test_crypto.py

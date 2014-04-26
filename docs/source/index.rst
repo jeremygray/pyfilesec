@@ -401,11 +401,12 @@ tested yet with machines known to be of different endian-ness, however.)
 
 With one exception, the specific version of OpenSSL does not matter. The
 known exception is that there are incompatibilities between v0.9.x and v1.0.x
-when using sign / verify. Tested with 9 versions of openssl, running on Mac OS
+when using sign / verify. Tested with 10 versions of openssl, running on Mac OS
 X (10.8), 3 Linux distributions, and Windows 7::
 
     OpenSSL 0.9.8r  8 Feb 2011     Mac 10.8.3, python 2.7.3
     OpenSSL 0.9.8x 10 May 2012     Mac 10.8.4, python 2.7.3
+    OpenSSL 0.9.8y 5 Feb 2013      Mac 10.8.5, python 2.7.3
     OpenSSL 1.0.1e 11 Feb 2013     same Mac, openssl via macports
     OpenSSL 1.1.0-dev xx XXX xx    same Mac, clone OpenSSL from github & compile
     OpenSSL 1.0.0-fips 29 Mar 2010 CentOS 6.4, python 2.6.6

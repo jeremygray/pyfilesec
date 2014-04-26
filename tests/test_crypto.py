@@ -829,12 +829,11 @@ class TestsCrypto(object):
         assert out['disposition'] == destroy_code[pfs_DESTROYED]
 
 
+@pytest.mark.altopenssl
 @pytest.mark.slow
 @pytest.mark.notravis
-class xxxTestCryptoUsingAnotherOpenSSL(TestsCrypto):
+class TestCryptoAltOpenSSL(TestsCrypto):
     def setup_class(self):
-        set_openssl('/opt/local/bin/openssl')
-
         global codec
         codec = PFSCodecRegistry(default_codec)
         self.start_dir = os.getcwd()
@@ -843,6 +842,11 @@ class xxxTestCryptoUsingAnotherOpenSSL(TestsCrypto):
         os.mkdir(tmp)
         self.tmp = abspath(tmp)
         os.chdir(tmp)
+
+        try:
+            set_openssl('/opt/local/bin/openssl')
+        except:
+            pytest.skip()
 
 
 def _known_values(folder='.'):

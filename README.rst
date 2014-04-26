@@ -66,8 +66,8 @@ Milestones
 -----------
 
 - 0.3  Python 3 (2to3 mostly passes now)
-- 0.4  An alternative encryption backend (possibly pyCrypto and gpg support)
-- 0.5  Windows file-permissions
+- 0.4  Alternative encryption: support for gpg-based management of RSA keys
+- 0.5  Windows file-permissions; possible SecStr
 
 Dev branch status
 ------------------
