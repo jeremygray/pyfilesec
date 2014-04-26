@@ -832,7 +832,7 @@ class TestsCrypto(object):
 @pytest.mark.altopenssl
 @pytest.mark.slow
 @pytest.mark.notravis
-class TestCryptoAltOpenSSL(TestsCrypto):
+class XXXTestCryptoAltOpenSSL(TestsCrypto):
     def setup_class(self):
         global codec
         codec = PFSCodecRegistry(default_codec)
