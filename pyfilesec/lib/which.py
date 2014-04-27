@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+# pylint: skip-file
+
 # Copyright (c) 2002-2007 ActiveState Software Inc.
 # See LICENSE.txt for license details.
 # Author:

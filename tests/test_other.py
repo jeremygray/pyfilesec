@@ -151,8 +151,8 @@ class TestBasics(object):
         sf.basename
         with pytest.raises(AttributeError):
             sf.set_file(1)
-        with pytest.raises(NotImplementedError):
-            sf.set_file_time(0)
+        #with pytest.raises(NotImplementedError):
+        #    sf.set_file_time(0)
         sf.snippet
         with pytest.raises(FileNotEncryptedError):
             sf._require_enc_file()

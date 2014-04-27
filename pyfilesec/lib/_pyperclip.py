@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+
+# pylint: skip-file
+
 from __future__ import print_function
 
 # JRG: from https://github.com/gfxmonk/pyperclip/ Aug 2013

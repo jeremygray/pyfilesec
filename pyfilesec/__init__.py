@@ -249,40 +249,46 @@ class PFSCodecRegistry(object):
     def keys(self):
         return list(self._functions.keys())
 
+    @staticmethod
+    def _test(new_functions, test_keys=None):
+        """Perform self.test: decrypt(encrypt())"""
+        enc_kwargs, dec_kwargs = test_keys
+        test_co = PFSCodecRegistry({})
+        # hack: splice in to bypass .register:
+        test_co._functions = new_functions
+        test_dir = mkdtemp()
+        test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
+        test_datum = printable_pwd(64)
+        recovered = None  # i.e., = test will fail unless proven otherwise
+        with open(test_file, write_mode) as fd:
+            fd.write(test_datum)
+        try:
+            sf = SecFile(test_file, codec=test_co)
+            sf.encrypt(keep=True, **enc_kwargs)
+            sf.decrypt(**dec_kwargs)
+        except:
+            import traceback
+            traceback.print_exc()
+        finally:
+            if sf.file:
+                recovered = open(sf.file, read_mode).read()
+            shutil.rmtree(test_dir, ignore_errors=True)
+        return recovered == test_datum
+
     def register(self, new_functions, test_keys=None):
         """Validate and add a new codec functions to the registry.
 
-        Typically one registers encrypt and decrypt functions in pairs. Its
+        Typically one registers encrypt and decrypt functions in pairs. It is
         possible to register only a decrypt function, to support "read only"
         (decrypt) use of a codec.
 
         If ``test_keys`` is provided, an
-        encrypt-decrypt self-test validation must passbefore registration can
-        proceed. ``test_keys``  should be a tuple of (enc_kwargs, dec_kwargs)
+        encrypt-decrypt self-test validation must pass before registration can
+        proceed. ``test_keys`` should be a tuple of (enc_kwargs, dec_kwargs)
         that will be passed to the respective functions being registered.
         """
         if test_keys:
-            enc_kwargs, dec_kwargs = test_keys
-            test_co = PFSCodecRegistry({})
-            # hack: splice in to bypass .register:
-            test_co._functions = new_functions
-            test_dir = mkdtemp()
-            test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
-            test_datum = printable_pwd(64)
-            with open(test_file, write_mode) as fd:
-                fd.write(test_datum)
-            try:
-                sf = SecFile(test_file, codec=test_co)
-                sf.encrypt(keep=True, **enc_kwargs)
-                sf.decrypt(**dec_kwargs)
-            except:
-                import traceback
-                traceback.print_exc()
-            finally:
-                if sf.file:
-                    recovered = open(sf.file, read_mode).read()
-                shutil.rmtree(test_dir, ignore_errors=True)
-            assert recovered == test_datum  # 'Codec reg: enc-dec failed'
+            assert self._test(new_functions, test_keys)  # self-test failed
 
         for key, fxn in list(new_functions.items()):
             try:
@@ -411,10 +417,10 @@ class _SecFileBase(object):
             'PUBLIC KEY' in open(infile, read_mode).read()):
             logging.warning('infile looks like a public key')
 
-    def set_file_time(self, new_time=None):
-        """Obscure the time-stamp on the underlying file system.
-        """
-        fatal('file time-stamp removal not supported yet', NotImplementedError)
+    #def set_file_time(self, new_time=None):
+    #    """Obscure the time-stamp on the underlying file system.
+    #    """
+    #    fatal('file time-stamp removal not supported yet', NotImplementedError)
 
     @property
     def file(self):
@@ -497,7 +503,7 @@ class _SecFileBase(object):
         finally:
             try:
                 os.unlink(test_name)
-            except:
+            except OSError:
                 pass
         return writeable
 
@@ -618,7 +624,8 @@ class _SecFileBase(object):
                     self._get_git_info(self.file),
                     self._get_hg_info(self.file)])
 
-    def _get_git_info(self, path, git='git'):
+    @staticmethod
+    def _get_git_info(path, git='git'):
         """Report whether a directory or file is tracked in a git repo.
 
         Can test any generic filename, not just current file::
@@ -642,7 +649,8 @@ class _SecFileBase(object):
         logging.debug('path %s tracked in git repo: %s' % (path, is_tracked))
         return is_tracked
 
-    def _get_svn_info(self, path):
+    @staticmethod
+    def _get_svn_info(path):
         """Tries to discover if a file is tracked under svn.
         """
         if not path or not exists(path):
@@ -653,7 +661,8 @@ class _SecFileBase(object):
         logging.debug('path %s tracked in svn repo: %s' % (path, has_svn_dir))
         return has_svn_dir
 
-    def _get_hg_info(self, path):
+    @staticmethod
+    def _get_hg_info(path):
         """Tries to discover if a file is tracked under mercurial.
         """
         if not path or not exists(path):
@@ -983,7 +992,7 @@ class SecFile(_SecFileBase):
         set_umask()
         name = 'encrypt'
         self.result = {'method': name, 'status': 'started'}
-        self._require_file(self.is_in_writeable_dir)  # enc file ok, warn
+        self._require_file(self.is_in_writeable_dir)  # enc file ok, warn below
         self.rsakeys.update(pub=pub, req=NEED_PUBK)
         logging.debug(name + 'start')
         if self.is_encrypted:
@@ -994,6 +1003,7 @@ class SecFile(_SecFileBase):
             fatal(name + ': meta must be True, False, or dict', AttributeError)
         if not keep in [True, False]:
             fatal(name + ": bad value for 'keep' parameter")
+
         # Do the encryption, using a registered `encMethod`:
         ENCRYPT_FXN = self.codec.get_function(enc_method)
         set_umask()  # redundant
@@ -1049,14 +1059,15 @@ class SecFile(_SecFileBase):
                     ': retaining original file, encryption did not succeed')
 
         unset_umask()
-        self.set_file(arch_enc.name)  # likely off in some situations
+        self.set_file(arch_enc.name)  # likely off in some situations (??)
         self.result.update({'status': 'good', 'cipher_text': self.file,
                             'meta': meta})
         if hmac_key:
             self.result.update({'hmac': True})
         return self
 
-    def _make_metadata(self, datafile, data_enc, pub, enc_method,
+    @staticmethod
+    def _make_metadata(datafile, data_enc, pub, enc_method,
                        date=True, hmac=None, note=None):
         """Return info about an encryption context, as {date-now: {info}} dict.
 
@@ -1423,7 +1434,7 @@ class SecFile(_SecFileBase):
 
 
 class SecFileArchive(_SecFileBase):
-    """Class for working with a cipher_text archive file (= \*.enc).
+    """Class for working with a cipher_text archive file (= ``.enc``).
 
     Used transparently by SecFile as needed; typically there's no need to work
     directly with a SecFileArchive.
@@ -1642,7 +1653,8 @@ class RsaKeys(object):
                         )
         return self
 
-    def sniff(self, key):
+    @staticmethod
+    def sniff(key):
         """Inspects the file ``key``, returns information.
 
         Example return values:
@@ -1701,7 +1713,8 @@ class RsaKeys(object):
         self._update_pphr(pphr)
         if self.priv_requires_pphr:
             req |= NEED_PPHR
-        req and self.require(req)
+        if req:
+            self.require(req)
 
     def _update_pub(self, pub=None):
         """Get pub from self or from param, set as needed
@@ -1782,7 +1795,8 @@ class GenRSA(object):
     def __init__(self):
         pass
 
-    def demo_rsa_keys(self, folder=''):
+    @staticmethod
+    def demo_rsa_keys(folder=''):
         pub = os.path.join(folder, 'pubkey_demo_only')
         pubkey = """   !!! DEMO public key do not use; for testing only!!!
 
@@ -1830,7 +1844,8 @@ class GenRSA(object):
                 fd.write(pp)
         return _abspath(pub), _abspath(priv), _abspath(pphr)
 
-    def check_entropy(self):
+    @staticmethod
+    def check_entropy():
         """Basic query for some indication that entropy is available.
         """
         e = '(unknown)'
@@ -1880,14 +1895,15 @@ class GenRSA(object):
             fatal('new keys failed to validate; removing them', RuntimeError)
         return _abspath(pub), _abspath(priv)
 
-    def _cleanup(self, msg, pub='', priv='', pphr=None):
+    @staticmethod
+    def _cleanup(msg, pub='', priv='', pphr=None):
         print(msg)
         try:
             SecFile(priv).destroy()
         except:
             try:
                 os.unlink(priv)
-            except:
+            except OSError:
                 pass
         if pphr:
             try:
@@ -1895,11 +1911,11 @@ class GenRSA(object):
             except:
                 try:
                     os.unlink(pphr)
-                except:
+                except OSError:
                     pass
         try:
             os.unlink(pub)
-        except:
+        except OSError:
             pass
         return None, None, None
 
@@ -2369,14 +2385,14 @@ def hmac_sha256(key, filename):
 
 
 def isinstance_basestring23(duck):
-    # placeholder for 2to3
-    #return isinstance(duck, basestring)
+    # idea is py2/py3 compatible: return isinstance(duck, basestring)
     try:
         duck + 'quack'
         duck.endswith('quack')
-        return True
     except:
         return False
+    else:
+        return True
 
 
 def printable_pwd(nbits=256, prefix='#'):

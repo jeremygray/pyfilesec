@@ -13,6 +13,8 @@ On the Mac EasyDialogs.AskPassword is used, if available.
 #          Guido van Rossum (Windows support and cleanup)
 #          Gregory P. Smith (tty support & GetPassWarning)
 
+# pylint: skip-file
+
 import os, sys, warnings
 __all__ = ["getpass","getuser","GetPassWarning"]
 
