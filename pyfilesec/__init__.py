@@ -32,13 +32,6 @@ import sys
 if sys.version < '2.6':
     raise RuntimeError('Requires python 2.6 or higher')
 
-PY3 = sys.version > '3'
-if PY3:
-    read_mode = 'r'  # 3.x file open does universal newlines by default
-else:
-    read_mode = 'rU'  # univeral newlines, for cross-platform transparency
-write_mode = 'w'
-
 import argparse
 from   base64 import b64encode, b64decode
 import copy
@@ -57,7 +50,7 @@ from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
 import time
 
-from pyfilesec.lib.which import which, WhichError
+from lib.which import which, WhichError
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__).rstrip('co')  # .py not .pyc, .pyo
@@ -70,6 +63,13 @@ if sys.platform == 'win32':
 else:
     user_can_link = True
     get_time = time.time
+
+PY3 = sys.version > '3'
+if PY3:
+    read_mode = 'r'  # 3.x file open does universal newlines by default
+else:
+    read_mode = 'rU'  # univeral newlines, for cross-platform transparency
+write_mode = 'w'
 
 # Constants: --------------------
 RSA_PADDING = '-oaep'  # actual arg for openssl rsautl in encrypt, decrypt
