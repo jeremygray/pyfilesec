@@ -111,8 +111,8 @@ DATE_UNKNOWN = '(date-time suppressed)'
 NO_META_DATA = {'meta-data %s' % DATE_UNKNOWN: {'meta-data': False}}
 METADATA_NOTE_MAX_LEN = 120
 
-whitespace_re = re.compile('\s')
-hexdigits_re = re.compile('^[\dA-F]+$|^[\da-f]+$')
+whitespace_re = re.compile(r'\s')
+hexdigits_re = re.compile(r'^[\dA-F]+$|^[\da-f]+$')
 
 # destroy() return codes:
 destroy_code = {1: 'secure deleted', 0: 'unlinked', -1: 'unknown'}
@@ -195,9 +195,8 @@ class PFSCodecRegistry(object):
     A PFSCodecRegistry is used to return the actual encrypt and decrypt
     functions to use when a SecFile object calls its ``.encrypt()`` or
     ``.decrypt()`` methods. The functions are vetted to conform to a minimal
-    expected format, and can optionally be required to pass an
-    encrypt-then-decrypt self-test before being registered (and hence available
-    to a SecFile to use).
+    expected format, and can optionally be required to successfully perform an
+    encrypt-then-decrypt self-test before being registered.
 
     Typically, there is no need for anything other than the default registry
     that is set-up automatically. Each instance of a ``SecFile`` keeps its
@@ -221,7 +220,7 @@ class PFSCodecRegistry(object):
     # and so on for files generated (currently are constants).
     # b) `rotate()` will need a newEncMethod param.
 
-    def __init__(self, defaults={}, test_keys=None):
+    def __init__(self, defaults=None, test_keys=None):
         """The class is designed around the default functions, and is intended
         to be easily extensible. To register a new function, the
         idea is to be able to do::
@@ -245,6 +244,8 @@ class PFSCodecRegistry(object):
         """
         self.name = 'PFSCodecRegistry'
         self._functions = {}
+        if defaults is None:
+            defaults = {}
         self.register(defaults, test_keys)
 
     def keys(self):
@@ -265,7 +266,8 @@ class PFSCodecRegistry(object):
         if test_keys:
             enc_kwargs, dec_kwargs = test_keys
             test_co = PFSCodecRegistry({})
-            test_co._functions = new_functions  # splice in to bypass .register
+            # hack: splice in to bypass .register:
+            test_co._functions = new_functions
             test_dir = mkdtemp()
             test_file = os.path.join(test_dir, 'codec_enc_dec.txt')
             test_datum = printable_pwd(64)
@@ -275,11 +277,13 @@ class PFSCodecRegistry(object):
                 sf = SecFile(test_file, codec=test_co)
                 sf.encrypt(keep=True, **enc_kwargs)
                 sf.decrypt(**dec_kwargs)
+            except:
+                import traceback
+                traceback.print_exc()
             finally:
-                os.unlink(test_file)
                 if sf.file:
                     recovered = open(sf.file, read_mode).read()
-                os.unlink(sf.file)
+                shutil.rmtree(test_dir, ignore_errors=True)
             assert recovered == test_datum  # 'Codec reg: enc-dec failed'
 
         for key, fxn in list(new_functions.items()):
@@ -344,6 +348,11 @@ class _SecFileBase(object):
     """
     def __init__(self, pub=None, priv=None, pphr=None):
         self.rsakeys = RsaKeys(pub=pub, priv=priv, pphr=pphr)
+        self._openssl = self._openssl_version = None
+        self.data_aes, self.pwd_rsa, self.meta = (None,) * 3
+        self.result = None
+        self._file = None
+        self.codec = None
 
     def _get_openssl(self):
         if not self._openssl:
@@ -478,7 +487,7 @@ class _SecFileBase(object):
         # (still might want to be able to check writeability as a property)
         if not self._file:
             return False
-        directory, filename = os.path.split(self._file)
+        directory = dirname(self._file)
         writeable = True
         try:
             tmp = printable_pwd(32)
@@ -1045,6 +1054,8 @@ class SecFile(_SecFileBase):
         self.set_file(arch_enc.name)  # likely off in some situations
         self.result.update({'status': 'good', 'cipher_text': self.file,
                             'meta': meta})
+        if hmac_key:
+            self.result.update({'hmac': True})
         return self
 
     def _make_metadata(self, datafile, data_enc, pub, enc_method,
@@ -1221,7 +1232,7 @@ class SecFile(_SecFileBase):
         enc_rsakeys = RsaKeys(pub=(pub or self.rsakeys.pub))
         enc_rsakeys.require(NEED_PUBK)
 
-        file_dec = None
+        sf = file_dec = None
         try:
             # encrypt() will destroy intermediate clear_text, but might be
             # an exception before getting to encrypt(), so wrap in try except
@@ -1246,13 +1257,17 @@ class SecFile(_SecFileBase):
             #   decrypt, destroy orig.enc, *then* get exception --> now what?
             # unlikely situation: require_keys(pub) before starting, if dec
             #   works then directory write permissions are ok
-            file_dec and isfile(file_dec) and SecFile(file_dec).destroy()
+            if file_dec and isfile(file_dec):
+                SecFile(file_dec).destroy()
 
         unset_umask()
         self.result.update({'file': self.file,
                        'status': 'good',
                        'old': os.path.split(priv)[1],
                        'new': os.path.split(pub)[1]})
+        if hmac_key:
+            self.result.update({'hmac': True})
+
         return self
 
     def sign(self, priv=None, pphr=None, out=None):
@@ -1592,6 +1607,8 @@ class RsaKeys(object):
     """Class to manage and test RSA key-pairs.
     """
     def __init__(self, pub=None, priv=None, pphr=None):
+        self._pub = self._priv = self._pphr = None
+        self.priv_requires_pphr = False
         self.update(pub=pub, priv=priv, pphr=pphr)
 
     def test(self):
@@ -1601,7 +1618,7 @@ class RsaKeys(object):
         encrypt-then-decrypt using the keys with the default codec.
         """
         self.require(req=NEED_PUBK | NEED_PRIV)
-        pubk, pub_bits = self.sniff(self.pub)
+        pub_bits = self.sniff(self.pub)[1]
 
         # compare pub against pub as extracted from priv:
         cmdEXTpub = [OPENSSL, 'rsa', '-in', self.priv, '-pubout']
@@ -1621,10 +1638,9 @@ class RsaKeys(object):
             logging.warning('short RSA key')
 
         # can the new keys be used to enc-dec in the codec?
-        test_codec = PFSCodecRegistry(default_codec,
-                        test_keys=(  # keys kwargs will trigger the auto-test
-                            {'pub': self.pub},
-                            {'priv': self.priv, 'pphr': self.pphr})
+        PFSCodecRegistry(default_codec,
+                         test_keys=({'pub': self.pub},
+                                    {'priv': self.priv, 'pphr': self.pphr})
                         )
         return self
 
@@ -1986,8 +2002,8 @@ class GenRSA(object):
         if pphr_auto:
             print('(auto-generating a passphrase)')
             pphr = printable_pwd(PPHR_BITS_DEFAULT)
+        bits = max(bits, RSA_MODULUS_WRN)
         bits_msg = '  using %i' % bits
-        bit = max(bits, RSA_MODULUS_WRN)
         print(bits_msg)
         ent_msg = '  entropy: ' + self.check_entropy()
         print(ent_msg)
@@ -2369,11 +2385,8 @@ def printable_pwd(nbits=256, prefix='#'):
     """Return hex digits with n random bits, zero-padded.
     """
     # default prefix ensures that the returned str is not interned by python
-
     val = random.SystemRandom().getrandbits(nbits)
-    len = nbits // 4
-    pwd = prefix + hex(val).strip('L').replace('0x', '').zfill(len)
-
+    pwd = prefix + hex(val).strip('L').replace('0x', '').zfill(nbits // 4)
     return pwd
 
 
@@ -2414,7 +2427,7 @@ def set_umask(new_umask=UMASK):
 def set_destroy():
     """Find, set, and report info about secure file removal tool to be used.
 
-    on win32, use a .bat file.
+    On win32, use a .bat file.
     """
     opts = {'darwin': ('-f', '-z', '--medium'),  # 7 passes
             'linux2': ('-f', '-u', '-n', '7'),
@@ -2506,7 +2519,7 @@ def set_openssl(path=None):
                 guess = sys_call(cmd).splitlines()[0]  # take first match
                 if not guess.endswith('openssl.exe'):
                     fatal('Failed to find OpenSSL.exe.\n' +
-                           'Please install under C:\ and try again.',
+                           'Please install under C:\\ and try again.',
                            RuntimeError)
                 guess_path = guess.replace(os.sep + 'openssl.exe', '')
                 where_bat = op_bat_template.replace(op_expr, guess_path)
@@ -2591,23 +2604,20 @@ def unset_umask():
 def main(args):
     logging.info("%s with %s" % (lib_name, openssl_version))
     if args.filename == 'genrsa':  # pragma: no cover
-        """Walk through key generation on command line.
-        """
+        # Walk-through key generation on command line.
         GenRSA().dialog(interactive=(not args.autogen), args=args)
         sys.exit()
     elif not isfile(args.filename):
         raise ArgumentError('no such file (requires "genrsa" or a filename)')
     else:
-        """Call requested method with arguments, return result.
+        # Call requested method with arguments, return result.
+        #Methods:    encrypt, decrypt, rotate, pad, sign, verify, destroy
+        #Properties: hardlinks, is_tracked, permissions, is_in_dropbox
 
-        Methods:    encrypt, decrypt, rotate, pad, sign, verify, destroy
-        Properties: hardlinks, is_tracked, permissions, is_in_dropbox
-        """
-        fxn = None  # becomes the actual function
-        kw = {}  # kwargs for fxn
-
-        # "kw.update()" ==> required arg, use kw even though its position-able
-        # "arg and kw.update(arg)" ==> optional args; watch out for value == 0
+        kw = {}
+        # build up kw as kwargs for sf_fxn
+        # "kw.update()" ==> required arg, use kw even if position-able
+        # "if arg.x: kw.update(arg)" ==> optional args; watch for arg.x == 0
 
         sf = SecFile(args.filename)
         # mutually exclusive args.fxn:
@@ -2617,23 +2627,31 @@ def main(args):
             if args.size >= -1:
                 sf.pad(args.size)
             kw.update({'pub': args.pub})
-            args.keep and kw.update({'keep': args.keep})
-            args.nometa and kw.update({'meta': False})
-            args.nodate and kw.update({'date': False})
-            args.hmac and kw.update({'hmac_key': args.hmac})
+            if args.keep:
+                kw.update({'keep': args.keep})
+            if args.nometa:
+                kw.update({'meta': False}) ##
+            if args.nodate:
+                kw.update({'date': False})  ##
+            if args.hmac:
+                kw.update({'hmac_key': args.hmac})  ##
         elif args.decrypt:
             sf_fxn = sf.decrypt
             kw.update({'priv': args.priv})
-            args.pphr and kw.update({'pphr': args.pphr})
-            args.out and kw.update({'out': args.out})
-            args.keep and kw.update({'keep_enc': args.keep})
+            if args.pphr:
+                kw.update({'pphr': args.pphr})
+            if args.out:
+                kw.update({'out': args.out})  ##
+            if args.keep:
+                kw.update({'keep_enc': args.keep})
         elif args.rotate:
             sf_fxn = sf.rotate
             kw.update({'priv': args.priv})
-            args.pphr and kw.update({'pphr': args.pphr})
+            if args.pphr:
+                kw.update({'pphr': args.pphr})
             kw.update({'pub': args.pub})
-            args.keep and kw.update({'keep_meta': args.keep})
-            args.hmac and kw.update({'hmac_new': args.hmac})
+            if args.hmac:
+                kw.update({'hmac_key': args.hmac})  ##
             if args.size >= -1:
                 kw.update({'pad': args.size})
         elif args.pad:
@@ -2648,8 +2666,10 @@ def main(args):
         elif args.sign:
             sf_fxn = sf.sign
             kw.update({'priv': args.priv})
-            args.pphr and kw.update({'pphr': args.pphr})
-            args.out and kw.update({'out': args.out})
+            if args.pphr:
+                kw.update({'pphr': args.pphr})
+            if args.out:
+                kw.update({'out': args.out})
         elif args.verify:
             sf_fxn = sf.verify
             kw.update({'pub': args.pub})
@@ -2734,10 +2754,11 @@ py64bit = bool(sys.maxsize == 2 ** 63 - 1)
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
 try:
+    #codec_registry = PFSCodecRegistry(default_codec)  # skip test during dev
     tmp = mkdtemp()
-    u, v, p = GenRSA().demo_rsa_keys(tmp)
+    _u, _v, _p = GenRSA().demo_rsa_keys(tmp)
     codec_registry = PFSCodecRegistry(default_codec,
-                        test_keys=({'pub': u}, {'priv': v, 'pphr': p}))
+                        test_keys=({'pub': _u}, {'priv': _v, 'pphr': _p}))
 finally:
     shutil.rmtree(tmp, ignore_errors=False)
 

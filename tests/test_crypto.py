@@ -344,6 +344,9 @@ class TestsCrypto(object):
         tmp = 'tmp'
         with open(tmp, write_mode) as fd:
             fd.write('a')
+        hmac = 'hmac'
+        with open(hmac, write_mode) as fd:
+            fd.write('hmac here')
 
         sys.argv = [__file__, '--pad', '-z', '0', tmp]
         main(_parse_args())
@@ -754,6 +757,9 @@ class TestsCrypto(object):
             fd.write(secretText)
         pub1, priv1, pphr1 = _known_values()[:3]
         datafile = _abspath(datafile)
+        hmac = 'hmac'
+        with open(hmac, write_mode) as fd:
+            fd.write('hmac here')
 
         # Encrypt:
         cmdLineCmd = [sys.executable, lib_path, datafile, '--encrypt',
@@ -778,11 +784,12 @@ class TestsCrypto(object):
         ciph = enc['cipher_text']
         assert (isfile(ciph) and ciph.endswith(ENC_EXT))  # need --keep in d
         cmdLineRotate = [sys.executable, lib_path,
-                         enc['cipher_text'], '--rotate',
+                         enc['cipher_text'], '--rotate', '--hmac', hmac,
                         '--pub', pub1, '--priv', priv1, '--pphr', pphr1,
                         '-z', str(getsize(ciph) * 2)]
         outr = sys_call(cmdLineRotate)  # dict as a string
         assert 'rotate' in outr and 'good' in outr
+        assert 'hmac' in outr
         rot = eval(outr)
         assert isfile(rot['file'])
 
