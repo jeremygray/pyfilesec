@@ -3,7 +3,9 @@
 
 """Test suite for pytest, covering crypto classes and functions.
 
-Part of the pyFileSec library. Copyright (c) 2013, Jeremy R. Gray
+Part of the pyFileSec library. Copyright (c) 2014, Jeremy R. Gray
+
+$ py.test -k-notravis --cov-report term-missing --cov pyfilesec -x
 """
 
 
@@ -330,6 +332,7 @@ class TestsCrypto(object):
             decrypt(bad_arch, priv1, pphr1)
         '''
 
+    @pytest.mark.main
     def test_main(self):
         # similar to test_command_line (those do not count toward coverage)
 
@@ -355,14 +358,18 @@ class TestsCrypto(object):
         sys.argv = [__file__, '--encrypt', '--keep', '--pub', pub,
                     '-z', '0', tmp]
         main(_parse_args())
+        sys.argv = [__file__, '--encrypt', '--keep', '--pub', pub,
+                    '-z', '0', '--hmac', hmac, '--nodate', '--nometa', tmp]
+        main(_parse_args())
 
         sys.argv = [__file__, '--decrypt', '--keep',
                     '--priv', priv, '--pphr', pphr, tmp + ENC_EXT]
         main(_parse_args())
 
-        sys.argv = [__file__, '--rotate', '--pub', pub, '-z', '0',
+        sys.argv = [__file__, '--rotate', '--pub', pub, '-z', '0', '--hmac', hmac,
                     '--priv', priv, '--pphr', pphr, tmp + ENC_EXT]
         out = main(_parse_args())
+        assert 'hmac' in out
 
         sys.argv = [__file__, '--sign', tmp,
                     '--priv', priv, '--pphr', pphr, '--out', 'sig.cmdline']
@@ -400,9 +407,18 @@ class TestsCrypto(object):
         sys.argv = [__file__, tmp, '--dropbox']
         main(_parse_args())
 
+        # no actual action:
+        sys.argv = [__file__, '--nocheck', tmp]
+        main(_parse_args())
+
         # destroy last
         sys.argv = [__file__, '--destroy', tmp]
         main(_parse_args())
+
+        # check with missing arguments (from commandline get usage string)
+        sys.argv = [__file__]
+        with pytest.raises(SystemExit):
+            main(_parse_args())
 
     def test_signatures(self):
         # sign a known file with a known key. can we get known signature?
@@ -736,8 +752,8 @@ class TestsCrypto(object):
         assert hmac_openssl.endswith(hm)
         assert hmac_openssl.split(')= ')[-1] == hm
 
-        # bad key, file:
-        # test of hmac file MAX_SIZE is in test_max_size_limit
+        # bad key, good file:
+        assert hmac_sha256(key+'x', tmp).endswith('77eec3b42f9')
         assert hmac_sha256(None, tmp) is None
 
     @pytest.mark.commandline
@@ -771,7 +787,7 @@ class TestsCrypto(object):
 
         # Decrypt:
         cmdLineCmd = [sys.executable, lib_path,
-                      enc['cipher_text'], '--decrypt', '--keep',
+                      enc['cipher_text'], '--decrypt', '--keep', '--nocheck',
                       '--priv', priv1, '--pphr', pphr1, '--openssl=' + OPENSSL]
         outd = sys_call(cmdLineCmd)
         assert 'clear_text' in outd
@@ -783,7 +799,7 @@ class TestsCrypto(object):
         # Rotate:
         ciph = enc['cipher_text']
         assert (isfile(ciph) and ciph.endswith(ENC_EXT))  # need --keep in d
-        cmdLineRotate = [sys.executable, lib_path,
+        cmdLineRotate = [sys.executable, lib_path, '--nocheck',
                          enc['cipher_text'], '--rotate', '--hmac', hmac,
                         '--pub', pub1, '--priv', priv1, '--pphr', pphr1,
                         '-z', str(getsize(ciph) * 2)]
@@ -800,7 +816,7 @@ class TestsCrypto(object):
         assert 'sig' in outs
         sig = eval(outs)
         cmdLineVerify = [sys.executable, lib_path, rot['file'], '--verify',
-                      '--pub', pub1, '--sig', sig['out']]
+                      '--pub', pub1, '--sig', sig['out'], '--nocheck']
         outv = sys_call(cmdLineVerify)
         assert 'verified' in outv
         out = eval(outv)
@@ -810,7 +826,7 @@ class TestsCrypto(object):
         with open(datafile, write_mode) as fd:
             fd.write(secretText)
         orig_size = getsize(datafile)
-        cmdLinePad = [sys.executable, lib_path, datafile, '--pad']
+        cmdLinePad = [sys.executable, lib_path, datafile, '--nocheck', '--pad']
         outp = sys_call(cmdLinePad)
         assert "'method': 'pad'" in outp
         assert "'size': %d" % DEFAULT_PAD_SIZE in outp
@@ -818,8 +834,8 @@ class TestsCrypto(object):
         assert getsize(datafile) == DEFAULT_PAD_SIZE
 
         # more coverage
-        cmdLineUnpad = [sys.executable, lib_path, datafile, '--pad',
-                        '-z', '0']
+        cmdLineUnpad = [sys.executable, lib_path, datafile, '--nocheck',
+                        '--pad', '-z', '0']
         outunp = sys_call(cmdLineUnpad)
         assert 'padding' in outunp
         out = eval(outunp)
@@ -834,12 +850,22 @@ class TestsCrypto(object):
         assert len(outv) > 800
         assert len(outv.splitlines()) > 40
 
+        # no actual action:
+        cmdLineCmd = [sys.executable, lib_path, '--nocheck', datafile]
+        out = sys_call(cmdLineCmd)
+        assert 'None' in out
+
         # Destroy:
         cmdLineDestroy = [sys.executable, lib_path, datafile, '--destroy']
         outx = sys_call(cmdLineDestroy)
         if 'disposition' in outx:
             out = eval(outx)
         assert out['disposition'] == destroy_code[pfs_DESTROYED]
+
+        # file specified but missing on file system
+        cmdLineCmd = [sys.executable, lib_path, '--nocheck', datafile]
+        out = sys_call(cmdLineCmd)
+        assert out.startswith('no such file')
 
 
 # this messes up coverage for coveralls.io, even when marked notravis

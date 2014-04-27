@@ -3,7 +3,7 @@
 
 """Test suite for pytest, covering noncrypto classes and functions.
 
-Part of the pyFileSec library. Copyright (c) 2013, Jeremy R. Gray
+Part of the pyFileSec library. Copyright (c) 2014, Jeremy R. Gray
 """
 
 

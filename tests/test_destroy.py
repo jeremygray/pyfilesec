@@ -3,7 +3,7 @@
 
 """Test suite for pytest, covering secure file removal (destroy).
 
-Part of the pyFileSec library. Copyright (c) 2013, Jeremy R. Gray
+Part of the pyFileSec library. Copyright (c) 2014, Jeremy R. Gray
 """
 
 

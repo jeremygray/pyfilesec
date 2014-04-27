@@ -2611,15 +2611,16 @@ def main(args):
         raise ArgumentError('no such file (requires "genrsa" or a filename)')
     else:
         # Call requested method with arguments, return result.
-        #Methods:    encrypt, decrypt, rotate, pad, sign, verify, destroy
-        #Properties: hardlinks, is_tracked, permissions, is_in_dropbox
+        # Methods:    encrypt, decrypt, rotate, pad, sign, verify, destroy
+        # Properties: hardlinks, is_tracked, permissions, is_in_dropbox
 
         kw = {}
         # build up kw as kwargs for sf_fxn
         # "kw.update()" ==> required arg, use kw even if position-able
-        # "if arg.x: kw.update(arg)" ==> optional args; watch for arg.x == 0
+        # "if arg.x: kw.update(arg)" ==> optional args (watch for arg.x == 0)
 
         sf = SecFile(args.filename)
+        sf_fxn = None
         # mutually exclusive args.fxn:
         if args.encrypt:
             sf_fxn = sf.encrypt
@@ -2630,18 +2631,16 @@ def main(args):
             if args.keep:
                 kw.update({'keep': args.keep})
             if args.nometa:
-                kw.update({'meta': False}) ##
+                kw.update({'meta': False})
             if args.nodate:
-                kw.update({'date': False})  ##
+                kw.update({'date': False})
             if args.hmac:
-                kw.update({'hmac_key': args.hmac})  ##
+                kw.update({'hmac_key': args.hmac})
         elif args.decrypt:
             sf_fxn = sf.decrypt
             kw.update({'priv': args.priv})
             if args.pphr:
                 kw.update({'pphr': args.pphr})
-            if args.out:
-                kw.update({'out': args.out})  ##
             if args.keep:
                 kw.update({'keep_enc': args.keep})
         elif args.rotate:
@@ -2651,7 +2650,7 @@ def main(args):
                 kw.update({'pphr': args.pphr})
             kw.update({'pub': args.pub})
             if args.hmac:
-                kw.update({'hmac_key': args.hmac})  ##
+                kw.update({'hmac_key': args.hmac})
             if args.size >= -1:
                 kw.update({'pad': args.size})
         elif args.pad:
@@ -2685,7 +2684,8 @@ def main(args):
         elif args.dropbox:
             return sf.is_in_dropbox
 
-        sf_fxn(**kw)  # make it happen
+        if sf_fxn:
+            sf_fxn(**kw)  # make it happen
         return sf.result
 
 
@@ -2705,6 +2705,7 @@ def _parse_args():
     parser.add_argument('filename', help='file path, or "genrsa" (no quotes)')
     parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('--verbose', action='store_true', help='print logging info to stdout', default=False)
+    parser.add_argument('--nocheck', action='store_true', help='skip registry self-test at start up')
     parser.add_argument('--openssl', help='path of the openssl binary to use')
 
     group = parser.add_mutually_exclusive_group()
@@ -2753,15 +2754,23 @@ py64bit = bool(sys.maxsize == 2 ** 63 - 1)
 # Register the default codec, runs auto-test
 default_codec = {'_encrypt_rsa_aes256cbc': _encrypt_rsa_aes256cbc,
                  '_decrypt_rsa_aes256cbc': _decrypt_rsa_aes256cbc}
-try:
-    #codec_registry = PFSCodecRegistry(default_codec)  # skip test during dev
-    tmp = mkdtemp()
-    _u, _v, _p = GenRSA().demo_rsa_keys(tmp)
-    codec_registry = PFSCodecRegistry(default_codec,
-                        test_keys=({'pub': _u}, {'priv': _v, 'pphr': _p}))
-finally:
-    shutil.rmtree(tmp, ignore_errors=False)
+if args and args.nocheck:
+    # skip registry self-test (can be helpful during dev as well):
+    codec_registry = PFSCodecRegistry(default_codec)
+    logging.warning('command line: --nocheck skips PFSCodecRegistry self-test')
+else:
+    try:
+        tmp = mkdtemp()
+        _u, _v, _p = GenRSA().demo_rsa_keys(tmp)
+        codec_registry = PFSCodecRegistry(default_codec,
+                            test_keys=({'pub': _u}, {'priv': _v, 'pphr': _p}))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=False)
 
 if __name__ == '__main__':  # pragma: no cover
-    result = main(args)
-    print(result)
+    try:
+        result = main(args)
+    except ArgumentError as e:
+        print(e)
+    else:
+        print(result)
