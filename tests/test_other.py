@@ -101,12 +101,12 @@ class TestBasics(object):
 
     @pytest.mark.notravis
     def test_import_pyperclip(self):
-        import _pyperclip
+        from pyfilesec.lib import _pyperclip
 
     def test_import_getpass_which(self):
         os.chdir(self.start_dir)
-        import _getpass
-        import which
+        from pyfilesec.lib import _getpass
+        from pyfilesec.lib import which
         os.chdir(self.tmp)
 
     def test_SecFileBase(self):

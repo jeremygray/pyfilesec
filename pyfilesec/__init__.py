@@ -57,9 +57,7 @@ from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
 import time
 
-# higher directory has: which, _getpass, _pyperclip
-sys.path.insert(0, dirname(abspath('__file__')))
-from which import which, WhichError
+from pyfilesec.lib.which import which, WhichError
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__).rstrip('co')  # .py not .pyc, .pyo
@@ -1979,7 +1977,7 @@ class GenRSA(object):
         pphr_auto = True
         bits = RSA_BITS_DEFAULT
         if interactive:  # pragma: no cover
-            import _getpass
+            from pyfilesec.lib import _getpass
             # python 3 compatibility:
             input23 = (input, raw_input)[sys.version < '3.']
             try:
@@ -2043,7 +2041,7 @@ class GenRSA(object):
                                   pub, priv, pphr_out)
             elif args.clipboard:
                 try:
-                    import _pyperclip
+                    from pyfilesec.lib import _pyperclip
                 except (ImportError, RuntimeError):
                     fatal("can't import clipboard: no display?", RuntimeError)
                 _pyperclip.copy(pphr)

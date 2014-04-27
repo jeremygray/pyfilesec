@@ -485,7 +485,7 @@ class TestsCrypto(object):
         assert args.clipboard
         # travis-ci builds on linux, needs xclip, else import will fail
         try:
-            import _pyperclip
+            from pyfilesec.lib import _pyperclip
             GenRSA().dialog(interactive=False, args=args)
         except (RuntimeError, ImportError):
             with pytest.raises(RuntimeError):
