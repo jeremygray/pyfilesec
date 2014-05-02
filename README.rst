@@ -85,5 +85,6 @@ in the development code.
 See also
 ---------
 
-- pyCrypto, M2Crypto, pyOpenSSL - broad crypto packages, few sys-admin features
+- pyCrypto, M2Crypto, pyOpenSSL, cryptography - much crypto, few sys-admin features
+- secureconfig - secure config files, transparent usage
 - pycogworks.crypto - similar audience as pyfilesec, no file encryption
