@@ -50,12 +50,11 @@ from   tempfile import mkdtemp, NamedTemporaryFile
 import threading
 import time
 
-from pyfilesec.lib.p23 import (PY3, str, unicode, bytes, basestring,
-                                str2bytes, bytes2str, read_mode, write_mode)
 try:
     from pyfilesec.lib.which import which, WhichError
 except:
     from lib.which import which, WhichError
+
 
 lib_name = 'pyFileSec'
 lib_path = abspath(__file__).rstrip('co')  # .py not .pyc, .pyo
@@ -69,6 +68,12 @@ else:
     user_can_link = True
     get_time = time.time
 
+PY3 = sys.version > '3'
+if PY3:
+    read_mode = 'r'  # 3.x file open does universal newlines by default
+else:
+    read_mode = 'rU'  # univeral newlines, for cross-platform transparency
+write_mode = 'w'
 
 # Constants: --------------------
 RSA_PADDING = '-oaep'  # actual arg for openssl rsautl in encrypt, decrypt
@@ -401,7 +406,7 @@ class _SecFileBase(object):
             self._file = None
             logging.info('set_file: received filename: None')
             return
-        if not isinstance(infile, basestring):
+        if not isinstance_basestring23(infile):
             fatal('set_file: infile expected as a string', AttributeError)
         f = os.path.split(infile)[1]
         if f and f[0] in ['.', os.sep]:
@@ -1018,7 +1023,7 @@ class SecFile(_SecFileBase):
         if not meta:  # False or {}
             meta = NO_META_DATA
         else:
-            if isinstance(note, basestring):
+            if isinstance_basestring23(note):
                 if len(note) > METADATA_NOTE_MAX_LEN:
                     logging.warning('trimming note to %d chars' %
                                      METADATA_NOTE_MAX_LEN)
@@ -1099,7 +1104,7 @@ class SecFile(_SecFileBase):
             'openssl': openssl_version,
             'platform': sys.platform,
             'python': '%d.%d.%d' % sys.version_info[:3]})
-        if isinstance(note, basestring):
+        if isinstance_basestring23(note):
             md.update({'note': note[:METADATA_NOTE_MAX_LEN]})
 
         return {'meta-data %s' % time_now: md}
@@ -1454,7 +1459,7 @@ class SecFileArchive(_SecFileBase):
         super(SecFileArchive, self).__init__()
 
         # init must not create any temp files if paths=None
-        if files and isinstance(files, basestring):
+        if files and isinstance_basestring23(files):
             files = tuple(files)
         if name:
             # given a name, regardless of its file status
@@ -1490,7 +1495,7 @@ class SecFileArchive(_SecFileBase):
         cipher_text archive, not a secure-delete option.
         """
 
-        if isinstance(files, basestring):
+        if isinstance_basestring23(files):
             files = [files]
         if not all([exists(f) for f in files]):
             fatal('missing file; cannot add to archive', AttributeError)
@@ -1665,7 +1670,7 @@ class RsaKeys(object):
 
             ``(None, None)`` = not a detectable key format
         """
-        if not isinstance(key, basestring):
+        if not isinstance_basestring23(key):
             return None, None
         if not isfile(key):
             return '(no file)', None
@@ -1718,7 +1723,7 @@ class RsaKeys(object):
     def _update_pub(self, pub=None):
         """Get pub from self or from param, set as needed
         """
-        if isinstance(pub, basestring):
+        if isinstance_basestring23(pub):
             if exists(pub) and 'PUBLIC KEY' in open(pub, read_mode).read():
                 self._pub = _abspath(pub)
             else:
@@ -1740,7 +1745,7 @@ class RsaKeys(object):
         Return bool to indicate whether priv in encrypted (= require pphr)
         """
         self.priv_requires_pphr = False
-        if isinstance(priv, basestring):
+        if isinstance_basestring23(priv):
             if exists(priv):  # is_file
                 contents = open(priv, read_mode).read()  # better to sniff...
                 if 'PRIVATE KEY' in contents:
@@ -1758,7 +1763,7 @@ class RsaKeys(object):
         Load from file if give a file
         """
         # don't screen for weak passphrase here, its too late
-        if isinstance(pphr, basestring):
+        if isinstance_basestring23(pphr):
             if exists(pphr):
                 self._pphr = open(pphr, 'rb').read()
             else:
@@ -2383,6 +2388,17 @@ def hmac_sha256(key, filename):
     return hmac_openssl
 
 
+def isinstance_basestring23(duck):
+    # idea is py2/py3 compatible: return isinstance(duck, basestring)
+    try:
+        duck + 'quack'
+        duck.endswith('quack')
+    except:
+        return False
+    else:
+        return True
+
+
 def printable_pwd(nbits=256, prefix='#'):
     """Return hex digits with n random bits, zero-padded.
     """
@@ -2569,8 +2585,8 @@ def sys_call(cmdList, stderr=False, stdin='', ignore_error=False):
                             stderr=subprocess.PIPE)
     _so, se = proc.communicate(stdin)
 
-    so = str(_so).strip()
-    se = str(se).strip()
+    so = _so.strip()
+    se = se.strip()
     if se:
         log('stderr%s: %s' % (msg, se))
     if stderr:
