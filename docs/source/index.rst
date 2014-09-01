@@ -263,12 +263,23 @@ noted).
     ``size`` : (long int)
         size in bytes on the disk as reported by ``os.path.getsize(sf.file)``.
 
-    ``metadata`` : (dict)
-        returns {} for an unencrypted file.
+    ``metadata`` : (dict of dict)
+        metadata consist of information about each encryption session, such as
+        the encryption time, method, and version of OpenSSL used. Rotating the
+        encryption adds to the metadata.
+
+        The keys of the outer dict are time-stamps, which sort to chronological
+        order. The value associated with a given key is a dict that contains
+        information about the encryption session.
+
+        The metadata for an unencrypted file is {}.
 
     ``metadataf`` : (string)
         human-friendly version of ``metadata``, e.g., for log files.
-        returns '{}' for an unencrypted file.
+        The metadata for an unencrypted file is {}.
+
+    ``notes``: (list)
+        a list of all `note` fields in the metadata, in chronological order.
 
     ``snippet`` : (string)
         up to 60 characters of the first line of the file; or will return '(encrypted)', or ``None`` if no file

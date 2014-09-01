@@ -534,6 +534,17 @@ class _SecFileBase(object):
         self.data_aes, self.pwd_rsa, self.meta = (None,) * 3
         return md
 
+    @property
+    def notes(self):
+        """A list of all notes in the metadata, in order.
+        """
+        md = self.metadata
+        note_list = []
+        for k in sorted(md.keys()):
+            if 'note' in list(md[k].keys()):
+                note_list.append(md[k]['note'])
+        return note_list
+
     def _get_permissions(self):
         name = '_get_permissions'
         self._require_file(check_size=False)

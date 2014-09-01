@@ -180,11 +180,14 @@ class TestBasics(object):
         sf.set_file(test_file)
 
         # encrypted file:
+        assert sf.notes == []  # no notes prior to encryption
         pub = _known_values()[0]
-        sf.encrypt(pub, keep=True)
+        note = 'this is a note'
+        sf.encrypt(pub, keep=True, note=note)
         sf.read()
         assert sf.metadata != {}
         assert sf.metadataf != '{}'
+        assert sf.notes == [note]
         sf.snippet
 
         # .pem file (warns)
